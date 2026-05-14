@@ -49,17 +49,20 @@ button.tog.active{background:var(--green);color:#fff;border-color:var(--green)}
 .wrap{overflow:auto;max-height:calc(100vh - 150px);border:1px solid var(--border);
   background:var(--paper);border-radius:6px;position:relative}
 table{border-collapse:collapse;width:100%;table-layout:fixed;font-size:11px}
+thead{background:#f0ede3}
 
 /* HEADER ROWS */
 thead th{position:sticky;background:#f0ede3;color:var(--text-dim);font-weight:600;
   padding:3px 4px;border:1px solid var(--border);text-align:center;line-height:1.15;
-  font-size:10px;vertical-align:middle}
+  font-size:10px;vertical-align:middle;overflow:visible}
 thead tr.master th{top:0;z-index:9;background:#e8e2cd;font-size:11px;text-transform:uppercase;
-  letter-spacing:0.6px;color:var(--text-bright);font-weight:800;padding:6px 4px;height:26px}
+  letter-spacing:0.6px;color:var(--text-bright);font-weight:800;padding:6px 4px;height:26px;
+  box-shadow:0 0 0 1px #e8e2cd}
 thead tr.stage th{top:28px;z-index:8;font-size:9px;font-weight:700;letter-spacing:0.3px;
-  text-transform:uppercase;padding:3px;height:20px;color:var(--text-dim)}
+  text-transform:uppercase;padding:3px;height:20px;color:var(--text-dim);
+  box-shadow:0 0 0 1px #f0ede3}
 thead tr.col th{top:50px;z-index:8;font-size:9px;font-weight:600;background:#faf8f1;padding:0;
-  vertical-align:middle}
+  vertical-align:middle;box-shadow:0 0 0 1px #faf8f1}
 thead tr.stage th{vertical-align:middle}
 thead tr.master th{vertical-align:middle}
 thead th.sortable{cursor:pointer;user-select:none}
@@ -71,22 +74,22 @@ thead th.active{background:#dfe8d6;color:var(--text-bright)}
 
 /* RR paired header — each half is its OWN clickable sort target */
 .rr-pair{display:flex;flex-direction:column;line-height:1.1;height:100%}
-.rr-pair > .rr-half{flex:1 1 0;min-height:34px;padding:3px;display:flex;flex-direction:column;
+.rr-pair > .rr-half{flex:1 1 0;min-height:44px;padding:4px 3px;display:flex;flex-direction:column;
   justify-content:center;box-sizing:border-box;cursor:pointer}
 .rr-pair > .rr-half:hover{background:#e6e0cc}
 .rr-pair > .rr-half.active{background:#dfe8d6}
 .rr-pair > .rr-half + .rr-half{border-top:1px dashed var(--rule-bd)}
-.rr-pair .num{display:block;font-size:9px;font-weight:700;color:var(--text-bright);line-height:1}
-.rr-pair .nm{display:block;font-size:7px;color:var(--text-dim);font-weight:500;line-height:1.15;
-  margin-top:1px;white-space:normal;word-break:break-word;overflow-wrap:anywhere}
+.rr-pair .num{display:block;font-size:7px;font-weight:600;color:#a8a08c;line-height:1;letter-spacing:0.2px}
+.rr-pair .nm{display:block;font-size:8.5px;color:var(--text-bright);font-weight:600;line-height:1.2;
+  margin-top:2px;white-space:normal;word-break:break-word;overflow-wrap:anywhere}
 .rr-pair .rr-half.blank{cursor:default}
 .rr-pair .rr-half.blank:hover{background:none}
 .rr-pair .rr-half.blank > *{visibility:hidden}
 
 /* A&J 2x2 header — each quadrant its own sort target */
 .aj-titles{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;height:100%}
-.aj-titles > div{padding:3px 2px;display:flex;flex-direction:column;justify-content:center;
-  align-items:center;line-height:1.1;border-right:1px dashed var(--rule-bd);
+.aj-titles > div{padding:4px 2px;min-height:22px;display:flex;flex-direction:column;justify-content:center;
+  align-items:center;line-height:1.15;border-right:1px dashed var(--rule-bd);
   border-bottom:1px dashed var(--rule-bd);cursor:pointer}
 .aj-titles > div:hover{background:#e6e0cc}
 .aj-titles > div.active{background:#dfe8d6}
@@ -262,7 +265,6 @@ tbody td.padcell-l{padding:4px 6px}
   </div>
   <div class="controls">
     <input class="filter" id="filterInput" placeholder="Filter by company, ticker, industry, cohort...">
-    <button class="tog" id="togName">Show: Company name</button>
     <button class="tog" id="togEmpty">Hide empty rows</button>
     <span class="spacer">Click any column header to sort &middot; hover a report cell for QC detail</span>
   </div>
@@ -380,12 +382,15 @@ function buildHead(){
   h += '<th class="stg-aj bx-aj-l bx-aj-r" style="padding:0">'+ajTitleCell("d")+'</th>';
   h += '<th class="stg-aj bx-aj-l bx-aj-r" style="padding:0">'+ajTitleCell("h")+'</th>';
   // MR 3x2 titles — each pillar a sort target. data-sort = "r:1".."r:6"
-  var MR_NAMES = ["Technical momentum","Sell-side momentum","Thematic fit",
-                  "Pillar I \u2014 Case change","Pillar II \u2014 Building blocks","Pillar III \u2014 Components"];
+  // MR grid: 3 cols x 2 rows, row-major. (label, sortKey) — sortKey targets the underlying rating slot.
+  var MR_CELLS = [
+    ["TECHNICAL","r:1"], ["CHANGE","r:4"], ["SSEM","r:2"],
+    ["THEMATIC","r:3"], ["BUILDING BLOCKS","r:5"], ["VALUATION","r:6"]
+  ];
   var mrCell = '<div class="mr-titles">';
   for(var mi=0;mi<6;mi++){
-    var sf="r:"+(mi+1);
-    mrCell += '<div class="sortable'+activeIf(sf)+'" data-sort="'+sf+'"><span class="nm">'+MR_NAMES[mi]+'</span>'+
+    var lbl=MR_CELLS[mi][0], sf=MR_CELLS[mi][1];
+    mrCell += '<div class="sortable'+activeIf(sf)+'" data-sort="'+sf+'"><span class="nm">'+lbl+'</span>'+
       (sortField===sf?'<span class="sort-arrow">'+(sortAsc?"\u25B2":"\u25BC")+'</span>':'')+'</div>';
   }
   mrCell += '</div>';
@@ -568,12 +573,6 @@ function setSort(f){
 }
 document.getElementById("filterInput").addEventListener("input", function(e){
   filterText=(e.target.value||"").toLowerCase(); renderBody();
-});
-document.getElementById("togName").addEventListener("click", function(){
-  showTicker=!showTicker;
-  this.textContent = showTicker?"Show: Ticker":"Show: Company name";
-  this.classList.toggle("active", showTicker);
-  renderBody();
 });
 document.getElementById("togEmpty").addEventListener("click", function(){
   hideEmpty=!hideEmpty;

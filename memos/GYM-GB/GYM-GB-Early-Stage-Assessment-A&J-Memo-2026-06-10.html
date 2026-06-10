@@ -214,6 +214,14 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
   .main-pane { padding:8mm; height:auto; overflow:visible; }
   .main-header { position:static; }
 }
+
+/* --- A6: nav search filter input --- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search { width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+              border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+              color:#333; outline:none; font-family:inherit; }
+#nav-search:focus { border-color:#3C3489; box-shadow:0 0 0 2px rgba(60,52,137,.12); }
+#nav-search::placeholder { color:#aaa; }
 </style>
 </head>
 <body class="show-pills element-details">
@@ -231,6 +239,9 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
         <span class="nav-toggle-spacer"></span>
         <button class="nav-toggle-btn" id="audit-toggle" title="Show RA word count vs target + weight badge">Audit</button>
       </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…" autocomplete="off" spellcheck="false">
     </div>
     <nav class="nav-tree">
 <span class="nav-item nav-section" data-anchor="b-i-1-bluf">B.I.1 — BLUF<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
@@ -780,6 +791,55 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
   }
 
   /* A5 — grade fallback: for nav pills showing NR on first load, scan body content */
+
+  /* A6 — nav search: filter nav-items by text; show ancestors of matches */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group',
+                     'nav-element','nav-ra','nav-cq'];
+    var tierRankMap = {};
+    tierOrder.forEach(function(t,i){ tierRankMap[t]=i; });
+    function itemRank(el) {
+      var cls = el.className ? el.className.split(' ') : [];
+      for (var i=0; i<cls.length; i++) {
+        if (tierRankMap[cls[i]] !== undefined) return tierRankMap[cls[i]];
+      }
+      return 99;
+    }
+    input.addEventListener('input', function() {
+      var q = this.value.trim().toLowerCase();
+      var items = Array.prototype.slice.call(
+        document.querySelectorAll('.nav-item'));
+      if (!q) {
+        items.forEach(function(it){ it.style.display = ''; }); return;
+      }
+      var show = new Set();
+      items.forEach(function(it, idx) {
+        var txt = it.textContent.replace(/\b[A-F]\b/g, '').toLowerCase().trim();
+        if (txt.indexOf(q) === -1) return;
+        show.add(idx);
+        // propagate up: show ancestor tiers
+        var myRank = itemRank(it);
+        var needed = myRank - 1;
+        for (var j = idx - 1; j >= 0 && needed >= 0; j--) {
+          var jRank = itemRank(items[j]);
+          if (jRank <= needed) { show.add(j); needed = jRank - 1; }
+        }
+      });
+      items.forEach(function(it, idx){
+        it.style.display = show.has(idx) ? '' : 'none';
+      });
+    });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = '';
+        this.dispatchEvent(new Event('input'));
+        this.blur();
+      }
+    });
+  }
+
   function applyGradeFallback() {
     document.querySelectorAll('.nav-item').forEach(function(item) {
       var pill = item.querySelector('.nav-rating-pill');
@@ -818,10 +878,17 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
     setupNavClicks();
     setupSpy();
     applyGradeFallback();
+    setupSearch();  /* A6 */
+    /* A4c: init breadcrumb to first nav item so it never shows bare dash */
+    setTimeout(function() {
+      var first = document.querySelector('.nav-item');
+      if (first) updateBreadcrumb(first);
+    }, 200);
     window.addEventListener('resize', setMainHeaderCssVar);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
 </script>
+<script>window.MEMO_RATINGS={};</script>
 </body></html>

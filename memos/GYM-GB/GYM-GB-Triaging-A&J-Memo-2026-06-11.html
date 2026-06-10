@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[W] GYM-GB — Triaging — A&amp;J Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE
+  Project: SA - Reports & Memos Repository  |  Phase 1 deliverable  |  14-May-26
+  ----------------------------------------------------------------------------
+  This is the inherited DISPLAY LAYER, lifted near-verbatim (behaviour) from
+  databases/memo-style-sheet3-htro.html (the old V20 WIP viewer), per D-MV-01.
+
+  WHAT IS INHERITED (near-verbatim):
+    - the two-pane shell (.app-shell > .nav-pane + .main-pane)
+    - the nav-pane: header, toggle bar (5 toggles), .nav-tree container
+    - the nav CSS: depth tiers, .nav-rating-pill, .nav-audit, focused state
+    - the nav JS: click-to-scroll, rAF scroll-spy, auto-expand-on-focus,
+      the 5 toggle handlers, the sticky-stack --main-header-h CSS var
+    - the sticky stack (.main-header)
+
+  WHAT IS EXTENDED (per D-MV-02 — old file had 4 depth tiers, new format has 7):
+    - nav depth tiers: nav-section, nav-subsection, nav-group ADDED above the
+      old nav-pillar / nav-element / nav-ra / nav-cq tiers
+    - scroll-spy gatherAnchors(): old file queried table-row selectors
+      (tr.pillar-banner[id] etc.). New body is DOCUMENT-FLOW (D-MV-01: body
+      renders to Presenting SOP v5, not the old table). So the spy now queries
+      heading elements carrying [data-spy] + [id] instead of table rows.
+
+  WHAT IS NOT INHERITED (per D-MV-01):
+    - the old table.memo body layout — the body is document-flow, SOP v5 render
+    - the old baked-in memo content — the generator pours each memo's content
+      into the nav-tree and memo-body slots below
+
+  SLOTS the generator fills (each token appears EXACTLY ONCE below, in its
+  real position — the generator uses str.replace which is global, so the
+  tokens must never appear anywhere else, including in this comment):
+    MEMO_TITLE token     -> document <title> + .page-title
+    MEMO_SUBTITLE token  -> .page-subtitle (stage, date, identity line)
+    NAV_TREE token       -> the 7-level nav-item tree
+    MEMO_BODY token      -> the document-flow memo body (SOP v5 render)
+  ============================================================================
+-->
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Aptos', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background:#fafaf8; color:#1a1a1a; }
+
+.app-shell { display:flex; flex-direction:row; align-items:stretch; height:100vh; }
+
+/* ============================== LEFT NAV PANE ============================== */
+/* Inherited near-verbatim from the old file's .nav-pane. */
+.nav-pane { flex:0 0 25%; max-width:25%; min-width:260px; background:#f5f4ee;
+            border-right:1px solid #d8d4c0; display:flex; flex-direction:column;
+            height:100vh; min-height:0; }
+.nav-header { padding:10px 12px; background:#3C3489; color:#fff; flex:0 0 auto; }
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+.nav-tree { flex:1 1 auto; overflow-y:auto; padding:8px 6px 24px 6px; font-size:9.5pt; scroll-behavior:smooth; }
+
+/* nav toggle bar — inherited; .nav-header-controls + 5 .nav-toggle-btn */
+.nav-header-controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:flex-end; }
+.nav-header-controls .nav-toggle-btn { font-size:7.5pt; padding:1px 5px;
+            background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+            border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+            font-family:inherit; transition:background 0.15s, color 0.15s; }
+.nav-header-controls .nav-toggle-btn:hover { background:rgba(255,255,255,0.18); color:#fff; }
+.nav-header-controls .nav-toggle-btn.active { background:#fff; color:#3C3489; border-color:#fff;
+            font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,0.4); }
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* nav items — generic; depth set by tier class */
+.nav-item { padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+            border-radius:3px; transition:background 0.15s; display:block; }
+.nav-item:hover { background:#ece9d4; }
+.nav-item.focused { background:#e6e0ff; font-weight:700; }
+
+/* --- 7 DEPTH TIERS (D-MV-02; A2 visual-hierarchy pass 10-Jun-26) ----------
+   Steps sharpened: ~1pt font gap per tier; 12px indent steps; background
+   tints at Section/Pillar/Group/Element; Group and Element colours more
+   saturated; border weights differentiated. */
+.nav-section    { font-size:10.5pt; font-weight:700; color:#3C3489; padding:7px 4px 4px 4px;
+                  margin-top:7px; text-transform:uppercase; letter-spacing:0.3px; }
+.nav-section:first-child { margin-top:0; }
+.nav-subsection { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:12px;
+                  padding-left:8px; }
+.nav-pillar     { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:24px;
+                  padding:3px 8px; border-left:2px solid #9090c4;
+                  background:rgba(60,52,137,0.04); border-radius:0 3px 3px 0; }
+.nav-group      { font-size:9pt;   font-weight:700; color:#064a35; margin-left:36px;
+                  padding:2px 8px; border-left:2.5px solid #4a9a7a;
+                  background:rgba(6,74,53,0.03); border-radius:0 3px 3px 0; }
+.nav-element    { font-size:8.5pt; font-weight:600; color:#8a3c00; margin-left:48px;
+                  padding:2px 8px; border-left:2px solid #c87a3a;
+                  background:rgba(138,60,0,0.03); border-radius:0 3px 3px 0; }
+.nav-ra         { font-size:8pt;   color:#0C447C; margin-left:60px;
+                  padding-left:8px; border-left:1px dashed #85B7EB; display:none; cursor:pointer; }
+.nav-cq         { font-size:7.5pt; color:#5a5526; margin-left:72px;
+                  padding-left:6px; border-left:1px dotted #c9c1a3; display:none;
+                  line-height:1.4; padding:1px 6px 1px 8px; cursor:pointer; }
+
+/* progressive disclosure — inherited: RA/CQ lists hidden until parent open */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills — inherited near-verbatim ---------------------------- */
+.nav-rating-pill { display:inline-block; font-size:7.5pt; font-weight:700; padding:1px 5px;
+            border-radius:3px; margin-left:5px; vertical-align:baseline; min-width:14px;
+            text-align:center; }
+.nav-rating-pill.A { background:#9DD49B; color:#1a4d1a; }
+.nav-rating-pill.B { background:#BFD9F2; color:#0C447C; }
+.nav-rating-pill.C { background:#E7E3AB; color:#5a5526; }
+.nav-rating-pill.D { background:#FFCC66; color:#7a4f00; }
+.nav-rating-pill.F { background:#FF7C80; color:#660000; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip — inherited; hidden until body.show-audit -------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal { background:#eee; color:#555; }
+.nav-audit-weight-double { background:#3C3489; color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half { background:#aaa; color:#fff; }
+
+/* --- toggle behaviours — inherited near-verbatim --------------------------- */
+/* All RAs on */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+/* All CQs on */
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+/* Element details — JS adds .force-show; CSS unhides */
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ============================== RIGHT MEMO PANE ============================ */
+.main-pane { flex:1 1 auto; min-width:0; min-height:0; height:100vh; overflow-y:auto; padding:0 0 80px 0; scroll-behavior:smooth; }
+
+/* sticky memo header — inherited; --main-header-h CSS var drives sticky stack */
+.main-header { position:sticky; top:0; z-index:5; background:#fafaf8;
+            border-bottom:1px solid #e0ddca; padding:16px 40px 13px 40px; }
+.page-title { font-size:14pt; font-weight:700; margin-bottom:2px; }
+.page-subtitle { font-size:9.5pt; color:#888; margin-bottom:2px; }
+.page-breadcrumb { font-size:8pt; color:#aaa; white-space:nowrap; overflow:hidden;
+                   text-overflow:ellipsis; line-height:1.4; margin-top:3px; }
+.page-breadcrumb .bc-sep { margin:0 4px; color:#d0cdc0; }
+.page-breadcrumb .bc-item { color:#888; }
+.page-breadcrumb .bc-item.bc-leaf { color:#3C3489; font-weight:600; }
+
+/* --- DOCUMENT-FLOW memo body (D-MV-01: SOP v5 render, NOT the old table) ---
+   Header hierarchy mirrors the 7-level spine. Every heading the spy tracks
+   carries id + data-spy. scroll-margin-top keeps anchors clear of the sticky
+   header on click-to-scroll. */
+.memo-body { padding:10px 40px 0 40px; max-width:900px; }
+h2.sec   { font-size:13.5pt; font-weight:700; color:#3C3489; margin:30px 0 4px;
+           padding-bottom:5px; border-bottom:2px solid #d8d4c0; scroll-margin-top:84px; }
+h3.subsec{ font-size:11.5pt; font-weight:700; color:#3C3489; margin:22px 0 4px; scroll-margin-top:84px; }
+h4.pillar{ font-size:11pt; font-weight:700; color:#3C3489; margin:20px 0 4px; scroll-margin-top:84px; }
+h5.group { font-size:10.5pt; font-weight:700; color:#064a35; margin:18px 0 4px;
+           background:rgba(6,74,53,0.04); padding:4px 8px; border-radius:3px;
+           border-left:3px solid #4a9a7a; scroll-margin-top:84px; }
+h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
+           background:#FBE9D5; padding:5px 9px; border-radius:3px;
+           border-left:3px solid #c87a3a; scroll-margin-top:84px; }
+.ra-head { font-size:9.5pt; font-weight:700; color:#0C447C; margin:14px 0 3px;
+           padding-left:8px; border-left:3px solid #85B7EB; scroll-margin-top:84px; }
+.cq-head { font-size:9pt; font-weight:700; color:#5a5526; margin:11px 0 3px;
+           padding-left:8px; border-left:3px solid #c9c1a3; scroll-margin-top:84px; }
+.memo-note { font-style:italic; color:#666; font-size:9pt; margin:3px 0 8px; line-height:1.5; }
+.memo-body p { font-size:9.5pt; line-height:1.62; margin:6px 0; }
+.memo-body ul { margin:6px 0 10px 4px; list-style:none; }
+.memo-body ul li { font-size:9.5pt; line-height:1.6; margin:5px 0; padding-left:16px; position:relative; }
+.memo-body ul li::before { content:'\2013'; position:absolute; left:0; color:#999; }
+.memo-closing { font-style:italic; color:#444; font-size:9pt; border-left:3px solid #d8d4c0;
+           padding:5px 0 5px 11px; margin:9px 0; background:#f7f6ee; }
+/* A3: element/RA institutional description block */
+.item-description { font-size:8pt; color:#5a5777; background:rgba(100,90,180,0.04);
+           border-left:2px solid #c5c0e8; padding:4px 10px; margin:4px 0 8px 0;
+           border-radius:0 3px 3px 0; line-height:1.5; }
+.item-desc-title { font-weight:700; color:#3C3489; margin-right:5px; }
+.item-desc-body { }
+.memo-body table { border-collapse:collapse; width:100%; font-size:8.5pt; margin:9px 0; }
+.memo-body table th { background:#FDFCF1; text-align:left; padding:5px 8px;
+           border-bottom:2px solid #d4d2bb; font-weight:700; }
+.memo-body table td { padding:5px 8px; border-bottom:1px solid #e8e5d4; vertical-align:top; }
+.memo-body table tr:nth-child(even) td { background:#faf8f0; }
+
+/* inline rating pill in the body — next to a heading or judgement */
+.rating { display:inline-flex; align-items:center; justify-content:center; min-width:20px;
+          height:18px; border-radius:2px; font-size:8.5pt; font-weight:700; padding:0 5px;
+          vertical-align:1px; margin-left:6px; }
+.rating.A { background:#9DD49B; color:#1a4d1a; }
+.rating.B { background:#BFD9F2; color:#0C447C; }
+.rating.C { background:#E7E3AB; color:#5a5526; }
+.rating.D { background:#FFCC66; color:#7a4f00; }
+.rating.F { background:#FF7C80; color:#660000; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#EEEDFE; color:#3C3489; }
+
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .main-header { position:static; }
+}
+
+/* --- A6: nav search filter input --- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search { width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+              border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+              color:#333; outline:none; font-family:inherit; }
+#nav-search:focus { border-color:#3C3489; box-shadow:0 0 0 2px rgba(60,52,137,.12); }
+#nav-search::placeholder { color:#aaa; }
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle" title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle" title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle" title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle" title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle" title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…" autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="b-i-1-bluf">B.I.1 — BLUF<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="b-i-2-top-line-judgement">B.I.2 — Top-line judgement</span>
+<span class="nav-item nav-section" data-anchor="b-i-3-headline-conviction-rating">B.I.3 — Headline conviction &amp; rating</span>
+<span class="nav-item nav-section" data-anchor="a-i-fy25-actuals-fy26-guidance">A.I — FY25 actuals &amp; FY26 guidance</span>
+<span class="nav-item nav-section" data-anchor="a-ii-peer-base-rate-context-gym-trio-comp-table">A.II — Peer/base-rate context (GYM-TRIO comp-table)</span>
+<span class="nav-item nav-section" data-anchor="a-iii-operating-leverage-fcf-inflection">A.III — Operating leverage &amp; FCF inflection<span class="nav-rating-pill A">A</span></span>
+<span class="nav-item nav-section" data-anchor="a-iv-bear-case-quantification-esa-short-sellers-cross-read">A.IV — Bear-case quantification (ESA Short-Sellers cross-read)<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-1-pillar-1-technical-strength-target-600w">C.II.1 — Pillar 1: Technical Strength (TARGET 600w)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm">C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 2,100w; 70% effort)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-3-pillar-2-fit-for-market-paradigm-target-600w-flat-sha">C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 600w; flat shape)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-4-pillar-5-ss-earnings-momentum-target-300w-5-3-matrix">C.II.4 — Pillar 5: SS Earnings Momentum</span>
+<span class="nav-item nav-section" data-anchor="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-flat-shap">C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w; flat shape)</span>
+<span class="nav-item nav-section" data-anchor="d-i-risk-decomposition">D.I — Risk decomposition</span>
+<span class="nav-item nav-section" data-anchor="d-ii-1-10-invalidation-achs-cohort-r4-exempt">D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</span>
+<span class="nav-item nav-section" data-anchor="d-ii-2-confidence-gaps">D.II.2 — Confidence / gaps</span>
+<span class="nav-item nav-section" data-anchor="d-ii-3-negative-should-be-expected-developments">D.II.3 — Negative-should-be-expected developments</span>
+<span class="nav-item nav-section" data-anchor="e-i-summary-judgement">E.I — Summary judgement<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="e-ii-next-stage-actions-esa-workplan">E.II — Next-stage actions (ESA workplan)</span>
+<span class="nav-item nav-section" data-anchor="e-iii-n-a-recommendation-is-progress-not-park">E.III — N/A (recommendation is PROGRESS not PARK)</span>
+<span class="nav-item nav-section" data-anchor="f-i-audit-trail">F.I — Audit trail</span>
+<span class="nav-item nav-section" data-anchor="f-ii-coverage-gap-notes">F.II — Coverage gap notes<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="f-iii-cross-references">F.III — Cross-references</span>
+<span class="nav-item nav-section" data-anchor="qc-footer">QC FOOTER<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="main-header">
+      <div class="page-title">[W] GYM-GB — Triaging — A&amp;J Memo</div>
+      <div class="page-subtitle">Ticker: GYM-GB | Stage: Triaging | Date: 03-May-26 Author: Watson (APM role) | SOP: APM A&amp;amp;J SOP v2.2 | Model: Opus Scope: Triaging+ (full ESA-stage research consulted; Triaging</div>
+      <div class="page-breadcrumb" id="breadcrumb">
+        <span class="bc-item">—</span>
+      </div>
+    </div>
+    <div class="memo-body">
+<p><em>The Gym Group is the highest-quality operator of the gym trio on every fundamental axis except sell-side momentum. UK #2 budget operator at 1.0x leverage, 27% mature site ROIC, +19% EBITDA LNR FY25, FCF-funded 75-site expansion, first-ever buyback, technical Capital 11/11 with RS 99th sector percentile. <strong>PROGRESS to ESA — clean, no conditional gates.</strong> Case-level rating [B/A].</em> #J</p>
+<p><em>Will Orr's "Next Chapter" turnaround has produced two consecutive years of 60-80% adjusted EPS growth, mature site ROIC at 27% (top decile HVLP), and the cleanest balance sheet of the trio (1.0x leverage, £102m bank facility extended to 2028). The friction worth surfacing: <strong>FactSet shows EPS revisions L1M -7% / L3M -5% / L6M -6% — momentum score 1/15</strong> = lowest of the trio. <strong>The discrepancy between operational performance and SS revisions is the most interesting question on this stock.</strong> Bull case: revisions reflect short-term modelling noise (buyback cancellations, FX) and operational momentum dominates. Bear case: SS analysts know something investors don't. ESA gate to resolve.</em> #J</p>
+<table><thead><tr><th>Pillar</th><th>Triaging draft rating</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td>🚩 <strong>A</strong> (Capital 11/11, RS 99th sector percentile, 1.62% from 52W high — best-in-trio technical setup)</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B</strong> (UK domestic single-country = clean me-state fit; budget gym counter-cyclical; risk-off mode = mild fit)</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>A</strong> (IC#1 outputs A; IC#2 simplicity A; IC#3 setups A — three independent fulcrum drivers; cleanest IC of trio)</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B/A</strong> (BB#1/3/4/5/6 strong; BB#2 untested; BB#7 PureGym competitive intensity = mild)</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td>❌ <strong>C</strong> (FactSet EPS L1M -7% / L3M -5% / L6M -6%; momentum 1/15 — weakest of trio; resolution at ESA)</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>B</strong> (3.74x EV/EBITDA = top-decile cheap on absolute basis; 33x P/E = depressed earnings base distorts; +33% TP upside)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td></tr></tbody></table>
+<div class="memo-note">Case-level rating is <strong>APM RECOMMENDATION</strong> at Triaging. Decision belongs to Richard at STAGE PROGRESSION Step 4 (Friday review). The CLEAN flag means no conditional ESA gates needed for progression — but ESA work should resolve the SS revisions vs operational divergence.</div>
+<table><thead><tr><th>Metric</th><th>FY24</th><th>FY25</th><th>FY26 guide / consensus</th><th>YoY %</th></tr></thead><tbody><tr><td>Revenue</td><td>£225.7m</td><td><strong>£244.9m</strong></td><td>£265-275m est.</td><td>+8% (decel from +11% FY24)</td></tr><tr><td>Adjusted EBITDA LNR</td><td>£47.6m</td><td><strong>£56.7m</strong></td><td>£59.6-60.7m guide top of consensus</td><td>+19%</td></tr><tr><td>EBITDA margin (LNR / revenue)</td><td>21.1%</td><td><strong>23.2%</strong></td><td>22-23% est.</td><td>+210bps</td></tr><tr><td>Adjusted PBT</td><td>£3.6m</td><td><strong>£10.6m</strong></td><td>£14-16m est.</td><td><strong>+194%</strong></td></tr><tr><td>Adjusted diluted EPS</td><td>2.9p</td><td><strong>5.3p</strong></td><td>7.0-7.5p est.</td><td><strong>+83%</strong></td></tr><tr><td>FCF</td><td>£35.0m</td><td><strong>£38.3m</strong></td><td>£40-45m est.</td><td>+10%</td></tr><tr><td>Non-property net debt</td><td>£61.3m</td><td><strong>£59.3m</strong></td><td>declining</td><td>-£2m</td></tr><tr><td>Adj. leverage</td><td>1.3x</td><td><strong>1.0x</strong></td><td>&lt;1.0x</td><td>-30bps</td></tr><tr><td>Members</td><td>893k</td><td><strong>923k</strong> (avg 945k)</td><td>~975k</td><td>+3-7%</td></tr><tr><td>Sites</td><td>232</td><td><strong>245 (incl. 16 new in FY25, 7 in Dec)</strong></td><td>~265</td><td>+6%</td></tr><tr><td>ARPMM</td><td>£20.74</td><td><strong>£21.60</strong></td><td>~£22.20 (3% growth est.)</td><td>+4% (decel from +7%)</td></tr></tbody></table>
+<table><thead><tr><th>Metric</th><th>GYM-GB</th><th>BFIT-NL</th><th>SATS-NO</th><th>Sector base rate</th></tr></thead><tbody><tr><td>EBITDA margin (pre-IFRS16)</td><td>23.2%</td><td>24.5%</td><td>16%</td><td>HVLP median 20-25%</td></tr><tr><td>Mature site ROIC</td><td>🚩 <strong>27% (30% ex-workforce)</strong></td><td>31-34%</td><td>~15-20%</td><td>HVLP top decile 30%+</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td>🚩 <strong>1.0x</strong></td><td>2.7-3.0x</td><td>1.3x</td><td>HVLP median 1.5x</td></tr><tr><td>Forward EV/EBITDA</td><td>3.74x</td><td>4.65x</td><td>2.07x</td><td>HVLP median 7-8x</td></tr><tr><td>FCF / EBITDA</td><td><strong>68%</strong></td><td>50% (FY25 reported)</td><td>55%</td><td>HVLP median 50%</td></tr><tr><td>EPS growth FY25</td><td>🚩 <strong>+83%</strong></td><td>+24%</td><td>+16%</td><td>HVLP median 10-15%</td></tr><tr><td>FactSet EPS revisions L1M</td><td>❌ <strong>-7%</strong></td><td>-6%</td><td>+1%</td><td>sector median +1-2%</td></tr><tr><td>Buy % (FactSet)</td><td>🚩 <strong>100%</strong> (full house)</td><td>70%</td><td>75%</td><td>sector median 60-70%</td></tr></tbody></table>
+<p>🚩 <strong>RARE: GYM Buy % = 100%</strong> — unanimous SS buy ratings. _Of 24 European HVLP-adjacent operators, fewer than 5 carry 100% buy ratings._ #I</p>
+<p>🚩 <strong>RARE: 1.0x leverage with 23%+ EBITDA margin and 27% mature ROIC</strong> — combination triple-top-quartile. #J</p>
+<p>❌ <strong>[C] EPS revisions L1M -7% with Buy % = 100%</strong> — analysts trimming numbers but not selling rating. _Either short-term modelling noise OR sell-side preserving relationships rather than acting on conviction. ESA gate to resolve._ #A</p>
+<p><em>Mature site ROIC rose 200bps to 27% in FY25 (30% excluding workforce-dependent sites). New site cohort outperforming historical maturity curve. ROIC expansion + 20-22 new sites/yr + ARPMM growth at 3-4% + technology-led retention improvement = compounding tailwind on EBITDA.</em> #A</p>
+<p><strong>[A] Mature ROIC trajectory</strong> = top-quartile sustainability of returns; outperforms peer set. _Material confirmation that operational improvements (not just volume) drive returns._ #J</p>
+<p><strong>[A] Cash conversion 68% of EBITDA LNR</strong> — top decile of UK consumer-services. 🚩 RARE for a 75-site rollout business to fund expansion entirely from FCF without dilution. #J</p>
+<p>❌ <strong>[C] No formal short-seller report exists</strong> — bear case is fundamental (PureGym scale gap, ARPMM ceiling), not fraud or misrepresentation. _Yellow credibility per AS bear-case research._ #A</p>
+<p>❌ <strong>[C] PureGym scale gap real and structural</strong> — PureGym ~600 UK clubs vs GYM 245; PureGym targeting 200+ additional sites Europe over 3-4Y. _GYM is structurally subscale vs UK leader._ #J</p>
+<p>❌ <strong>[C] ARPMM deceleration 7% → 4%</strong> is the single most important watchpoint per Triaging research. _If trend continues to 2-3% in FY26, EPS growth normalises sharply from current 60-80% pace. Could explain SS L1M revisions._ #J</p>
+<p><strong>Pre-pandemic guidance miss (2018 EBITDA miss despite revenue +30%)</strong> is the only material delivery imperfection in the L7Y track record. _Otherwise 12/12 site delivery, 16/16 site delivery — operational track record exceptional._ #I</p>
+<p><strong>Rating: A</strong> — Capital 11/11, RS 99th sector percentile. Best-in-trio. #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<ul><li><strong>P1 RA1 — MM99 / Minervini score?</strong> <strong>Capital 11/11 — perfect score.</strong> _Best technical setup of any stock in the watchlist._ #J</li><li>All 11 group tests PASS unconditionally (T1-T11). #I</li><li>Filter qualification: <strong>Capital Stage</strong> (highest classification). _Vs BFIT Late Stage 2; SATS Capital — GYM is the trio's technical leader._ #A</li></ul>
+<p><strong>(b) RS excess return analysis</strong></p>
+<ul><li>🚩 <strong>RARE: RS percentile 75th overall / 99th sector</strong> — strongest stock in the sector by RS. #I</li><li><strong>RS excess +16.89% sector / +22.47% industry / +12.95% market</strong> — durable, multi-window outperformance. #J</li></ul>
+<p><strong>(c) MA structure</strong></p>
+<ul><li><strong>Price 182p vs 200D 155.22p = +17.2% premium.</strong> 200D rising 7 consecutive months. #I</li><li>All MAs in ascending order; price testing 50D from above (+3.56%). _Pullback exceptionally shallow at 1.62% from 52W high._ #A</li></ul>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<ul><li><strong>Late Stage 2 advance, mature.</strong> 18th retest of 50D — high-frequency consolidation = institutional accumulation. #I</li><li>52W range 131.2-186.8p (+42.4% range); current price near top of range = strong trend characteristic. #A</li></ul>
+<p><strong>(e) Volume patterns</strong></p>
+<ul><li><strong>ADV 1M 535k &gt; ADV 3M 510k</strong> — buyer interest expanding. _Confirmatory volume._ #I</li><li>No distribution signature in volume profile. #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>🚩 [A] Technical leader of the trio</strong> — Capital 11/11, RS 99th sector, shallow pullback, expanding volume. _Technical setup is best-in-class. Entry zone 175-186p; trigger above 186.8p on volume._ #J</li></ul>
+<p><strong>Rating: A overall.</strong> _Cleanest IC of trio; three independent fulcrum drivers; track record of execution._ #J</p>
+<p><strong>IC#1 — Required financial outputs</strong></p>
+<ul><li><strong>IC#1 RA1 — Are required outputs evident?</strong> <strong>A — every line item at top decile of HVLP sector.</strong> #J</li><li>🚩 <strong>Adjusted EPS +83% FY25 (after +67% FY24)</strong> — two consecutive years 60-80% from turnaround base = exceptional trajectory. #I</li><li><strong>Mature site ROIC 27%</strong> (30% ex-workforce) = top-decile HVLP. #A</li><li><strong>FCF £38.3m on £244.9m revenue = 15.6% FCF/Revenue</strong> = top-decile UK consumer services. #A</li><li><strong>EBITDA LNR +19% FY25</strong> with margin expansion to 23.2% (+210bps) = high-quality earnings. #J</li></ul>
+<ul><li><strong>IC#1 RA2 — Earnings quality?</strong> <strong>A — adjusted vs statutory gap small (£10.6m PBT adjusted vs ~£8m statutory).</strong> _No major non-cash adjustments; clean earnings._ #J</li></ul>
+<ul><li><strong>IC#1 RA3 — ROIC / ROCE?</strong> <strong>🚩 A — 27% mature ROIC (30% ex-workforce); group ROIC 12-15%.</strong> _Top-decile HVLP._ #J</li></ul>
+<ul><li><strong>IC#1 RA4 — Cash conversion?</strong> <strong>A — 68% of EBITDA LNR converts to FCF.</strong> Above HVLP median 50%. #J</li></ul>
+<p><strong>IC#2 — Simplicity / required guardrails</strong></p>
+<ul><li><strong>IC#2 RA1 — Business comprehensibility?</strong> <strong>A — single-product UK budget gym; no franchise complexity; no multi-country compliance burden.</strong> #J</li><li>🚩 <strong>RARE: zero geography ambiguity</strong> — UK only, GBP only, single regulatory regime. _Unambiguous compared to BFIT (12 countries) or SATS (4)._ #J</li></ul>
+<ul><li><strong>IC#2 RA2 — Required simplicity guardrails?</strong> <strong>A — no IFRS 16 distortion; no convertible bond; no acquisition intangibles; no two-brand structure.</strong> #J</li><li>Reporting clean: revenue, EBITDA LNR, PBT, FCF all reconcile transparently. #I</li></ul>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation)</strong></p>
+<ul><li><strong>IC#3 RA1 — Identifiable fulcrum driver(s)?</strong> <strong>A — three independent fulcrum drivers, all in execution phase.</strong> #J</li><li><strong>FD1: 75-site expansion to ~335 by end-FY28.</strong> £1-1.5m capex/site at 27-30% ROIC = ~£12m incremental EBITDA per cohort. _High-conviction; mechanical from FCF coverage._ #J</li><li><strong>FD2: ARPMM growth from £21.60.</strong> 1% increase = £2.5m incremental annualised revenue at near-100% incremental margin. _Sensitivity is high but pace is decelerating (+7% → +4%) — watchpoint._ #J</li><li><strong>FD3: Multiple re-rating from turnaround discount to compounder premium.</strong> Currently 7.6x EV/EBITDA → potentially 10-12x if delivery sustains 24M = +30-50% multiple expansion. _Optionality, not guarantee._ #J</li></ul>
+<ul><li><strong>IC#3 RA2 — Disciplined-buyer entry test?</strong> <strong>B/A — at 182p, current price above ideal entry but technical signals strong.</strong> Entry 175-186p; ideal trigger above 186.8p on volume. #J</li></ul>
+<ul><li><strong>IC#3 RA3 — Invalidation triggers (preview of D.II.1)?</strong> <strong>B — clean — primary trigger ARPMM &lt;2% sustained 2 quarters.</strong> #J</li></ul>
+<p><strong>BB#1-8 — Investment Case Building Blocks (cohort summary)</strong></p>
+<ul><li><strong>BB#1 Sector strength?</strong> <strong>A — UK budget segment 41% of UK private gym memberships; structural HVLP penetration runway 5-10Y; counter-cyclical resilience confirmed.</strong> #J</li><li><strong>BB#2 Lessons-check (track record)?</strong> <strong>B — closest archetype: turnaround compounder + property-led rollout. Track-record-by-stock data not directly read in this Triaging memo (ESA gap to fill).</strong> #A</li><li><strong>BB#3 Unit economics?</strong> <strong>🚩 A — £1-1.5m capex/site; cash break-even 1,400-1,500 members; 27% mature ROIC.</strong> Top-decile HVLP. #J</li><li><strong>BB#4 Management / governance?</strong> <strong>A — Will Orr "Next Chapter" delivery flawless; Hamish Latchem CPO from Aldi = strong property hire; clean governance.</strong> _12/12 site delivery; 16/16 site delivery; PBT +194% FY25._ #J</li><li><strong>BB#5 Balance sheet / liquidity?</strong> <strong>🚩 A — 1.0x leverage; £102m bank facility extended to June 2028; £10m buyback first in company history.</strong> _Cleanest balance sheet of trio._ #J</li><li><strong>BB#6 Capital allocation?</strong> <strong>A — buyback + FCF-funded expansion + declining leverage. Disciplined.</strong> #J</li><li><strong>BB#7 Plain-sight risks?</strong> <strong>B — PureGym competitive intensity (mild); ARPMM ceiling concern (yellow); UK consumer slowdown exposure.</strong> _Cohort weight moderate; no individual fatal risk._ #J</li><li><strong>BB#8 Optionality?</strong> <strong>B — technology-led retention extension; PT marketplace ancillary scaling; M&amp;A consolidation potential (mid-tier UK distress) — three plausible options.</strong> #J</li></ul>
+<p><strong>Rating: B</strong> — UK domestic single-country = strong me-state fit; budget gym counter-cyclical; mild risk-off-mode mismatch on consumer discretionary axis. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<ul><li><strong>Richard's me-state: risk-off mode (Iran conflict).</strong> Targeting recurring non-cyclical revenues, domestic EU footprint, banks/insurance, healthcare. #I</li><li>_GYM is single-country UK domestic + recurring subscription model + counter-cyclical (cost-of-living drives HVLP substitution). <strong>Better me-state fit than BFIT (multi-country, France-heavy) and SATS (FX exposed).</strong>_ #J</li></ul>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<ul><li><strong>HVLP gym sector +5.8% member growth, +9.1% revenue growth FY25</strong> — top-quartile European consumer category. #I</li><li>UK budget segment 41% of UK private gym memberships — leading position in fastest-growing segment. #A</li><li>🚩 <strong>RARE: HVLP delivered 13 consecutive years of double-digit category growth</strong> (only HVLP, low-cost airlines, discount grocery achieve this in European consumer). #I</li></ul>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<ul><li><strong>GDP exposure: low</strong> — habitual subscription with weak elasticity at £21.60. #A</li><li><strong>FX exposure: nil</strong> — GBP-reporting, GBP-domestic operations 100%. _Most FX-clean of trio._ #I</li><li><strong>Rate exposure: moderate</strong> — £102m bank facility floats with SONIA. _Lower absolute debt than BFIT, lower sensitivity._ #A</li><li><strong>Tariff / trade exposure: nil.</strong> #I</li></ul>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<ul><li>_UK domestic single-stock; minimal correlation to existing pipeline (DCC GB-domestic, FLTR GB-domestic — different sectors). ESA gate to confirm._ #T</li></ul>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<ul><li><strong>Market cap ~£300-330m — small mid-cap, slightly below Richard's $5-50bn sweet spot but acceptable.</strong> #I</li><li><strong>ADV 535k shares × 182p ≈ £1m daily — adequate for 1-2% portfolio sizing with patience.</strong> #A</li><li>❌ <strong>[C] Smallest market cap of the trio</strong> — liquidity less robust than BFIT (€2.4bn) or SATS (NOK 4bn). _Sizing constraint at higher portfolio weights._ #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>[B] Best paradigm fit of the trio for risk-off mode</strong> — UK domestic, GBP, low macro exposure, high recurring revenue. _Mild liquidity constraint at higher sizing; overall paradigm fit is B+._ #J</li></ul>
+<p><strong>Rating: C</strong> — FactSet EPS revisions L1M -7% / L3M -5% / L6M -6%; EBITDA L1M -5% / L3M -8% / L6M -5%. Momentum score 1/15 — weakest of trio. The puzzle: how is the operational momentum (PBT +194%, EBITDA +19%, EPS +83%) so disconnected from SS revisions? #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM data — pulled 03-May-26)</strong></p>
+<ul><li>❌ <strong>EPS revisions: L1M -7% / L3M -5% / L6M -6% / L12M 0%</strong> = persistent negative bias across all short-term windows. _Materially worse than BFIT (L1M -6% but L6M +14%) or SATS (L1M +1%, L6M +4%)._ #A</li><li>❌ <strong>EBITDA revisions: L1M -5% / L3M -8% / L6M -5% / L12M -5%</strong> = negative across every window. _Single most disconfirming data point in the case._ #J</li><li><strong>Sales revisions: L1M +1% / L3M 0% / L6M +2% / L12M +2%</strong> — top-line stable. _Revisions are at the margin / unit-economics line, not the demand line._ #A</li><li><strong>TP revisions: L1M 0% / L3M +7% / L6M +21% / L12M unspecified.</strong> _TPs were raised heavily 6M ago; pace flatlined recently._ #A</li></ul>
+<p><strong>(b) Estimate dispersion</strong></p>
+<ul><li><strong>Buy % = 🚩 100%</strong> — unanimous buy. _Conviction is high; numbers being trimmed at the margin._ #I</li></ul>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<ul><li><strong>11 buy revisions L6M; 0 in L1M</strong> — analysts not actively re-rating; just trimming numbers. _Suggests cosmetic / modelling adjustments rather than thesis change._ #A</li></ul>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<ul><li><strong>AS Earnings-L3Y report: "flawless guidance delivery."</strong> Operational evidence is unambiguously strong (PBT +194%; 12/12 site delivery; 16/16 site delivery). _<strong>Material disconnect between SS revisions and operational performance — this is the case's most interesting question.</strong>_ #J</li></ul>
+<p><strong>(e) Momentum scoring (5×3 matrix; FactSet data)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>❌ -7%</td><td>❌ -5%</td><td>+1%</td></tr><tr><td>L3M</td><td>❌ -5%</td><td>❌ -8%</td><td>0%</td></tr><tr><td>L6M</td><td>❌ -6%</td><td>❌ -5%</td><td>+2%</td></tr><tr><td>L12M</td><td>0%</td><td>❌ -5%</td><td>+2%</td></tr></tbody></table>
+<p><strong>Momentum composite score: 1/15</strong> (FactSet computed) — _weakest of the trio (BFIT 7, SATS 13). The earnings momentum is the friction in this case._ #J</p>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li>❌ <strong>[C] Earnings momentum is the only material weakness in the case.</strong> SS analysts maintain unanimous buy ratings (100%) while trimming numbers across every window. _Three plausible explanations: (1) analysts updating for buyback-driven share count reduction (mechanical EPS reduction not thesis-related); (2) analysts modelling more conservative ARPMM after 7%→4% deceleration; (3) analysts seeing something in the channel (PureGym pricing, UK consumer) the operational data hasn't caught yet. <strong>Resolution at ESA via channel checks + analyst conversations.</strong>_ #J</li><li>🚩 <strong>RARE: 100% buy + persistent negative revisions</strong> — specific, unusual pattern. _Most likely interpretation: cosmetic modelling friction; least likely: thesis weakness._ #A</li></ul>
+<p><strong>Rating: B</strong> — 3.74x forward EV/EBITDA = top-decile cheap on absolute metric; 33x forward P/E reflects depressed earnings base from turnaround; +33% TP upside. _Cheapness is real but P/E noise distorts._ #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<ul><li><strong>Forward EV/EBITDA 3.74x</strong> (EV £397m / FY consensus EBITDA £106m). #I</li><li><strong>NTM P/E 33x</strong> (£1.82 / consensus EPS £0.055) — _appears expensive but EPS base is post-turnaround and forward growth is structural. P/E is the wrong metric here._ #A</li><li><strong>EV/Sales 1.33x</strong> vs HVLP median 2.0-2.5x — top-quartile cheap. #I</li></ul>
+<p><strong>(b) Percentile positioning</strong></p>
+<ul><li><strong>Own history: ~40th percentile</strong> (post-turnaround derate from 2022 peak). #I</li><li><strong>Peer percentile: top decile cheap on EV/EBITDA absolute basis.</strong> _Cheapest of trio._ #J</li></ul>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<ul><li><strong>TP (FactSet consensus): £2.42 = +33% upside</strong> to current ~£1.82. _Highest TP upside of trio (BFIT +27%, SATS -2.5%)._ #I</li><li><strong>Bull case (75-site rollout delivers + ARPMM holds + multiple re-rates):</strong> EBITDA reaches £75m+ FY28 + 9-10x multiple = SP £2.50-3.00 (+38-65%). #J</li><li><strong>Base case (75-site rollout delivers + ARPMM 2-3% growth):</strong> EBITDA £65-70m FY28 + 7-8x multiple = SP £2.20-2.40 (+21-32%). #J</li><li><strong>Bear case (PureGym co-location intensifies + ARPMM stagnates):</strong> EBITDA flatlines £55-58m + 5-6x multiple = SP £1.30-1.50 (-18% to -28%). #J</li></ul>
+<p><strong>(d) Scenario anchoring</strong></p>
+<ul><li><strong>R/R: base +25% / bull +50% / bear -23%. Probability-weighted (50% base / 30% bull / 20% bear) = +22% expected return</strong> — clears the Triaging hurdle for ESA progression with margin to spare. _Top R/R of the trio._ #J</li></ul>
+<p><strong>(e) Synthesis</strong></p>
+<ul><li><strong>[B] Valuation is solid but not the strongest pillar.</strong> EV/EBITDA top-decile cheap; P/E noisy due to turnaround base; TP upside top of trio at +33%. _Cheapness real; the PROGRESS rationale rests more on quality (P3, P4) than valuation (P6)._ #J</li></ul>
+<ul><li><strong>Top three case-killers (descending probability × impact):</strong> 1. <strong>ARPMM growth decelerates to &lt;2% in FY26</strong> — single most financially sensitive variable. Probability ~30%; impact -15-20% on share price. #J 2. <strong>PureGym intensifies UK price competition</strong> — share-loss scenario; could compress EBITDA margin 200bps. Probability ~25%; impact -10-15%. #J 3. <strong>75-site rollout misses delivery</strong> — delivery &lt;60 sites on a 75 target. Probability ~15%; impact -10%. #J</li></ul>
+<ul><li><strong>Rating breaker analysis:</strong> P3 and P4 ratings remain A even with bear case partially materialising. The thesis breaks only if BOTH ARPMM stagnates AND PureGym co-location intensifies. _The bear case requires two independent bad outcomes._ #J</li></ul>
+<p><em>Standing 10 ACHs per <code>feedback_live_case_invalidations.md</code>.</em> #J</p>
+<table><thead><tr><th>#</th><th>ACH</th><th>GYM-GB Triaging status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>_CLEAN — every set of results since Orr's appointment beat. FY26 guide top of consensus._</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>_N/A — GBP-domestic._</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>_Iran conflict consumer-discretionary spillover = mild monitor._</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>_N/A — atomistic membership base._</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>_CLEAN — 1.0x leverage vs 3.0x covenant; £102m facility to 2028._</td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>_Will Orr stable; Hamish Latchem just hired._</td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>_PureGym = mild monitor (structural not acute)._</td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>_UK regulatory environment stable._</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>_CLEAN — buyback + FCF-funded expansion + 30% ROIC hurdle._</td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>_ARPMM deceleration = the watchpoint; not yet a break._</td></tr></tbody></table>
+<p>🚩 <strong>RARE: GYM trips ZERO ACHs at Triaging.</strong> _Of three names + ten checks each, GYM is the only one to pass all 10. Outlier-clean stress-test result._ #J</p>
+<ul><li><strong>High confidence:</strong> sector tailwind, unit economics at maturity, 75-site rollout mechanics, balance sheet strength, FCF coverage. #J</li><li><strong>Medium confidence:</strong> ARPMM trajectory; PureGym competitive intensity; multiple re-rating timing. #J</li><li>❌ <strong>Low confidence / explicit gaps:</strong> SS revisions vs operational divergence reason; channel-check intelligence on UK gym pricing; cohort performance of 2025 new sites at 12-month mark. <strong>All three are ESA workstreams.</strong> #OQ</li></ul>
+<ul><li><strong>NSE-1: H1-26 ARPMM growth slows to 2-3%.</strong> Comp base from 2024-25 is high. Don't extrapolate to 2-3% as new run-rate without channel evidence. #J</li><li><strong>NSE-2: PureGym IPO discussion in 2026.</strong> When PureGym files, GYM will trade noisily on read-across. _Buy weakness if thesis intact._ #J</li><li><strong>NSE-3: Quarter where new site openings cluster early (e.g. Dec-25 had 7 of 16).</strong> Resulting cohort EBITDA contribution lumpy. #J</li></ul>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>🚩 A</td><td>High</td><td>Capital 11/11; RS 99th sector; 1.62% from 52W high</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B</td><td>Medium-High</td><td>UK domestic + counter-cyclical + low FX/macro exposure</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>A</td><td>High</td><td>IC#1 outputs A; IC#2 simplicity A; IC#3 setups A</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B/A</td><td>Medium-High</td><td>BB#1/3/4/5/6/8 strong; BB#2 untested; BB#7 mild</td></tr><tr><td>P5 SS Earnings Momentum</td><td>❌ C</td><td>Medium</td><td>EPS L1M -7%; momentum 1/15; resolution at ESA</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>B</td><td>High</td><td>3.74x EV/EBITDA top-decile; +33% TP upside</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td><td><strong>Medium-High</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net: GYM's case-level is the strongest of the trio on quality and balance sheet, but P5 momentum is the only material friction. Cleanest progression from Triaging → ESA of the three names.</em> #J</p>
+<p><strong>PROGRESS to ESA — CLEAN.</strong> No conditional gates required for progression — the operational evidence (PBT +194%, ROIC 27%, 1.0x leverage, FCF £38.3m, technical Capital 11/11) is unambiguously top-quartile. ESA work is needed to test whether SS revisions L1M -7% reflects operational reality or modelling noise. #J</p>
+<p>1. <strong>SS revisions vs operational divergence resolution</strong> — interview 2-3 top-rated GYM analysts to understand revision drivers. Establish whether revisions reflect (a) buyback-driven EPS mechanical reduction, (b) ARPMM modelling conservatism, (c) channel intelligence on UK gym pricing. _Owner: APM ESA Phase 1 + RESEARCHER expert calls._ #T 2. <strong>PureGym channel check</strong> — interview 3-5 PureGym franchisees / former employees on UK pricing strategy + co-location intensity. _Owner: RESEARCHER expert calls._ #T 3. <strong>ARPMM trajectory disambiguation</strong> — analyse FY26 H1 ARPMM print + run UK consumer panel checks on price elasticity at £21-25. _Owner: RESEARCHER._ #T 4. <strong>75-site rollout pipeline depth analysis</strong> — request property pipeline disclosure from Hamish Latchem; verify 36+ months of site visibility. _Owner: COS to schedule IR call; APM attends._ #T 5. <strong>Track-record-by-stock cross-check</strong> — pull turnaround-compounder + property-rollout archetypes; compare delivery hit rates. _Owner: APM ESA Phase 1 read._ #T 6. <strong>PureGym private-comp deep-dive (shared with BFIT ESA)</strong> — model 7.5x leverage + global expansion; what's GYM's competitive response if PureGym IPOs. _Owner: RESEARCHER ESA Q10b — shared workstream._ #T</p>
+<ul><li><strong>Phase 0 pre-flight:</strong> ✓ All 11 query files present (IG/02-CF, 03-TM; Triaging/04-ET, 05-ED, 07-KD; ESA/08-BM-Primer, 09-Earnings-L3Y, 10-Short-Sellers, 11-VCMap, 12-Value-Chain, 13-Guidance) + GYM-TRIO sector synthesis.</li><li><strong>Phase 1 read time:</strong> 03-May-26.</li><li><strong>Phase 2 authoring time:</strong> 03-May-26.</li></ul>
+<ul><li><strong>ESA-stage research consulted under Triaging+ scope</strong> per Richard's confirmation 03-May-26. Triaging decision logic preserved (PROGRESS / PARK / KILL into ESA).</li><li><strong>Master Dashboard data:</strong> factset-ssem.json read directly (P5 quantification); factset-valuation.json does NOT contain GYM-GB; filter-results.json corrupted (silent truncation); valuation cells computed from SSEM raw + reported balance sheet.</li></ul>
+<ul><li>Comp-table: <code>Files/GYM-TRIO/synthesis/comp-table-skeleton-v1.md</code> (cited; v2 update pending after all three memos)</li><li>ESA Short-Sellers: <code>Files/GYM-GB/ESA/10-Short-Sellers/merged.md</code> (bear-case anchor)</li><li>10 INVALIDATION ACHs: <code>feedback_live_case_invalidations.md</code> + <code>decisions.md</code> "10 INVALIDATION ACHs"</li></ul>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~90% of metric bullets with comparison ✓ Principle #2 (A-F grading):              36/36 gradeable findings graded ✓ Principle #3 (invert markers ❌):         8 D/F findings (P5 EPS L1M; P5 EBITDA L1M; P5 EBITDA L3M; P5 EBITDA L6M; P5 EBITDA L12M; P5 EPS L3M; P5 EPS L6M; smallest market cap liquidity) Principle #4 (🚩 RARE outlier markers):  7 RARE markers (Buy% 100%; 1.0x lev + 23% margin + 27% ROIC combination; ZERO ACH trips; UK domestic single-country geography clean; RS 99th sector percentile; 13Y category growth; persistent negative revisions WITH 100% buy) QC PILLAR DEFAULT: A / B / A / B-A / C / B QC CASE-LEVEL: B/A — PROGRESS to ESA (CLEAN — no conditional gates) SCOPE NOTE: Triaging+ — ESA-stage research consulted; Triaging decision logic SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: factset-ssem.json (03-May-26 build); GYM-GB/* research (02-May-26); GYM-TRIO comp-table-skeleton-v1 DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+<div class="memo-note">[W] GYM-GB Triaging A&amp;J memo v1 authored 03-May-26 by Watson (APM role). Source corpus: 77,342 words GYM-GB research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~5,400 words.</div>
+<h2 class="sec" id="b-i-1-bluf" data-spy>B.I.1 — BLUF<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><em>The Gym Group is the highest-quality operator of the gym trio on every fundamental axis except sell-side momentum. UK #2 budget operator at 1.0x leverage, 27% mature site ROIC, +19% EBITDA LNR FY25, FCF-funded 75-site expansion, first-ever buyback, technical Capital 11/11 with RS 99th sector percentile. <strong>PROGRESS to ESA — clean, no conditional gates.</strong> Case-level rating [B/A].</em> #J</p>
+<h2 class="sec" id="b-i-2-top-line-judgement" data-spy>B.I.2 — Top-line judgement</h2>
+<p><em>Will Orr's "Next Chapter" turnaround has produced two consecutive years of 60-80% adjusted EPS growth, mature site ROIC at 27% (top decile HVLP), and the cleanest balance sheet of the trio (1.0x leverage, £102m bank facility extended to 2028). The friction worth surfacing: <strong>FactSet shows EPS revisions L1M -7% / L3M -5% / L6M -6% — momentum score 1/15</strong> = lowest of the trio. <strong>The discrepancy between operational performance and SS revisions is the most interesting question on this stock.</strong> Bull case: revisions reflect short-term modelling noise (buyback cancellations, FX) and operational momentum dominates. Bear case: SS analysts know something investors don't. ESA gate to resolve.</em> #J</p>
+<h2 class="sec" id="b-i-3-headline-conviction-rating" data-spy>B.I.3 — Headline conviction &amp; rating</h2>
+<table><thead><tr><th>Pillar</th><th>Triaging draft rating</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td>🚩 <strong>A</strong> (Capital 11/11, RS 99th sector percentile, 1.62% from 52W high — best-in-trio technical setup)</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B</strong> (UK domestic single-country = clean me-state fit; budget gym counter-cyclical; risk-off mode = mild fit)</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>A</strong> (IC#1 outputs A; IC#2 simplicity A; IC#3 setups A — three independent fulcrum drivers; cleanest IC of trio)</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B/A</strong> (BB#1/3/4/5/6 strong; BB#2 untested; BB#7 PureGym competitive intensity = mild)</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td>❌ <strong>C</strong> (FactSet EPS L1M -7% / L3M -5% / L6M -6%; momentum 1/15 — weakest of trio; resolution at ESA)</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>B</strong> (3.74x EV/EBITDA = top-decile cheap on absolute basis; 33x P/E = depressed earnings base distorts; +33% TP upside)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td></tr></tbody></table>
+<div class="memo-note">Case-level rating is <strong>APM RECOMMENDATION</strong> at Triaging. Decision belongs to Richard at STAGE PROGRESSION Step 4 (Friday review). The CLEAN flag means no conditional ESA gates needed for progression — but ESA work should resolve the SS revisions vs operational divergence.</div>
+<h2 class="sec" id="a-i-fy25-actuals-fy26-guidance" data-spy>A.I — FY25 actuals &amp; FY26 guidance</h2>
+<table><thead><tr><th>Metric</th><th>FY24</th><th>FY25</th><th>FY26 guide / consensus</th><th>YoY %</th></tr></thead><tbody><tr><td>Revenue</td><td>£225.7m</td><td><strong>£244.9m</strong></td><td>£265-275m est.</td><td>+8% (decel from +11% FY24)</td></tr><tr><td>Adjusted EBITDA LNR</td><td>£47.6m</td><td><strong>£56.7m</strong></td><td>£59.6-60.7m guide top of consensus</td><td>+19%</td></tr><tr><td>EBITDA margin (LNR / revenue)</td><td>21.1%</td><td><strong>23.2%</strong></td><td>22-23% est.</td><td>+210bps</td></tr><tr><td>Adjusted PBT</td><td>£3.6m</td><td><strong>£10.6m</strong></td><td>£14-16m est.</td><td><strong>+194%</strong></td></tr><tr><td>Adjusted diluted EPS</td><td>2.9p</td><td><strong>5.3p</strong></td><td>7.0-7.5p est.</td><td><strong>+83%</strong></td></tr><tr><td>FCF</td><td>£35.0m</td><td><strong>£38.3m</strong></td><td>£40-45m est.</td><td>+10%</td></tr><tr><td>Non-property net debt</td><td>£61.3m</td><td><strong>£59.3m</strong></td><td>declining</td><td>-£2m</td></tr><tr><td>Adj. leverage</td><td>1.3x</td><td><strong>1.0x</strong></td><td>&lt;1.0x</td><td>-30bps</td></tr><tr><td>Members</td><td>893k</td><td><strong>923k</strong> (avg 945k)</td><td>~975k</td><td>+3-7%</td></tr><tr><td>Sites</td><td>232</td><td><strong>245 (incl. 16 new in FY25, 7 in Dec)</strong></td><td>~265</td><td>+6%</td></tr><tr><td>ARPMM</td><td>£20.74</td><td><strong>£21.60</strong></td><td>~£22.20 (3% growth est.)</td><td>+4% (decel from +7%)</td></tr></tbody></table>
+<h2 class="sec" id="a-ii-peer-base-rate-context-gym-trio-comp-table" data-spy>A.II — Peer/base-rate context (GYM-TRIO comp-table)</h2>
+<table><thead><tr><th>Metric</th><th>GYM-GB</th><th>BFIT-NL</th><th>SATS-NO</th><th>Sector base rate</th></tr></thead><tbody><tr><td>EBITDA margin (pre-IFRS16)</td><td>23.2%</td><td>24.5%</td><td>16%</td><td>HVLP median 20-25%</td></tr><tr><td>Mature site ROIC</td><td>🚩 <strong>27% (30% ex-workforce)</strong></td><td>31-34%</td><td>~15-20%</td><td>HVLP top decile 30%+</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td>🚩 <strong>1.0x</strong></td><td>2.7-3.0x</td><td>1.3x</td><td>HVLP median 1.5x</td></tr><tr><td>Forward EV/EBITDA</td><td>3.74x</td><td>4.65x</td><td>2.07x</td><td>HVLP median 7-8x</td></tr><tr><td>FCF / EBITDA</td><td><strong>68%</strong></td><td>50% (FY25 reported)</td><td>55%</td><td>HVLP median 50%</td></tr><tr><td>EPS growth FY25</td><td>🚩 <strong>+83%</strong></td><td>+24%</td><td>+16%</td><td>HVLP median 10-15%</td></tr><tr><td>FactSet EPS revisions L1M</td><td>❌ <strong>-7%</strong></td><td>-6%</td><td>+1%</td><td>sector median +1-2%</td></tr><tr><td>Buy % (FactSet)</td><td>🚩 <strong>100%</strong> (full house)</td><td>70%</td><td>75%</td><td>sector median 60-70%</td></tr></tbody></table>
+<p>🚩 <strong>RARE: GYM Buy % = 100%</strong> — unanimous SS buy ratings. _Of 24 European HVLP-adjacent operators, fewer than 5 carry 100% buy ratings._ #I</p>
+<p>🚩 <strong>RARE: 1.0x leverage with 23%+ EBITDA margin and 27% mature ROIC</strong> — combination triple-top-quartile. #J</p>
+<p>❌ <strong>[C] EPS revisions L1M -7% with Buy % = 100%</strong> — analysts trimming numbers but not selling rating. _Either short-term modelling noise OR sell-side preserving relationships rather than acting on conviction. ESA gate to resolve._ #A</p>
+<h2 class="sec" id="a-iii-operating-leverage-fcf-inflection" data-spy>A.III — Operating leverage &amp; FCF inflection<span class="rating A">A</span></h2>
+<p><em>Mature site ROIC rose 200bps to 27% in FY25 (30% excluding workforce-dependent sites). New site cohort outperforming historical maturity curve. ROIC expansion + 20-22 new sites/yr + ARPMM growth at 3-4% + technology-led retention improvement = compounding tailwind on EBITDA.</em> #A</p>
+<p><strong>[A] Mature ROIC trajectory</strong> = top-quartile sustainability of returns; outperforms peer set. _Material confirmation that operational improvements (not just volume) drive returns._ #J</p>
+<p><strong>[A] Cash conversion 68% of EBITDA LNR</strong> — top decile of UK consumer-services. 🚩 RARE for a 75-site rollout business to fund expansion entirely from FCF without dilution. #J</p>
+<h2 class="sec" id="a-iv-bear-case-quantification-esa-short-sellers-cross-read" data-spy>A.IV — Bear-case quantification (ESA Short-Sellers cross-read)<span class="rating C">C</span></h2>
+<p>❌ <strong>[C] No formal short-seller report exists</strong> — bear case is fundamental (PureGym scale gap, ARPMM ceiling), not fraud or misrepresentation. _Yellow credibility per AS bear-case research._ #A</p>
+<p>❌ <strong>[C] PureGym scale gap real and structural</strong> — PureGym ~600 UK clubs vs GYM 245; PureGym targeting 200+ additional sites Europe over 3-4Y. _GYM is structurally subscale vs UK leader._ #J</p>
+<p>❌ <strong>[C] ARPMM deceleration 7% → 4%</strong> is the single most important watchpoint per Triaging research. _If trend continues to 2-3% in FY26, EPS growth normalises sharply from current 60-80% pace. Could explain SS L1M revisions._ #J</p>
+<p><strong>Pre-pandemic guidance miss (2018 EBITDA miss despite revenue +30%)</strong> is the only material delivery imperfection in the L7Y track record. _Otherwise 12/12 site delivery, 16/16 site delivery — operational track record exceptional._ #I</p>
+<h2 class="sec" id="c-ii-1-pillar-1-technical-strength-target-600w" data-spy>C.II.1 — Pillar 1: Technical Strength (TARGET 600w)</h2>
+<p><strong>Rating: A</strong> — Capital 11/11, RS 99th sector percentile. Best-in-trio. #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<ul><li><strong>P1 RA1 — MM99 / Minervini score?</strong> <strong>Capital 11/11 — perfect score.</strong> _Best technical setup of any stock in the watchlist._ #J</li><li>All 11 group tests PASS unconditionally (T1-T11). #I</li><li>Filter qualification: <strong>Capital Stage</strong> (highest classification). _Vs BFIT Late Stage 2; SATS Capital — GYM is the trio's technical leader._ #A</li></ul>
+<p><strong>(b) RS excess return analysis</strong></p>
+<ul><li>🚩 <strong>RARE: RS percentile 75th overall / 99th sector</strong> — strongest stock in the sector by RS. #I</li><li><strong>RS excess +16.89% sector / +22.47% industry / +12.95% market</strong> — durable, multi-window outperformance. #J</li></ul>
+<p><strong>(c) MA structure</strong></p>
+<ul><li><strong>Price 182p vs 200D 155.22p = +17.2% premium.</strong> 200D rising 7 consecutive months. #I</li><li>All MAs in ascending order; price testing 50D from above (+3.56%). _Pullback exceptionally shallow at 1.62% from 52W high._ #A</li></ul>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<ul><li><strong>Late Stage 2 advance, mature.</strong> 18th retest of 50D — high-frequency consolidation = institutional accumulation. #I</li><li>52W range 131.2-186.8p (+42.4% range); current price near top of range = strong trend characteristic. #A</li></ul>
+<p><strong>(e) Volume patterns</strong></p>
+<ul><li><strong>ADV 1M 535k &gt; ADV 3M 510k</strong> — buyer interest expanding. _Confirmatory volume._ #I</li><li>No distribution signature in volume profile. #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>🚩 [A] Technical leader of the trio</strong> — Capital 11/11, RS 99th sector, shallow pullback, expanding volume. _Technical setup is best-in-class. Entry zone 175-186p; trigger above 186.8p on volume._ #J</li></ul>
+<h2 class="sec" id="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm" data-spy>C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 2,100w; 70% effort)</h2>
+<p><strong>Rating: A overall.</strong> _Cleanest IC of trio; three independent fulcrum drivers; track record of execution._ #J</p>
+<p><strong>IC#1 — Required financial outputs</strong></p>
+<ul><li><strong>IC#1 RA1 — Are required outputs evident?</strong> <strong>A — every line item at top decile of HVLP sector.</strong> #J</li><li>🚩 <strong>Adjusted EPS +83% FY25 (after +67% FY24)</strong> — two consecutive years 60-80% from turnaround base = exceptional trajectory. #I</li><li><strong>Mature site ROIC 27%</strong> (30% ex-workforce) = top-decile HVLP. #A</li><li><strong>FCF £38.3m on £244.9m revenue = 15.6% FCF/Revenue</strong> = top-decile UK consumer services. #A</li><li><strong>EBITDA LNR +19% FY25</strong> with margin expansion to 23.2% (+210bps) = high-quality earnings. #J</li></ul>
+<ul><li><strong>IC#1 RA2 — Earnings quality?</strong> <strong>A — adjusted vs statutory gap small (£10.6m PBT adjusted vs ~£8m statutory).</strong> _No major non-cash adjustments; clean earnings._ #J</li></ul>
+<ul><li><strong>IC#1 RA3 — ROIC / ROCE?</strong> <strong>🚩 A — 27% mature ROIC (30% ex-workforce); group ROIC 12-15%.</strong> _Top-decile HVLP._ #J</li></ul>
+<ul><li><strong>IC#1 RA4 — Cash conversion?</strong> <strong>A — 68% of EBITDA LNR converts to FCF.</strong> Above HVLP median 50%. #J</li></ul>
+<p><strong>IC#2 — Simplicity / required guardrails</strong></p>
+<ul><li><strong>IC#2 RA1 — Business comprehensibility?</strong> <strong>A — single-product UK budget gym; no franchise complexity; no multi-country compliance burden.</strong> #J</li><li>🚩 <strong>RARE: zero geography ambiguity</strong> — UK only, GBP only, single regulatory regime. _Unambiguous compared to BFIT (12 countries) or SATS (4)._ #J</li></ul>
+<ul><li><strong>IC#2 RA2 — Required simplicity guardrails?</strong> <strong>A — no IFRS 16 distortion; no convertible bond; no acquisition intangibles; no two-brand structure.</strong> #J</li><li>Reporting clean: revenue, EBITDA LNR, PBT, FCF all reconcile transparently. #I</li></ul>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation)</strong></p>
+<ul><li><strong>IC#3 RA1 — Identifiable fulcrum driver(s)?</strong> <strong>A — three independent fulcrum drivers, all in execution phase.</strong> #J</li><li><strong>FD1: 75-site expansion to ~335 by end-FY28.</strong> £1-1.5m capex/site at 27-30% ROIC = ~£12m incremental EBITDA per cohort. _High-conviction; mechanical from FCF coverage._ #J</li><li><strong>FD2: ARPMM growth from £21.60.</strong> 1% increase = £2.5m incremental annualised revenue at near-100% incremental margin. _Sensitivity is high but pace is decelerating (+7% → +4%) — watchpoint._ #J</li><li><strong>FD3: Multiple re-rating from turnaround discount to compounder premium.</strong> Currently 7.6x EV/EBITDA → potentially 10-12x if delivery sustains 24M = +30-50% multiple expansion. _Optionality, not guarantee._ #J</li></ul>
+<ul><li><strong>IC#3 RA2 — Disciplined-buyer entry test?</strong> <strong>B/A — at 182p, current price above ideal entry but technical signals strong.</strong> Entry 175-186p; ideal trigger above 186.8p on volume. #J</li></ul>
+<ul><li><strong>IC#3 RA3 — Invalidation triggers (preview of D.II.1)?</strong> <strong>B — clean — primary trigger ARPMM &lt;2% sustained 2 quarters.</strong> #J</li></ul>
+<p><strong>BB#1-8 — Investment Case Building Blocks (cohort summary)</strong></p>
+<ul><li><strong>BB#1 Sector strength?</strong> <strong>A — UK budget segment 41% of UK private gym memberships; structural HVLP penetration runway 5-10Y; counter-cyclical resilience confirmed.</strong> #J</li><li><strong>BB#2 Lessons-check (track record)?</strong> <strong>B — closest archetype: turnaround compounder + property-led rollout. Track-record-by-stock data not directly read in this Triaging memo (ESA gap to fill).</strong> #A</li><li><strong>BB#3 Unit economics?</strong> <strong>🚩 A — £1-1.5m capex/site; cash break-even 1,400-1,500 members; 27% mature ROIC.</strong> Top-decile HVLP. #J</li><li><strong>BB#4 Management / governance?</strong> <strong>A — Will Orr "Next Chapter" delivery flawless; Hamish Latchem CPO from Aldi = strong property hire; clean governance.</strong> _12/12 site delivery; 16/16 site delivery; PBT +194% FY25._ #J</li><li><strong>BB#5 Balance sheet / liquidity?</strong> <strong>🚩 A — 1.0x leverage; £102m bank facility extended to June 2028; £10m buyback first in company history.</strong> _Cleanest balance sheet of trio._ #J</li><li><strong>BB#6 Capital allocation?</strong> <strong>A — buyback + FCF-funded expansion + declining leverage. Disciplined.</strong> #J</li><li><strong>BB#7 Plain-sight risks?</strong> <strong>B — PureGym competitive intensity (mild); ARPMM ceiling concern (yellow); UK consumer slowdown exposure.</strong> _Cohort weight moderate; no individual fatal risk._ #J</li><li><strong>BB#8 Optionality?</strong> <strong>B — technology-led retention extension; PT marketplace ancillary scaling; M&amp;A consolidation potential (mid-tier UK distress) — three plausible options.</strong> #J</li></ul>
+<h2 class="sec" id="c-ii-3-pillar-2-fit-for-market-paradigm-target-600w-flat-sha" data-spy>C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 600w; flat shape)</h2>
+<p><strong>Rating: B</strong> — UK domestic single-country = strong me-state fit; budget gym counter-cyclical; mild risk-off-mode mismatch on consumer discretionary axis. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<ul><li><strong>Richard's me-state: risk-off mode (Iran conflict).</strong> Targeting recurring non-cyclical revenues, domestic EU footprint, banks/insurance, healthcare. #I</li><li>_GYM is single-country UK domestic + recurring subscription model + counter-cyclical (cost-of-living drives HVLP substitution). <strong>Better me-state fit than BFIT (multi-country, France-heavy) and SATS (FX exposed).</strong>_ #J</li></ul>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<ul><li><strong>HVLP gym sector +5.8% member growth, +9.1% revenue growth FY25</strong> — top-quartile European consumer category. #I</li><li>UK budget segment 41% of UK private gym memberships — leading position in fastest-growing segment. #A</li><li>🚩 <strong>RARE: HVLP delivered 13 consecutive years of double-digit category growth</strong> (only HVLP, low-cost airlines, discount grocery achieve this in European consumer). #I</li></ul>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<ul><li><strong>GDP exposure: low</strong> — habitual subscription with weak elasticity at £21.60. #A</li><li><strong>FX exposure: nil</strong> — GBP-reporting, GBP-domestic operations 100%. _Most FX-clean of trio._ #I</li><li><strong>Rate exposure: moderate</strong> — £102m bank facility floats with SONIA. _Lower absolute debt than BFIT, lower sensitivity._ #A</li><li><strong>Tariff / trade exposure: nil.</strong> #I</li></ul>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<ul><li>_UK domestic single-stock; minimal correlation to existing pipeline (DCC GB-domestic, FLTR GB-domestic — different sectors). ESA gate to confirm._ #T</li></ul>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<ul><li><strong>Market cap ~£300-330m — small mid-cap, slightly below Richard's $5-50bn sweet spot but acceptable.</strong> #I</li><li><strong>ADV 535k shares × 182p ≈ £1m daily — adequate for 1-2% portfolio sizing with patience.</strong> #A</li><li>❌ <strong>[C] Smallest market cap of the trio</strong> — liquidity less robust than BFIT (€2.4bn) or SATS (NOK 4bn). _Sizing constraint at higher portfolio weights._ #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>[B] Best paradigm fit of the trio for risk-off mode</strong> — UK domestic, GBP, low macro exposure, high recurring revenue. _Mild liquidity constraint at higher sizing; overall paradigm fit is B+._ #J</li></ul>
+<h2 class="sec" id="c-ii-4-pillar-5-ss-earnings-momentum-target-300w-5-3-matrix" data-spy>C.II.4 — Pillar 5: SS Earnings Momentum</h2>
+<p><strong>Rating: C</strong> — FactSet EPS revisions L1M -7% / L3M -5% / L6M -6%; EBITDA L1M -5% / L3M -8% / L6M -5%. Momentum score 1/15 — weakest of trio. The puzzle: how is the operational momentum (PBT +194%, EBITDA +19%, EPS +83%) so disconnected from SS revisions? #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM data — pulled 03-May-26)</strong></p>
+<ul><li>❌ <strong>EPS revisions: L1M -7% / L3M -5% / L6M -6% / L12M 0%</strong> = persistent negative bias across all short-term windows. _Materially worse than BFIT (L1M -6% but L6M +14%) or SATS (L1M +1%, L6M +4%)._ #A</li><li>❌ <strong>EBITDA revisions: L1M -5% / L3M -8% / L6M -5% / L12M -5%</strong> = negative across every window. _Single most disconfirming data point in the case._ #J</li><li><strong>Sales revisions: L1M +1% / L3M 0% / L6M +2% / L12M +2%</strong> — top-line stable. _Revisions are at the margin / unit-economics line, not the demand line._ #A</li><li><strong>TP revisions: L1M 0% / L3M +7% / L6M +21% / L12M unspecified.</strong> _TPs were raised heavily 6M ago; pace flatlined recently._ #A</li></ul>
+<p><strong>(b) Estimate dispersion</strong></p>
+<ul><li><strong>Buy % = 🚩 100%</strong> — unanimous buy. _Conviction is high; numbers being trimmed at the margin._ #I</li></ul>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<ul><li><strong>11 buy revisions L6M; 0 in L1M</strong> — analysts not actively re-rating; just trimming numbers. _Suggests cosmetic / modelling adjustments rather than thesis change._ #A</li></ul>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<ul><li><strong>AS Earnings-L3Y report: "flawless guidance delivery."</strong> Operational evidence is unambiguously strong (PBT +194%; 12/12 site delivery; 16/16 site delivery). _<strong>Material disconnect between SS revisions and operational performance — this is the case's most interesting question.</strong>_ #J</li></ul>
+<p><strong>(e) Momentum scoring (5×3 matrix; FactSet data)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>❌ -7%</td><td>❌ -5%</td><td>+1%</td></tr><tr><td>L3M</td><td>❌ -5%</td><td>❌ -8%</td><td>0%</td></tr><tr><td>L6M</td><td>❌ -6%</td><td>❌ -5%</td><td>+2%</td></tr><tr><td>L12M</td><td>0%</td><td>❌ -5%</td><td>+2%</td></tr></tbody></table>
+<p><strong>Momentum composite score: 1/15</strong> (FactSet computed) — _weakest of the trio (BFIT 7, SATS 13). The earnings momentum is the friction in this case._ #J</p>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li>❌ <strong>[C] Earnings momentum is the only material weakness in the case.</strong> SS analysts maintain unanimous buy ratings (100%) while trimming numbers across every window. _Three plausible explanations: (1) analysts updating for buyback-driven share count reduction (mechanical EPS reduction not thesis-related); (2) analysts modelling more conservative ARPMM after 7%→4% deceleration; (3) analysts seeing something in the channel (PureGym pricing, UK consumer) the operational data hasn't caught yet. <strong>Resolution at ESA via channel checks + analyst conversations.</strong>_ #J</li><li>🚩 <strong>RARE: 100% buy + persistent negative revisions</strong> — specific, unusual pattern. _Most likely interpretation: cosmetic modelling friction; least likely: thesis weakness._ #A</li></ul>
+<h2 class="sec" id="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-flat-shap" data-spy>C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w; flat shape)</h2>
+<p><strong>Rating: B</strong> — 3.74x forward EV/EBITDA = top-decile cheap on absolute metric; 33x forward P/E reflects depressed earnings base from turnaround; +33% TP upside. _Cheapness is real but P/E noise distorts._ #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<ul><li><strong>Forward EV/EBITDA 3.74x</strong> (EV £397m / FY consensus EBITDA £106m). #I</li><li><strong>NTM P/E 33x</strong> (£1.82 / consensus EPS £0.055) — _appears expensive but EPS base is post-turnaround and forward growth is structural. P/E is the wrong metric here._ #A</li><li><strong>EV/Sales 1.33x</strong> vs HVLP median 2.0-2.5x — top-quartile cheap. #I</li></ul>
+<p><strong>(b) Percentile positioning</strong></p>
+<ul><li><strong>Own history: ~40th percentile</strong> (post-turnaround derate from 2022 peak). #I</li><li><strong>Peer percentile: top decile cheap on EV/EBITDA absolute basis.</strong> _Cheapest of trio._ #J</li></ul>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<ul><li><strong>TP (FactSet consensus): £2.42 = +33% upside</strong> to current ~£1.82. _Highest TP upside of trio (BFIT +27%, SATS -2.5%)._ #I</li><li><strong>Bull case (75-site rollout delivers + ARPMM holds + multiple re-rates):</strong> EBITDA reaches £75m+ FY28 + 9-10x multiple = SP £2.50-3.00 (+38-65%). #J</li><li><strong>Base case (75-site rollout delivers + ARPMM 2-3% growth):</strong> EBITDA £65-70m FY28 + 7-8x multiple = SP £2.20-2.40 (+21-32%). #J</li><li><strong>Bear case (PureGym co-location intensifies + ARPMM stagnates):</strong> EBITDA flatlines £55-58m + 5-6x multiple = SP £1.30-1.50 (-18% to -28%). #J</li></ul>
+<p><strong>(d) Scenario anchoring</strong></p>
+<ul><li><strong>R/R: base +25% / bull +50% / bear -23%. Probability-weighted (50% base / 30% bull / 20% bear) = +22% expected return</strong> — clears the Triaging hurdle for ESA progression with margin to spare. _Top R/R of the trio._ #J</li></ul>
+<p><strong>(e) Synthesis</strong></p>
+<ul><li><strong>[B] Valuation is solid but not the strongest pillar.</strong> EV/EBITDA top-decile cheap; P/E noisy due to turnaround base; TP upside top of trio at +33%. _Cheapness real; the PROGRESS rationale rests more on quality (P3, P4) than valuation (P6)._ #J</li></ul>
+<h2 class="sec" id="d-i-risk-decomposition" data-spy>D.I — Risk decomposition</h2>
+<ul><li><strong>Top three case-killers (descending probability × impact):</strong> 1. <strong>ARPMM growth decelerates to &lt;2% in FY26</strong> — single most financially sensitive variable. Probability ~30%; impact -15-20% on share price. #J 2. <strong>PureGym intensifies UK price competition</strong> — share-loss scenario; could compress EBITDA margin 200bps. Probability ~25%; impact -10-15%. #J 3. <strong>75-site rollout misses delivery</strong> — delivery &lt;60 sites on a 75 target. Probability ~15%; impact -10%. #J</li></ul>
+<ul><li><strong>Rating breaker analysis:</strong> P3 and P4 ratings remain A even with bear case partially materialising. The thesis breaks only if BOTH ARPMM stagnates AND PureGym co-location intensifies. _The bear case requires two independent bad outcomes._ #J</li></ul>
+<h2 class="sec" id="d-ii-1-10-invalidation-achs-cohort-r4-exempt" data-spy>D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</h2>
+<p><em>Standing 10 ACHs per <code>feedback_live_case_invalidations.md</code>.</em> #J</p>
+<table><thead><tr><th>#</th><th>ACH</th><th>GYM-GB Triaging status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>_CLEAN — every set of results since Orr's appointment beat. FY26 guide top of consensus._</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>_N/A — GBP-domestic._</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>_Iran conflict consumer-discretionary spillover = mild monitor._</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>_N/A — atomistic membership base._</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>_CLEAN — 1.0x leverage vs 3.0x covenant; £102m facility to 2028._</td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>_Will Orr stable; Hamish Latchem just hired._</td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>_PureGym = mild monitor (structural not acute)._</td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>_UK regulatory environment stable._</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>_CLEAN — buyback + FCF-funded expansion + 30% ROIC hurdle._</td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>_ARPMM deceleration = the watchpoint; not yet a break._</td></tr></tbody></table>
+<p>🚩 <strong>RARE: GYM trips ZERO ACHs at Triaging.</strong> _Of three names + ten checks each, GYM is the only one to pass all 10. Outlier-clean stress-test result._ #J</p>
+<h2 class="sec" id="d-ii-2-confidence-gaps" data-spy>D.II.2 — Confidence / gaps</h2>
+<ul><li><strong>High confidence:</strong> sector tailwind, unit economics at maturity, 75-site rollout mechanics, balance sheet strength, FCF coverage. #J</li><li><strong>Medium confidence:</strong> ARPMM trajectory; PureGym competitive intensity; multiple re-rating timing. #J</li><li>❌ <strong>Low confidence / explicit gaps:</strong> SS revisions vs operational divergence reason; channel-check intelligence on UK gym pricing; cohort performance of 2025 new sites at 12-month mark. <strong>All three are ESA workstreams.</strong> #OQ</li></ul>
+<h2 class="sec" id="d-ii-3-negative-should-be-expected-developments" data-spy>D.II.3 — Negative-should-be-expected developments</h2>
+<ul><li><strong>NSE-1: H1-26 ARPMM growth slows to 2-3%.</strong> Comp base from 2024-25 is high. Don't extrapolate to 2-3% as new run-rate without channel evidence. #J</li><li><strong>NSE-2: PureGym IPO discussion in 2026.</strong> When PureGym files, GYM will trade noisily on read-across. _Buy weakness if thesis intact._ #J</li><li><strong>NSE-3: Quarter where new site openings cluster early (e.g. Dec-25 had 7 of 16).</strong> Resulting cohort EBITDA contribution lumpy. #J</li></ul>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>🚩 A</td><td>High</td><td>Capital 11/11; RS 99th sector; 1.62% from 52W high</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B</td><td>Medium-High</td><td>UK domestic + counter-cyclical + low FX/macro exposure</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>A</td><td>High</td><td>IC#1 outputs A; IC#2 simplicity A; IC#3 setups A</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B/A</td><td>Medium-High</td><td>BB#1/3/4/5/6/8 strong; BB#2 untested; BB#7 mild</td></tr><tr><td>P5 SS Earnings Momentum</td><td>❌ C</td><td>Medium</td><td>EPS L1M -7%; momentum 1/15; resolution at ESA</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>B</td><td>High</td><td>3.74x EV/EBITDA top-decile; +33% TP upside</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td><td><strong>Medium-High</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net: GYM's case-level is the strongest of the trio on quality and balance sheet, but P5 momentum is the only material friction. Cleanest progression from Triaging → ESA of the three names.</em> #J</p>
+<h2 class="sec" id="e-i-summary-judgement" data-spy>E.I — Summary judgement<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><strong>PROGRESS to ESA — CLEAN.</strong> No conditional gates required for progression — the operational evidence (PBT +194%, ROIC 27%, 1.0x leverage, FCF £38.3m, technical Capital 11/11) is unambiguously top-quartile. ESA work is needed to test whether SS revisions L1M -7% reflects operational reality or modelling noise. #J</p>
+<h2 class="sec" id="e-ii-next-stage-actions-esa-workplan" data-spy>E.II — Next-stage actions (ESA workplan)</h2>
+<p>1. <strong>SS revisions vs operational divergence resolution</strong> — interview 2-3 top-rated GYM analysts to understand revision drivers. Establish whether revisions reflect (a) buyback-driven EPS mechanical reduction, (b) ARPMM modelling conservatism, (c) channel intelligence on UK gym pricing. _Owner: APM ESA Phase 1 + RESEARCHER expert calls._ #T 2. <strong>PureGym channel check</strong> — interview 3-5 PureGym franchisees / former employees on UK pricing strategy + co-location intensity. _Owner: RESEARCHER expert calls._ #T 3. <strong>ARPMM trajectory disambiguation</strong> — analyse FY26 H1 ARPMM print + run UK consumer panel checks on price elasticity at £21-25. _Owner: RESEARCHER._ #T 4. <strong>75-site rollout pipeline depth analysis</strong> — request property pipeline disclosure from Hamish Latchem; verify 36+ months of site visibility. _Owner: COS to schedule IR call; APM attends._ #T 5. <strong>Track-record-by-stock cross-check</strong> — pull turnaround-compounder + property-rollout archetypes; compare delivery hit rates. _Owner: APM ESA Phase 1 read._ #T 6. <strong>PureGym private-comp deep-dive (shared with BFIT ESA)</strong> — model 7.5x leverage + global expansion; what's GYM's competitive response if PureGym IPOs. _Owner: RESEARCHER ESA Q10b — shared workstream._ #T</p>
+<h2 class="sec" id="e-iii-n-a-recommendation-is-progress-not-park" data-spy>E.III — N/A (recommendation is PROGRESS not PARK)</h2>
+<h2 class="sec" id="f-i-audit-trail" data-spy>F.I — Audit trail</h2>
+<ul><li><strong>Phase 0 pre-flight:</strong> ✓ All 11 query files present (IG/02-CF, 03-TM; Triaging/04-ET, 05-ED, 07-KD; ESA/08-BM-Primer, 09-Earnings-L3Y, 10-Short-Sellers, 11-VCMap, 12-Value-Chain, 13-Guidance) + GYM-TRIO sector synthesis.</li><li><strong>Phase 1 read time:</strong> 03-May-26.</li><li><strong>Phase 2 authoring time:</strong> 03-May-26.</li></ul>
+<h2 class="sec" id="f-ii-coverage-gap-notes" data-spy>F.II — Coverage gap notes<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<ul><li><strong>ESA-stage research consulted under Triaging+ scope</strong> per Richard's confirmation 03-May-26. Triaging decision logic preserved (PROGRESS / PARK / KILL into ESA).</li><li><strong>Master Dashboard data:</strong> factset-ssem.json read directly (P5 quantification); factset-valuation.json does NOT contain GYM-GB; filter-results.json corrupted (silent truncation); valuation cells computed from SSEM raw + reported balance sheet.</li></ul>
+<h2 class="sec" id="f-iii-cross-references" data-spy>F.III — Cross-references</h2>
+<ul><li>Comp-table: <code>Files/GYM-TRIO/synthesis/comp-table-skeleton-v1.md</code> (cited; v2 update pending after all three memos)</li><li>ESA Short-Sellers: <code>Files/GYM-GB/ESA/10-Short-Sellers/merged.md</code> (bear-case anchor)</li><li>10 INVALIDATION ACHs: <code>feedback_live_case_invalidations.md</code> + <code>decisions.md</code> "10 INVALIDATION ACHs"</li></ul>
+<h2 class="sec" id="qc-footer" data-spy>QC FOOTER<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~90% of metric bullets with comparison ✓ Principle #2 (A-F grading):              36/36 gradeable findings graded ✓ Principle #3 (invert markers ❌):         8 D/F findings (P5 EPS L1M; P5 EBITDA L1M; P5 EBITDA L3M; P5 EBITDA L6M; P5 EBITDA L12M; P5 EPS L3M; P5 EPS L6M; smallest market cap liquidity) Principle #4 (🚩 RARE outlier markers):  7 RARE markers (Buy% 100%; 1.0x lev + 23% margin + 27% ROIC combination; ZERO ACH trips; UK domestic single-country geography clean; RS 99th sector percentile; 13Y category growth; persistent negative revisions WITH 100% buy) QC PILLAR DEFAULT: A / B / A / B-A / C / B QC CASE-LEVEL: B/A — PROGRESS to ESA (CLEAN — no conditional gates) SCOPE NOTE: Triaging+ — ESA-stage research consulted; Triaging decision logic SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: factset-ssem.json (03-May-26 build); GYM-GB/* research (02-May-26); GYM-TRIO comp-table-skeleton-v1 DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+<div class="memo-note">[W] GYM-GB Triaging A&amp;J memo v1 authored 03-May-26 by Watson (APM role). Source corpus: 77,342 words GYM-GB research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~5,400 words.</div>
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited near-verbatim from the old file, EXTENDED per D-MV-02:
+   - the scroll-spy gatherAnchors() now queries document-flow headings
+     ([data-spy][id]) instead of the old file's table-row selectors
+   - everything else (click-to-scroll, auto-expand, 5 toggle handlers,
+     sticky-stack CSS var) is the old logic, unchanged.
+   ============================================================================ */
+(function() {
+
+  /* sticky stack height = .main-header — subtract from scroll target so a
+     clicked heading lands JUST BELOW the sticky header, not behind it */
+  function getStickyStackHeight() {
+    var mh = document.querySelector('.main-header');
+    return mh ? mh.getBoundingClientRect().height : 0;
+  }
+
+  /* expose .main-header height to CSS so scroll-margin-top + sticky compose */
+  function setMainHeaderCssVar() {
+    var mh = document.querySelector('.main-header');
+    if (!mh) return;
+    document.documentElement.style.setProperty(
+      '--main-header-h', Math.ceil(mh.getBoundingClientRect().height) + 'px');
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle', 'show-pills');
+    bindToggle('element-details-toggle', 'element-details');
+    bindToggle('ras-on-toggle', 'ras-always-on');
+    bindToggle('cqs-on-toggle', 'cqs-always-on');
+    bindToggle('audit-toggle', 'show-audit');
+  }
+
+  /* Element-details mode — reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) { n.classList.remove('force-show'); });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element')) elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector('.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) { ra.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) { cl.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) { cq.classList.add('force-show'); });
+    }
+  }
+
+  /* --- click-to-scroll — inherited; clicking an RA also toggles its CQ list */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra')) item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var rect = target.getBoundingClientRect();
+        var containerRect = mainPane.getBoundingClientRect();
+        var offset = rect.top - containerRect.top + mainPane.scrollTop
+                     - getStickyStackHeight() - 8;
+        // CSS scroll-behavior:smooth on .main-pane animates this; the JS
+        // scrollTo {behavior:'smooth'} option is unreliable on overflow containers
+        mainPane.scrollTop = offset;
+      });
+    });
+  }
+
+  /* --- scroll-spy — inherited logic, EXTENDED to query document-flow headings
+     The old file queried table rows (tr.pillar-banner[id] etc). The new body
+     is document-flow, so every spy-tracked heading carries [data-spy][id]. */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect = mainPane.getBoundingClientRect();
+      var triggerY = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY) picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused'); });
+      var navItem = document.querySelector('.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand the focused branch — inherited behaviour */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded'); });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded'); });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list')) raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list')) parent.classList.add('expanded');
+        navItem.classList.add('expanded');
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else if (navItem.classList.contains('nav-cq')) {
+        var cqList = navItem.parentElement;
+        if (cqList && cqList.classList.contains('nav-cq-list')) {
+          var prevRa = cqList.previousElementSibling;
+          if (prevRa && prevRa.classList.contains('nav-ra')) {
+            prevRa.classList.add('expanded');
+            var raListAnc = prevRa.parentElement;
+            if (raListAnc && raListAnc.classList.contains('nav-ra-list'))
+              raListAnc.classList.add('expanded');
+          }
+        }
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else {
+        navItem.scrollIntoView({ block: 'nearest' });
+      }
+
+      if (document.body.classList.contains('element-details')) applyElementDetails();
+
+      /* A4 — update breadcrumb strip */
+      updateBreadcrumb(navItem);
+    }
+
+    var rafQueued = false;
+    mainPane.addEventListener('scroll', function() {
+      if (rafQueued) return;
+      rafQueued = true;
+      requestAnimationFrame(function() { rafQueued = false; updateFocus(); });
+    }, { passive: true });
+    setTimeout(updateFocus, 100);
+  }
+
+  /* A4 — breadcrumb: walk up the nav tree to build the trail */
+  function updateBreadcrumb(navItem) {
+    var bc = document.getElementById('breadcrumb');
+    if (!bc || !navItem) return;
+    var tier = null;
+    var classes = navItem.className ? navItem.className.split(' ') : [];
+    for (var ci = 0; ci < classes.length; ci++) {
+      if (classes[ci].indexOf('nav-') === 0) { tier = classes[ci]; break; }
+    }
+    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group','nav-element','nav-ra','nav-cq'];
+    var tierRank = {};
+    tierOrder.forEach(function(t,i){ tierRank[t]=i; });
+    var myRank = tier ? (tierRank[tier]||0) : 0;
+    // collect ancestors: scan all nav-items for those whose rank < mine and whose
+    // anchor precedes ours in document order
+    var allItems = Array.prototype.slice.call(document.querySelectorAll('.nav-item'));
+    var myIdx = allItems.indexOf(navItem);
+    var ancestors = [];
+    for (var ai = myIdx - 1; ai >= 0; ai--) {
+      var it = allItems[ai];
+      var itTier = null;
+      var itCls = it.className ? it.className.split(' ') : [];
+      for (var ci2 = 0; ci2 < itCls.length; ci2++) {
+        if (itCls[ci2].indexOf('nav-') === 0) { itTier = itCls[ci2]; break; }
+      }
+      if (itTier && (tierRank[itTier]||0) < myRank) {
+        var alreadyHave = ancestors.some(function(a){ return (tierRank[a.tier]||0) <= (tierRank[itTier]||0); });
+        if (!alreadyHave) ancestors.unshift({tier:itTier, text:it.textContent.trim().replace(/\s+/g,' ').substring(0,40)});
+        myRank = tierRank[itTier]||0;
+        if (myRank === 0) break;
+      }
+    }
+    // build trail: ancestors + current
+    var trailItems = ancestors.concat([{tier:tier, text:navItem.textContent.trim().replace(/\s+/g,' ').substring(0,50), leaf:true}]);
+    // strip pill text artefacts (A-F single chars at end)
+    trailItems = trailItems.map(function(item) {
+      var t = item.text.replace(/\s+[ABCDF]\s*$/, '').trim();
+      return {tier:item.tier, text:t, leaf:item.leaf||false};
+    });
+    var html2 = trailItems.map(function(item, idx) {
+      var cls = 'bc-item' + (item.leaf ? ' bc-leaf' : '');
+      var sep = idx > 0 ? '<span class="bc-sep">›</span>' : '';
+      return sep + '<span class="'+cls+'">'+item.text.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span>';
+    }).join('');
+    bc.innerHTML = html2 || '<span class="bc-item">—</span>';
+  }
+
+  /* A5 — grade fallback: for nav pills showing NR on first load, scan body content */
+
+  /* A6 — nav search: filter nav-items by text; show ancestors of matches */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group',
+                     'nav-element','nav-ra','nav-cq'];
+    var tierRankMap = {};
+    tierOrder.forEach(function(t,i){ tierRankMap[t]=i; });
+    function itemRank(el) {
+      var cls = el.className ? el.className.split(' ') : [];
+      for (var i=0; i<cls.length; i++) {
+        if (tierRankMap[cls[i]] !== undefined) return tierRankMap[cls[i]];
+      }
+      return 99;
+    }
+    input.addEventListener('input', function() {
+      var q = this.value.trim().toLowerCase();
+      var items = Array.prototype.slice.call(
+        document.querySelectorAll('.nav-item'));
+      if (!q) {
+        items.forEach(function(it){ it.style.display = ''; }); return;
+      }
+      var show = new Set();
+      items.forEach(function(it, idx) {
+        var txt = it.textContent.replace(/\b[A-F]\b/g, '').toLowerCase().trim();
+        if (txt.indexOf(q) === -1) return;
+        show.add(idx);
+        // propagate up: show ancestor tiers
+        var myRank = itemRank(it);
+        var needed = myRank - 1;
+        for (var j = idx - 1; j >= 0 && needed >= 0; j--) {
+          var jRank = itemRank(items[j]);
+          if (jRank <= needed) { show.add(j); needed = jRank - 1; }
+        }
+      });
+      items.forEach(function(it, idx){
+        it.style.display = show.has(idx) ? '' : 'none';
+      });
+    });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = '';
+        this.dispatchEvent(new Event('input'));
+        this.blur();
+      }
+    });
+  }
+
+  function applyGradeFallback() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      var pill = item.querySelector('.nav-rating-pill');
+      if (!pill || !pill.classList.contains('NR')) return;
+      var anchor = item.getAttribute('data-anchor');
+      if (!anchor) return;
+      var bodyEl = document.getElementById(anchor);
+      if (!bodyEl) return;
+      // walk sibling body content until next same-or-higher heading
+      var tagRank = {H2:0,H3:1,H4:2,H5:3,H6:4,DIV:5,P:6,UL:6};
+      var bodyTier = bodyEl.tagName;
+      var node = bodyEl.nextSibling;
+      var text = '';
+      var limit = 0;
+      while (node && limit < 30) {
+        if (node.nodeType === 1) {
+          var t = node.tagName;
+          if ((tagRank[t]||10) < (tagRank[bodyTier]||10)) break; // new heading above us = stop
+          text += (node.textContent || '');
+        }
+        node = node.nextSibling;
+        limit++;
+      }
+      var m = text.match(/\[([ABCDF])\]/);
+      if (m) {
+        var grade = m[1];
+        pill.className = 'nav-rating-pill ' + grade;
+        pill.textContent = grade;
+      }
+    });
+  }
+
+  function init() {
+    setMainHeaderCssVar();
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    applyGradeFallback();
+    setupSearch();  /* A6 */
+    /* A4c: init breadcrumb to first nav item so it never shows bare dash */
+    setTimeout(function() {
+      var first = document.querySelector('.nav-item');
+      if (first) updateBreadcrumb(first);
+    }, 200);
+    window.addEventListener('resize', setMainHeaderCssVar);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body></html>

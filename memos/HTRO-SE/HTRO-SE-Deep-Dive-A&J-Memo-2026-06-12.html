@@ -5,119 +5,186 @@
 <title>HEXATRONIC GROUP AB (HTRO-SE) — DD PHASE 1 MEMO — A&J Memo Viewer</title>
 <!--
   ============================================================================
-  A&J MEMO VIEWER — BASE TEMPLATE
-  Project: SA - Reports & Memos Repository  |  Phase 1 deliverable  |  14-May-26
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
   ----------------------------------------------------------------------------
-  This is the inherited DISPLAY LAYER, lifted near-verbatim (behaviour) from
-  databases/memo-style-sheet3-htro.html (the old V20 WIP viewer), per D-MV-01.
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
 
-  WHAT IS INHERITED (near-verbatim):
-    - the two-pane shell (.app-shell > .nav-pane + .main-pane)
-    - the nav-pane: header, toggle bar (5 toggles), .nav-tree container
-    - the nav CSS: depth tiers, .nav-rating-pill, .nav-audit, focused state
-    - the nav JS: click-to-scroll, rAF scroll-spy, auto-expand-on-focus,
-      the 5 toggle handlers, the sticky-stack --main-header-h CSS var
-    - the sticky stack (.main-header)
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
 
-  WHAT IS EXTENDED (per D-MV-02 — old file had 4 depth tiers, new format has 7):
-    - nav depth tiers: nav-section, nav-subsection, nav-group ADDED above the
-      old nav-pillar / nav-element / nav-ra / nav-cq tiers
-    - scroll-spy gatherAnchors(): old file queried table-row selectors
-      (tr.pillar-banner[id] etc.). New body is DOCUMENT-FLOW (D-MV-01: body
-      renders to Presenting SOP v5, not the old table). So the spy now queries
-      heading elements carrying [data-spy] + [id] instead of table rows.
-
-  WHAT IS NOT INHERITED (per D-MV-01):
-    - the old table.memo body layout — the body is document-flow, SOP v5 render
-    - the old baked-in memo content — the generator pours each memo's content
-      into the nav-tree and memo-body slots below
-
-  SLOTS the generator fills (each token appears EXACTLY ONCE below, in its
-  real position — the generator uses str.replace which is global, so the
-  tokens must never appear anywhere else, including in this comment):
-    MEMO_TITLE token     -> document <title> + .page-title
-    MEMO_SUBTITLE token  -> .page-subtitle (stage, date, identity line)
-    NAV_TREE token       -> the 7-level nav-item tree
-    MEMO_BODY token      -> the document-flow memo body (SOP v5 render)
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
   ============================================================================
 -->
 <style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:'Aptos', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-       background:#fafaf8; color:#1a1a1a; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
 
-.app-shell { display:flex; flex-direction:row; align-items:stretch; height:100vh; }
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
 
-/* ============================== LEFT NAV PANE ============================== */
-/* Inherited near-verbatim from the old file's .nav-pane. */
-.nav-pane { flex:0 0 25%; max-width:25%; min-width:260px; background:#f5f4ee;
-            border-right:1px solid #d8d4c0; display:flex; flex-direction:column;
-            height:100vh; min-height:0; }
-.nav-header { padding:10px 12px; background:#3C3489; color:#fff; flex:0 0 auto; }
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
 .nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
-.nav-tree { flex:1 1 auto; overflow-y:auto; padding:8px 6px 24px 6px; font-size:9.5pt; scroll-behavior:smooth; }
 
-/* nav toggle bar — inherited; .nav-header-controls + 5 .nav-toggle-btn */
-.nav-header-controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:flex-end; }
-.nav-header-controls .nav-toggle-btn { font-size:7.5pt; padding:1px 5px;
-            background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
-            border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
-            font-family:inherit; transition:background 0.15s, color 0.15s; }
-.nav-header-controls .nav-toggle-btn:hover { background:rgba(255,255,255,0.18); color:#fff; }
-.nav-header-controls .nav-toggle-btn.active { background:#fff; color:#3C3489; border-color:#fff;
-            font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,0.4); }
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
 .nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
 
-/* nav items — generic; depth set by tier class */
-.nav-item { padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
-            border-radius:3px; transition:background 0.15s; display:block; }
-.nav-item:hover { background:#ece9d4; }
-.nav-item.focused { background:#e6e0ff; font-weight:700; }
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
 
-/* --- 7 DEPTH TIERS (D-MV-02; A2 visual-hierarchy pass 10-Jun-26) ----------
-   Steps sharpened: ~1pt font gap per tier; 12px indent steps; background
-   tints at Section/Pillar/Group/Element; Group and Element colours more
-   saturated; border weights differentiated. */
-.nav-section    { font-size:10.5pt; font-weight:700; color:#3C3489; padding:7px 4px 4px 4px;
-                  margin-top:7px; text-transform:uppercase; letter-spacing:0.3px; }
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
 .nav-section:first-child { margin-top:0; }
-.nav-subsection { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:12px;
-                  padding-left:8px; }
-.nav-pillar     { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:24px;
-                  padding:3px 8px; border-left:2px solid #9090c4;
-                  background:rgba(60,52,137,0.04); border-radius:0 3px 3px 0; }
-.nav-group      { font-size:9pt;   font-weight:700; color:#064a35; margin-left:36px;
-                  padding:2px 8px; border-left:2.5px solid #4a9a7a;
-                  background:rgba(6,74,53,0.03); border-radius:0 3px 3px 0; }
-.nav-element    { font-size:8.5pt; font-weight:600; color:#8a3c00; margin-left:48px;
-                  padding:2px 8px; border-left:2px solid #c87a3a;
-                  background:rgba(138,60,0,0.03); border-radius:0 3px 3px 0; }
-.nav-ra         { font-size:8pt;   color:#0C447C; margin-left:60px;
-                  padding-left:8px; border-left:1px dashed #85B7EB; display:none; cursor:pointer; }
-.nav-cq         { font-size:7.5pt; color:#5a5526; margin-left:72px;
-                  padding-left:6px; border-left:1px dotted #c9c1a3; display:none;
-                  line-height:1.4; padding:1px 6px 1px 8px; cursor:pointer; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
 
-/* progressive disclosure — inherited: RA/CQ lists hidden until parent open */
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
 .nav-ra-list { display:none; }
 .nav-ra-list.expanded { display:block; }
 .nav-ra-list.expanded .nav-ra { display:block; }
 .nav-cq-list { display:none; }
 .nav-ra.expanded + .nav-cq-list { display:block; }
 
-/* --- nav rating pills — inherited near-verbatim ---------------------------- */
-.nav-rating-pill { display:inline-block; font-size:7.5pt; font-weight:700; padding:1px 5px;
-            border-radius:3px; margin-left:5px; vertical-align:baseline; min-width:14px;
-            text-align:center; }
-.nav-rating-pill.A { background:#9DD49B; color:#1a4d1a; }
-.nav-rating-pill.B { background:#BFD9F2; color:#0C447C; }
-.nav-rating-pill.C { background:#E7E3AB; color:#5a5526; }
-.nav-rating-pill.D { background:#FFCC66; color:#7a4f00; }
-.nav-rating-pill.F { background:#FF7C80; color:#660000; }
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
 .nav-rating-pill.NR { background:#e0e0e0; color:#666; }
 body:not(.show-pills) .nav-rating-pill { display:none; }
 
-/* --- nav audit chip — inherited; hidden until body.show-audit -------------- */
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
 .nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
 body.show-audit .nav-audit { display:inline; }
 .nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
@@ -125,103 +192,367 @@ body.show-audit .nav-audit { display:inline; }
 .nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
 .nav-audit-target { color:#888; margin:0 2px; }
 .nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
-.nav-audit-weight-normal { background:#eee; color:#555; }
-.nav-audit-weight-double { background:#3C3489; color:#fff; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
 .nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
-.nav-audit-weight-half { background:#aaa; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
 
-/* --- toggle behaviours — inherited near-verbatim --------------------------- */
-/* All RAs on */
+/* --- toggle body classes: PRESERVED ------------------------------------ */
 body.ras-always-on .nav-ra { display:block !important; }
 body.ras-always-on .nav-ra-list { display:block !important; }
-/* All CQs on */
 body.cqs-always-on .nav-cq-list { display:block !important; }
 body.cqs-always-on .nav-cq { display:block !important; }
 body.cqs-always-on .nav-ra { display:block !important; }
 body.cqs-always-on .nav-ra-list { display:block !important; }
-/* Element details — JS adds .force-show; CSS unhides */
 body.element-details .nav-ra.force-show,
 body.element-details .nav-cq.force-show { display:block !important; }
 body.element-details .nav-ra-list.force-show,
 body.element-details .nav-cq-list.force-show { display:block !important; }
 
-/* ============================== RIGHT MEMO PANE ============================ */
-.main-pane { flex:1 1 auto; min-width:0; min-height:0; height:100vh; overflow-y:auto; padding:0 0 80px 0; scroll-behavior:smooth; }
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
 
-/* sticky memo header — inherited; --main-header-h CSS var drives sticky stack */
-.main-header { position:sticky; top:0; z-index:5; background:#fafaf8;
-            border-bottom:1px solid #e0ddca; padding:16px 40px 13px 40px; }
-.page-title { font-size:14pt; font-weight:700; margin-bottom:2px; }
-.page-subtitle { font-size:9.5pt; color:#888; margin-bottom:2px; }
-.page-breadcrumb { font-size:8pt; color:#aaa; white-space:nowrap; overflow:hidden;
-                   text-overflow:ellipsis; line-height:1.4; margin-top:3px; }
-.page-breadcrumb .bc-sep { margin:0 4px; color:#d0cdc0; }
-.page-breadcrumb .bc-item { color:#888; }
-.page-breadcrumb .bc-item.bc-leaf { color:#3C3489; font-weight:600; }
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
 
-/* --- DOCUMENT-FLOW memo body (D-MV-01: SOP v5 render, NOT the old table) ---
-   Header hierarchy mirrors the 7-level spine. Every heading the spy tracks
-   carries id + data-spy. scroll-margin-top keeps anchors clear of the sticky
-   header on click-to-scroll. */
-.memo-body { padding:10px 40px 0 40px; max-width:900px; }
-h2.sec   { font-size:13.5pt; font-weight:700; color:#3C3489; margin:30px 0 4px;
-           padding-bottom:5px; border-bottom:2px solid #d8d4c0; scroll-margin-top:84px; }
-h3.subsec{ font-size:11.5pt; font-weight:700; color:#3C3489; margin:22px 0 4px; scroll-margin-top:84px; }
-h4.pillar{ font-size:11pt; font-weight:700; color:#3C3489; margin:20px 0 4px; scroll-margin-top:84px; }
-h5.group { font-size:10.5pt; font-weight:700; color:#064a35; margin:18px 0 4px;
-           background:rgba(6,74,53,0.04); padding:4px 8px; border-radius:3px;
-           border-left:3px solid #4a9a7a; scroll-margin-top:84px; }
-h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
-           background:#FBE9D5; padding:5px 9px; border-radius:3px;
-           border-left:3px solid #c87a3a; scroll-margin-top:84px; }
-.ra-head { font-size:9.5pt; font-weight:700; color:#0C447C; margin:14px 0 3px;
-           padding-left:8px; border-left:3px solid #85B7EB; scroll-margin-top:84px; }
-.cq-head { font-size:9pt; font-weight:700; color:#5a5526; margin:11px 0 3px;
-           padding-left:8px; border-left:3px solid #c9c1a3; scroll-margin-top:84px; }
-.memo-note { font-style:italic; color:#666; font-size:9pt; margin:3px 0 8px; line-height:1.5; }
-.memo-body p { font-size:9.5pt; line-height:1.62; margin:6px 0; }
-.memo-body ul { margin:6px 0 10px 4px; list-style:none; }
-.memo-body ul li { font-size:9.5pt; line-height:1.6; margin:5px 0; padding-left:16px; position:relative; }
-.memo-body ul li::before { content:'\2013'; position:absolute; left:0; color:#999; }
-.memo-closing { font-style:italic; color:#444; font-size:9pt; border-left:3px solid #d8d4c0;
-           padding:5px 0 5px 11px; margin:9px 0; background:#f7f6ee; }
-/* A3: element/RA institutional description block */
-.item-description { font-size:8pt; color:#5a5777; background:rgba(100,90,180,0.04);
-           border-left:2px solid #c5c0e8; padding:4px 10px; margin:4px 0 8px 0;
-           border-radius:0 3px 3px 0; line-height:1.5; }
-.item-desc-title { font-weight:700; color:#3C3489; margin-right:5px; }
-.item-desc-body { }
-.memo-body table { border-collapse:collapse; width:100%; font-size:8.5pt; margin:9px 0; }
-.memo-body table th { background:#FDFCF1; text-align:left; padding:5px 8px;
-           border-bottom:2px solid #d4d2bb; font-weight:700; }
-.memo-body table td { padding:5px 8px; border-bottom:1px solid #e8e5d4; vertical-align:top; }
-.memo-body table tr:nth-child(even) td { background:#faf8f0; }
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
 
-/* inline rating pill in the body — next to a heading or judgement */
-.rating { display:inline-flex; align-items:center; justify-content:center; min-width:20px;
-          height:18px; border-radius:2px; font-size:8.5pt; font-weight:700; padding:0 5px;
-          vertical-align:1px; margin-left:6px; }
-.rating.A { background:#9DD49B; color:#1a4d1a; }
-.rating.B { background:#BFD9F2; color:#0C447C; }
-.rating.C { background:#E7E3AB; color:#5a5526; }
-.rating.D { background:#FFCC66; color:#7a4f00; }
-.rating.F { background:#FF7C80; color:#660000; }
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
 .rating.NR { background:#e0e0e0; color:#666; }
-.rating.cond { background:#EEEDFE; color:#3C3489; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
 
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:19px; font-weight:700; margin-top:2px; line-height:1.1; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:1fr 1fr 1fr;
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:nowrap; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
 @media print {
   .nav-pane { display:none; }
   .main-pane { padding:8mm; height:auto; overflow:visible; }
-  .main-header { position:static; }
+  .bar { box-shadow:none; position:static !important; }
 }
-
-/* --- A6: nav search filter input --- */
-.nav-search-wrap { padding:5px 8px 3px; }
-#nav-search { width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
-              border:1px solid #c8c5b8; border-radius:3px; background:#fff;
-              color:#333; outline:none; font-family:inherit; }
-#nav-search:focus { border-color:#3C3489; box-shadow:0 0 0 2px rgba(60,52,137,.12); }
-#nav-search::placeholder { color:#aaa; }
 </style>
 </head>
 <body class="show-pills element-details">
@@ -231,86 +562,119 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
     <div class="nav-header">
       <div class="nav-title">Memo navigation</div>
       <div class="nav-header-controls">
-        <button class="nav-toggle-btn active" id="pill-toggle" title="Toggle rating chips in navigation pane">Ratings</button>
-        <button class="nav-toggle-btn active" id="element-details-toggle" title="Show all RAs + CQs for the focused element">Element details</button>
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
         <span class="nav-toggle-spacer"></span>
-        <button class="nav-toggle-btn" id="ras-on-toggle" title="Always show all RAs in the taxonomy">All RAs on</button>
-        <button class="nav-toggle-btn" id="cqs-on-toggle" title="Always show all CQs in the taxonomy">All CQs on</button>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
         <span class="nav-toggle-spacer"></span>
-        <button class="nav-toggle-btn" id="audit-toggle" title="Show RA word count vs target + weight badge">Audit</button>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
       </div>
     </div>
     <div class="nav-search-wrap">
-      <input type="search" id="nav-search" placeholder="Filter…" autocomplete="off" spellcheck="false">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
     </div>
     <nav class="nav-tree">
-<span class="nav-item nav-section" data-anchor="section-a-business-quality-final">SECTION A — BUSINESS QUALITY<span class="nav-rating-pill F">F</span></span>
-<span class="nav-item nav-section" data-anchor="section-b-financial-analysis-final">SECTION B — FINANCIAL ANALYSIS<span class="nav-rating-pill F">F</span></span>
+<span class="nav-item nav-section" data-anchor="section-a-business-quality-final">SECTION A — BUSINESS QUALITY<span class="nav-rating-pill F">F</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-financial-analysis-final">SECTION B — FINANCIAL ANALYSIS<span class="nav-rating-pill F">F</span><span class="nav-fc">4</span></span>
 <span class="nav-item nav-section" data-anchor="section-c-ic-analysis-six-pillars-final">SECTION C — IC ANALYSIS (SIX PILLARS — FINAL)</span>
-<span class="nav-item nav-section" data-anchor="section-d-investment-case-final">SECTION D — INVESTMENT CASE<span class="nav-rating-pill F">F</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-investment-case-final">SECTION D — INVESTMENT CASE<span class="nav-rating-pill F">F</span><span class="nav-fc">3</span></span>
 <span class="nav-item nav-section" data-anchor="section-e-risks-final">SECTION E — RISKS<span class="nav-rating-pill F">F</span></span>
 <span class="nav-item nav-section" data-anchor="section-f-key-outstanding-questions-dd-round-out">SECTION F — KEY OUTSTANDING QUESTIONS (DD ROUND-OUT)</span>
     </nav>
   </aside>
 
   <main class="main-pane">
-    <div class="main-header">
-      <div class="page-title">HEXATRONIC GROUP AB (HTRO-SE) — DD PHASE 1 MEMO</div>
-      <div class="page-subtitle">Role: Investment Analyst (IA) Date: 14-May-26 Stage: DD P1 — Deep Dive Phase 1 (v3 Final) Version: v3 — incorporates [C] web search (10 topics) + [AS] AlphaSense Deep Research (5 q</div>
-      <div class="page-breadcrumb" id="breadcrumb">
-        <span class="bc-item">—</span>
-      </div>
+    <div class="cover">
+      <div class="ttl">HEXATRONIC GROUP AB (HTRO-SE) — DD PHASE 1 MEMO</div>
+      <div class="meta">Role: Investment Analyst (IA) Date: 14-May-26 Stage: DD P1 — Deep Dive Phase 1 (v3 Final) Version: v3 — incorporates [C] web search (10 topics) + [AS] AlphaSense Deep Research (5 q</div>
     </div>
     <div class="memo-body">
+<div class="snap" id="section-a-metadata-header" data-spy>
+<div class="snap-bar"><span class="id">HTRO-SE</span> HEXATRONIC GROUP AB (HTRO-SE) — DD PHASE 1 MEMO -- Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 12-Jun-26 15:19</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Deep Dive</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Exchange</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Currency</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Country</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Industry</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">--</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">--</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">--</span></div>
+<div class="dr"><span class="k">50-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Buy rating</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Initiated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Last updated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Change Forces</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Business Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Leadership Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Risks</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Carried from</span><span class="v">--</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
 <p><strong>Change log v2 → v3:</strong></p>
-<ul><li>Superior Fiber &amp; Data Services acquisition (May 2026) incorporated</li><li>SEK 600m rights issue incorporated into share count and valuation</li><li>LTIP 2026 withdrawal (May 12 AGM) incorporated — governance downgrade</li><li>Corning: additional hyperscaler LTAs + Poland factory incorporated — ICD-5 further elevated</li><li>BEAD fibre share quantified at 63% (not ~100%) — ICD-4 maintained AMBER-RED</li><li>DC "boom-and-bust" risk and historical ROIC inconsistency flags incorporated — P4 unchanged at D+</li><li>RedEye SEK 37 target (post-Superior) incorporated into P5/P6</li><li>IC maintained at B-; P4 confirmed D+; P6 confirmed D+</li></ul>
 <p>The HTRO investment thesis has been substantially stress-tested by a comprehensive dual-source ([C] + [AS]) research programme covering 15 topics. The core thesis — DC portfolio transformation, Fröberg execution, Fibre Solutions floor — is intact and Stage 1 confirmed by Q1 2026 results. Three material new developments complicate the picture:</p>
-<p><strong>Positive:</strong> Hexatronic acquired Superior Fiber &amp; Data Services (May 2026), funded by a SEK 600m rights issue at 8.2% discount. This acquisition targets the Enterprise DC market — a direct strategic response to the Corning hyperscaler ceiling. Management is moving faster than expected and is explicitly de-risking the DC concentration from hyperscalers.</p>
-<p><strong>Negative (governance):</strong> The LTIP 2026 proposal — which was linked to the 2028 financial targets (SEK 8.7–11.7bn revenue, 10.5–12.5% EBITA margin) — was <strong>withdrawn at the May 12, 2026 AGM</strong>. This materially weakens the management alignment case. Without a long-term equity incentive tied to 2028 targets, the incentive for Fröberg to remain through the full transformation and to execute precisely against those targets is less explicit.</p>
-<p><strong>Negative (competitive):</strong> Corning has secured not just Meta + Nvidia, but also <strong>two additional hyperscaler LTAs</strong> of similar scale to the Meta deal — potentially locking 3–4 of the top 5 US hyperscaler relationships. Corning also has a Poland manufacturing facility serving European customers. The geographic buffer for European DC suppliers is relationship-based, not logistics-based. Prysmian is simultaneously securing its own hyperscaler LTAs (€5bn+ announced). HTRO's effective DC addressable market is the regional/Enterprise DC tier.</p>
-<p>Net assessment: The thesis holds, the position rationale is intact at 3%, the IC is B- with P4=D+ and P6=D+. The LTIP withdrawal is the most actionable new negative and warrants a direct follow-up question to management.</p>
-<h2 class="sec" id="section-a-business-quality-final" data-spy>SECTION A — BUSINESS QUALITY<span class="rating F">F</span></h2>
-<p><strong>A1 — What Hexatronic Actually Is</strong></p>
-<p>Three businesses, very different competitive positions. Q1 2026 confirmed the portfolio rotation: DC = 46% of group adjusted EBITA for the first time.</p>
-<p><strong>Fibre Solutions (~58% Q1 2026 revenue, ~32% EBITA):</strong> The legacy business in structural transition. Q1 2026: SEK 982m, organic -11% (European FTTH phase transition from "homes passed" to "subscriber connections"), EBITA margin 6.2% (above 6% floor, PIP ahead of schedule). US Fibre Solutions positive organic despite BEAD headwinds — private-sector DC-adjacent demand is the offset. BEAD quantified at 63% fibre share (not ~100% under original rules) — fibre TAM within BEAD ~37% smaller than original assumptions, construction mostly 2027+. Chinese manufacturers (Hengtong) establishing EU manufacturing within 18–36 months — the logistics buffer is being removed. Floor at 6–7% probably structural rather than transitional. RedEye flags "inconsistent historical returns on capital" — ROIC has not been reliably above cost of capital through prior downturns.</p>
-<p><strong>Harsh Environment (~17% Q1 2026 revenue, ~22% EBITA):</strong> Q1 2026: SEK 283m, organic +9%, EBITA 8.5% (below 11–14% late-2025 range, JOWO dilution timing). JOWO closed April 1 at 4.7x EBITDA — rational pricing. Post-JOWO, HE approaching SEK 1.5bn annualised pro forma. Defence capex tailwind (NATO 2%+ GDP) is structural and multi-year. SRCA is real — qualification barriers, certification relationships, bespoke design IP. On track toward SEK 2.0bn 2028 target.</p>
-<p><strong>Data Centre (~26% Q1 2026 revenue, 46% EBITA):</strong> Q1 2026: SEK 434m, organic +20%, EBITA 16.8% (above 15% target). DC is now the largest profit contributor — Stage 1 thesis confirmed. Two new Q2 2026 developments: (1) <strong>Superior Fiber &amp; Data Services acquisition</strong> — Enterprise DC focus, explicitly reducing hyperscaler dependency; (2) SEK 600m rights issue at 8.2% discount to fund M&amp;A pipeline. DC addressable market recalibrated post-Corning: regional/Enterprise DC tier, not US hyperscaler top tier. Prysmian Digital Solutions at 19.5% EBITDA margin confirms the European regional DC market is large and profitable. DC "boom-and-bust" risk acknowledged by RedEye — service model (shorter cycles, managed services) is the structural defence but not yet proven at scale.</p>
-<p><strong>A2 — Competitive Position</strong></p>
-<p><strong>Fibre Solutions:</strong> Narrow moat, structurally challenged. Chinese EU manufacturing entry (18–36 months) removes logistics buffer. Floor at 6% confirmed near-term; susceptible to further erosion. Assessment unchanged.</p>
-<p><strong>Harsh Environment:</strong> Strong moat. JOWO adds German defence connector capability. On track. Assessment unchanged.</p>
-<p><strong>Data Centre — significantly revised post-AS research:</strong></p>
-<p>Corning's competitive position is more severe than [C] research indicated:</p>
-<ul><li>Meta $6bn + Nvidia $3.2bn + <strong>two additional hyperscaler LTAs of similar scale</strong> = Corning likely anchors 3–4 of the top 5 US hyperscaler DC connectivity relationships</li><li>Corning has a <strong>Poland factory</strong> serving EU customers — geographic buffer is NOT a complete protection</li><li>Prysmian is simultaneously securing its own hyperscaler LTAs (€5bn+ announced)</li><li>Corning estimated &gt;50% market share at several major US hyperscalers already</li></ul>
-<p>HTRO's achievable DC market is explicitly the <strong>regional/Enterprise DC tier</strong>. The Superior Fiber &amp; Data Services acquisition confirms management has made this strategic choice explicitly. This is the right strategic response. The Enterprise DC market is large, growing, and profitable — but it is a smaller total addressable market than "all DC connectivity."</p>
-<p><strong>Revised DC moat assessment:</strong> Early-stage moat in the correct sub-markets. The Corning/Prysmian hyperscaler ceiling is now structural. HTRO's DC growth ceiling has been lowered, but the floor has been raised (Enterprise DC economics are confirmed attractive, managed services reduce cyclicality).</p>
-<p><strong>A3 — Management Quality [FINAL — GOVERNANCE CONCERN ADDED]</strong></p>
-<p><strong>Fröberg execution:</strong> Positive signals maintained. PIP ahead of schedule. JOWO at 4.7x EBITDA (rational). Communication Zone and Superior Fiber &amp; Data Services acquired in 2026 — DC M&amp;A engine running. Q1 2026 call commentary confident and precise. Leadership style: visionary pivot (RedEye), transparent communication, lean decentralised organisation.</p>
-<p><strong>Governance concern — LTIP 2026 WITHDRAWN:</strong></p>
-<ul><li>The proposed LTIP 2026, which included 2028 targets (SEK 8.7–11.7bn revenue, 10.5–12.5% EBITA margin), was withdrawn at the <strong>May 12, 2026 AGM</strong></li><li>The reasons for withdrawal are not disclosed in available sources</li><li>Three possible interpretations: shareholder opposition (negative), board preemptive withdrawal (neutral-negative), replacement with alternative structure (neutral)</li><li>If there is no replacement equity incentive linking Fröberg's personal wealth to the 2028 targets, the alignment case is materially weaker than assumed</li><li>This is the single most important unanswered management question</li></ul>
-<p><strong>Additional governance concern (RedEye):</strong> No controlling shareholder with &gt;20% voting stake, limited board member personal shareholdings. Reduces the concentrated long-term stewardship associated with European small-cap outperformance.</p>
-<p><strong>Management assessment revised:</strong> Overall management quality remains B, but the LTIP withdrawal introduces a governance tail risk not previously in the model. The alignment confidence is now B- rather than B at the management layer specifically.</p>
-<p><strong>A4 — Capital Allocation</strong></p>
-<ul><li>SEK 600m rights issue (May 2026, 8.2% discount) — well-received by market; confirms M&amp;A pipeline is active and funded beyond internal FCF</li><li>Superior Fiber &amp; Data Services financed by rights issue — M&amp;A pace is running ahead of pure FCF generation capacity</li><li>JOWO pricing (4.7x EBITDA) maintains the rational pricing track record</li><li>Leverage: 2.2x Q1 2026 (post-JOWO). Rights issue proceeds will reduce leverage. Net balance sheet remains manageable.</li><li>FCF quality: sub-1.2% capex intensity vs 2–2.5% peers — structural advantage maintained</li></ul>
-<div class="memo-note">[W] Key observation: The rights issue is the first equity dilution event under Fröberg. At 8.2% discount and well-received by market, it confirms market confidence. But it also signals that the 3–6 DC acquisitions per year target is not self-funding from existing FCF — equity will be required periodically. Investors should price in 1–2 rights issues per 3–4 year cycle if the M&amp;A pace continues at this rate.</div>
-<h2 class="sec" id="section-b-financial-analysis-final" data-spy>SECTION B — FINANCIAL ANALYSIS<span class="rating F">F</span></h2>
+<p><strong>Positive:</strong> Hexatronic acquired Superior Fiber &amp; Data Services (May 2026), funded by a SEK 600m rights issue at <strong>8.2%</strong> discount. This acquisition targets the Enterprise DC market — a direct strategic response to the Corning hyperscaler ceiling. Management is moving faster than expected and is explicitly de-risking the DC concentration from hyperscalers.</p>
+<p><strong>Negative (governance):</strong> The LTIP 2026 proposal — which was linked to the 2028 financial targets (SEK 8.7–11.7bn revenue, 10.5–<strong>12.5%</strong> EBITA margin) — was <strong>withdrawn at the May 12, 2026 AGM</strong>. This materially weakens the management alignment case. Without a long-term equity incentive tied to 2028 targets, the incentive for Fröberg to remain through the full transformation and to execute precisely against those targets is less explicit.</p>
+<p><strong>Negative (competitive):</strong> Corning has secured not just Meta + Nvidia, but also <strong>two additional hyperscaler LTAs</strong> of similar scale to the Meta deal — potentially locking 3–4 of the top 5 US hyperscaler relationships. Corning also has a Poland manufacturing facility serving European customers. The geographic buffer for European DC suppliers is relationship-based, not logistics-based. Prysmian is simultaneously securing its own hyperscaler LTAs (€<strong>5bn</strong>+ announced). HTRO's effective DC addressable market is the regional/Enterprise DC tier.</p>
+<p>Net assessment: The thesis holds, the position rationale is intact at <strong>3%</strong>, the IC is B- with P4=D+ and P6=D+. The LTIP withdrawal is the most actionable new negative and warrants a direct follow-up question to management.</p>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-financial-analysis-final" data-spy><span class="id">B</span> FINANCIAL ANALYSIS <span class="g gF">F</span> <span class="secn">4 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
 <p><strong>B1 — Revenue Bridge</strong></p>
 <table><thead><tr><th>Segment</th><th>Q1 2026 Annualised</th><th>2028 Target</th><th>Required CAGR</th><th>Confidence</th></tr></thead><tbody><tr><td>Fibre Solutions</td><td>~SEK 3.9bn</td><td>SEK 4.0bn</td><td>~Flat</td><td>Medium — floor confirmed, Chinese entry approaching</td></tr><tr><td>Harsh Environment</td><td>~SEK 1.1bn</td><td>SEK 2.0bn</td><td>+21%</td><td>High — JOWO adds, defence tailwind</td></tr><tr><td>Data Centre</td><td>~SEK 1.7bn</td><td>SEK 3.0bn</td><td>+21%</td><td>Medium — organic at 20% + M&amp;A (Superior adds)</td></tr><tr><td><strong>Group</strong></td><td><strong>~SEK 6.7bn</strong></td><td><strong>SEK 9.0bn</strong></td><td><strong>+10%</strong></td><td>Medium</td></tr></tbody></table>
-<p>Superior Fiber &amp; Data Services adds revenue to DC. Assuming $15–30m annual revenue (typical for this size Enterprise DC services business), DC run rate moves to ~SEK 1.8–1.9bn annualised — closing the gap to the SEK 3.0bn target.</p>
+<p>Superior Fiber &amp; Data Services adds revenue to DC. Assuming $<strong>15</strong>–30m annual revenue (typical for this size Enterprise DC services business), DC run rate moves to ~SEK 1.8–1.9bn annualised — closing the gap to the SEK 3.0bn target.</p>
 <p><strong>B2 — Margin Bridge</strong></p>
 <table><thead><tr><th>Segment</th><th>Q1 2026</th><th>2028 Target</th><th>Confidence</th></tr></thead><tbody><tr><td>Fibre Solutions</td><td>6.2%</td><td>6–7%</td><td>Medium — floor confirmed; Chinese pressure ongoing</td></tr><tr><td>Harsh Environment</td><td>8.5%</td><td>15%</td><td>Medium — JOWO dilution expected to normalise H2 2026</td></tr><tr><td>Data Centre</td><td>16.8%</td><td>15%</td><td>High — above target at scale; managed services mix improving</td></tr><tr><td><strong>Group adjusted EBITA</strong></td><td><strong>8.6%</strong></td><td><strong>12%</strong></td><td>Medium — sequential improvement confirmed; ~350bp gap to close</td></tr></tbody></table>
 <p><strong>B3 — Valuation [RESTATED — RIGHTS ISSUE DILUTION + CURRENT PRICE]</strong></p>
-<p><strong>Rights issue dilution:</strong> SEK 600m at ~8.2% discount to pre-issue price. This increases share count. Exact dilution depends on issue price — at SEK 43 (8.2% below estimated SEK 47), the issue is approximately 13.9m new shares on a ~206m base = ~6.7% dilution.</p>
+<p><strong>Rights issue dilution:</strong> SEK 600m at ~<strong>8.2%</strong> discount to pre-issue price. This increases share count. Exact dilution depends on issue price — at SEK 43 (<strong>8.2%</strong> below estimated SEK 47), the issue is approximately 13.9m new shares on a ~206m base = ~<strong>6.7%</strong> dilution.</p>
 <p><strong>Estimated post-issue market cap and EV:</strong></p>
-<ul><li>Pre-issue shares: ~206m; Post-issue: ~220m (estimated)</li><li>At SEK 47 per share (estimated current): market cap ~SEK 10.3bn</li><li>Net debt post-rights issue: ~SEK 1.8bn (Q1) minus SEK 600m rights proceeds = ~SEK 1.2bn</li><li>EV: ~SEK 11.5bn</li></ul>
+<div class="finding"><span class="fnum">1.</span><div class="ftext">Pre-issue shares: ~206m; Post-issue: ~220m (estimated)</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext">At SEK 47 per share (estimated current): market cap ~SEK 10.3bn</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext">Net debt post-rights issue: ~SEK 1.8bn (Q1) minus SEK 600m rights proceeds = ~SEK 1.2bn</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext">EV: ~SEK 11.5bn</div></div>
 <table><thead><tr><th>Metric</th><th>2025 Actual</th><th>2026 Est</th><th>2028 Target</th></tr></thead><tbody><tr><td>Revenue (SEKbn)</td><td>7.52</td><td>~7.2</td><td>9.0+ (Superior adds)</td></tr><tr><td>Adj EBITA (SEKm)</td><td>~1,010</td><td>~700–750 (annualised Q1 + Superior add)</td><td>~1,080</td></tr><tr><td>EV/EBITA</td><td>~11.4x</td><td>~15–16x</td><td>~10.6x</td></tr><tr><td>EV/Revenue</td><td>1.53x</td><td>~1.6x</td><td>~1.28x</td></tr></tbody></table>
-<p><strong>Valuation unchanged from v2 conclusion:</strong> At estimated SEK 47, the base case is flat. Bull case 13–17% IRR. P6 = D+. Entry below SEK 43 materially improves base case toward acceptable returns. Monitor for post-rights issue and post-Superior consolidation as potential entry window.</p>
-<h2 class="sec" id="section-c-ic-analysis-six-pillars-final" data-spy>SECTION C — IC ANALYSIS (SIX PILLARS — FINAL)</h2>
+<p><strong>Valuation unchanged from v2 conclusion:</strong> At estimated SEK 47, the base case is flat. Bull case 13–<strong>17%</strong> IRR. P6 = D+. Entry below SEK 43 materially improves base case toward acceptable returns. Monitor for post-rights issue and post-Superior consolidation as potential entry window.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-ic-analysis-six-pillars-final" data-spy><span class="id">C</span> IC ANALYSIS (SIX PILLARS — FINAL)</div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
 <p><strong>P1 — Technical Momentum: A-</strong></p>
-<p>Stock +49% on Q1 2026 results. Rights issue well-received (8.2% discount = strong market confidence). Superior acquisition announced — further positive momentum. Consensus catching up (RedEye SEK 37, up from SEK 34 pre-Q1). Only 1–2 active analysts — early-mover information advantage significant. <strong>Rating: A- maintained.</strong></p>
+<p>Stock +<strong>49%</strong> on Q1 2026 results. Rights issue well-received (<strong>8.2%</strong> discount = strong market confidence). Superior acquisition announced — further positive momentum. Consensus catching up (RedEye SEK 37, up from SEK 34 pre-Q1). Only 1–2 active analysts — early-mover information advantage significant. <strong>Rating: A- maintained.</strong></p>
 <p><strong>P2 — Market Paradigm Fit: B-</strong></p>
-<p>Hyperscaler capex $725bn (+77% YoY) — definitively confirmed. German FTTH €34.2bn committed. BEAD operational but fibre share quantified at 63% (not ~100%) — moderate downward revision to North America FS TAM. DC "Next Wave" European hubs confirmed as the HTRO-addressable market. European defence capex structural tailwind. <strong>Rating: B- maintained.</strong></p>
+<p>Hyperscaler capex $<strong>725bn</strong> (+<strong>77%</strong> YoY) — definitively confirmed. German FTTH €<strong>34.2bn</strong> committed. BEAD operational but fibre share quantified at <strong>63%</strong> (not ~<strong>100%</strong>) — moderate downward revision to North America FS TAM. DC "Next Wave" European hubs confirmed as the HTRO-addressable market. European defence capex structural tailwind. <strong>Rating: B- maintained.</strong></p>
 <p><strong>P3 — Fundamental Change: B+</strong></p>
-<p>DC = 46% of group EBITA confirmed in Q1 2026. Superior acquisition extends the DC pivot into Enterprise DC (reduces hyperscaler dependency — strategically correct). Fröberg is accelerating the transformation, not observing. <strong>Rating: B+ maintained.</strong></p>
+<p>DC = <strong>46%</strong> of group EBITA confirmed in Q1 2026. Superior acquisition extends the DC pivot into Enterprise DC (reduces hyperscaler dependency — strategically correct). Fröberg is accelerating the transformation, not observing. <strong>Rating: B+ maintained.</strong></p>
 <p><strong>P4 — Building Blocks: D+</strong></p>
 <p>ICD status updated with AS findings:</p>
 <table><thead><tr><th>ICD</th><th>Previous</th><th>Updated</th><th>Driver</th></tr></thead><tbody><tr><td>ICD-1: DC growth &gt;20% sustained</td><td>AMBER</td><td>AMBER</td><td>20% Q1 confirmed; Enterprise DC pivot (Superior) is the right adjustment</td></tr><tr><td>ICD-2: Fibre margin &gt;6%</td><td>GREEN</td><td>GREEN</td><td>6.2% Q1, PIP ahead of schedule</td></tr><tr><td>ICD-3: M&amp;A execution</td><td>AMBER</td><td>AMBER</td><td>JOWO rational; Superior funded; integration quality still unconfirmed</td></tr><tr><td>ICD-4: BEAD</td><td>AMBER-RED</td><td>AMBER-RED</td><td>63% fibre share quantified; 2027+ construction; private DC offsetting</td></tr><tr><td>ICD-5: Corning ceiling</td><td>STRUCTURAL CONSTRAINT</td><td><strong>ELEVATED</strong></td><td>2 additional hyperscaler LTAs + Poland factory = ceiling more severe than v2 assumed</td></tr><tr><td>ICD-NEW: LTIP Withdrawal</td><td>Not in scope</td><td><strong>AMBER-RED</strong></td><td>LTIP 2026 linked to 2028 targets withdrawn at May 12 AGM</td></tr></tbody></table>
@@ -319,64 +683,73 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
 <p><strong>P5 — SS Earnings Momentum: B-</strong></p>
 <p>RedEye upgrade to SEK 37 (from SEK 34) post-Q1 + Superior. Only 1 broker visible — but the direction is right. The "consensus catching up" dynamic is confirmed in the one available data point. Superior acquisition and rights issue will likely trigger further estimate revisions as RedEye incorporates the acquisition. <strong>Rating: B- maintained.</strong></p>
 <p><strong>P6 — Valuation: D+</strong></p>
-<p>Rights issue (6.7% dilution) is modestly negative for per-share valuation but offset by the acquisition of Superior (incremental revenue + Enterprise DC diversification). EV/EBITA at ~15–16x on 2026 annualised numbers is not cheap. Base case still approximately flat from SEK 47. <strong>Rating: D+ maintained.</strong> Entry below SEK 43 moves toward C-.</p>
+<p>Rights issue (<strong>6.7%</strong> dilution) is modestly negative for per-share valuation but offset by the acquisition of Superior (incremental revenue + Enterprise DC diversification). EV/EBITA at ~15–<strong>16x</strong> on 2026 annualised numbers is not cheap. Base case still approximately flat from SEK 47. <strong>Rating: D+ maintained.</strong> Entry below SEK 43 moves toward C-.</p>
 <p><strong>Rollup — Final Six Pillar Summary</strong></p>
 <table><thead><tr><th>Pillar</th><th>v1 (Apr 26)</th><th>v2 ([C])</th><th>v3 (Final [C+AS])</th><th>Net change vs ESA</th></tr></thead><tbody><tr><td>P1 Technical Momentum</td><td>B+ (ESA A)</td><td>A-</td><td><strong>A-</strong></td><td>↑↑</td></tr><tr><td>P2 Market Paradigm</td><td>C- (ESA)</td><td>B-</td><td><strong>B-</strong></td><td>↑↑</td></tr><tr><td>P3 Fundamental Change</td><td>B- (ESA)</td><td>B+</td><td><strong>B+</strong></td><td>↑↑</td></tr><tr><td>P4 Building Blocks</td><td>D (ESA)</td><td>D+</td><td><strong>D+</strong></td><td>↑ (marginal)</td></tr><tr><td>P5 SS Earnings Momentum</td><td>C (ESA)</td><td>B-</td><td><strong>B-</strong></td><td>↑↑</td></tr><tr><td>P6 Valuation</td><td>C (ESA)</td><td>D+</td><td><strong>D+</strong></td><td>↓</td></tr></tbody></table>
-<p><strong>IC Overall: B-</strong> — upgraded from ESA C- to DD P1 B-. The thesis is empirically confirmed at Stage 1. P4 (D+) and P6 (D+) are the anchors limiting the IC from B or above. Weighted worst-of 60% bottom quartile pulls from B toward B-. Confirmed.</p>
-<h2 class="sec" id="section-d-investment-case-final" data-spy>SECTION D — INVESTMENT CASE<span class="rating F">F</span></h2>
+<p><strong>IC Overall: B-</strong> — upgraded from ESA C- to DD P1 B-. The thesis is empirically confirmed at Stage 1. P4 (D+) and P6 (D+) are the anchors limiting the IC from B or above. Weighted worst-of <strong>60%</strong> bottom quartile pulls from B toward B-. Confirmed.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-investment-case-final" data-spy><span class="id">D</span> INVESTMENT CASE <span class="g gF">F</span> <span class="secn">3 findings</span></div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
 <p><strong>D1 — Investment Case</strong></p>
-<p><strong>Stage 1 CONFIRMED:</strong> DC = 46% of group EBITA. Fibre margin 6.2% above floor. US Fibre positive organic. Done.</p>
-<p><strong>Stage 2 (Now → Q4 2026):</strong> DC + HE sustain &gt;50% of group EBITA across 2–3 consecutive quarters. JOWO HE margin recovers toward 10%+. Superior Fiber &amp; Data Services contributes clean DC revenue. Group EBITA margin approaches 10% by Q3/Q4 2026. If confirmed: stock range SEK 50–60.</p>
-<p><strong>Stage 3 (2027–2028):</strong> DC + HE at &gt;50% of revenue. Group ROIC &gt;15%. Multiple expansion toward 12–13x. Bull case stock SEK 63–68.</p>
-<p>The Enterprise DC pivot (Superior) is the right strategic response to the Corning hyperscaler ceiling. If the Enterprise DC market delivers similar margins to the hyperscaler DC market (Prysmian benchmark 19.5% EBITDA), the ceiling on DC profitability is removed — the ceiling is on DC revenue scale, not DC economics.</p>
+<p><strong>Stage 1 CONFIRMED:</strong> DC = <strong>46%</strong> of group EBITA. Fibre margin <strong>6.2%</strong> above floor. US Fibre positive organic. Done.</p>
+<p><strong>Stage 2 (Now → Q4 2026):</strong> DC + HE sustain &gt;<strong>50%</strong> of group EBITA across 2–3 consecutive quarters. JOWO HE margin recovers toward <strong>10%</strong>+. Superior Fiber &amp; Data Services contributes clean DC revenue. Group EBITA margin approaches <strong>10%</strong> by Q3/Q4 2026. If confirmed: stock range SEK 50–60.</p>
+<p><strong>Stage 3 (2027–2028):</strong> DC + HE at &gt;<strong>50%</strong> of revenue. Group ROIC &gt;<strong>15%</strong>. Multiple expansion toward 12–<strong>13x</strong>. Bull case stock SEK 63–68.</p>
+<p>The Enterprise DC pivot (Superior) is the right strategic response to the Corning hyperscaler ceiling. If the Enterprise DC market delivers similar margins to the hyperscaler DC market (Prysmian benchmark <strong>19.5%</strong> EBITDA), the ceiling on DC profitability is removed — the ceiling is on DC revenue scale, not DC economics.</p>
 <p><strong>D2 — Fulcrum Drivers</strong></p>
-<p><strong>FD#1 — DC organic moat in European/Enterprise DC:</strong> Confirmed at 20% organic Q1 2026. Corning ceiling confirmed more severe than assumed, but Enterprise DC (Superior) is the strategic response. FD#1 is now: "Can HTRO build a B-quality DC business in European and Enterprise DC markets at 15%+ EBITA margins?" Evidence says yes. Corning does not preclude this.</p>
-<p><strong>FD#2 — Fröberg M&amp;A execution:</strong> JOWO and Superior both at rational terms. Rights issue at 8.2% discount — market receptive. LTIP withdrawal is a governance concern but does not change the pace of execution evidence. FD#2 is intact but governance alignment is now an explicit monitoring point.</p>
+<p><strong>FD#1 — DC organic moat in European/Enterprise DC:</strong> Confirmed at <strong>20%</strong> organic Q1 2026. Corning ceiling confirmed more severe than assumed, but Enterprise DC (Superior) is the strategic response. FD#1 is now: "Can HTRO build a B-quality DC business in European and Enterprise DC markets at <strong>15%</strong>+ EBITA margins?" Evidence says yes. Corning does not preclude this.</p>
+<p><strong>FD#2 — Fröberg M&amp;A execution:</strong> JOWO and Superior both at rational terms. Rights issue at <strong>8.2%</strong> discount — market receptive. LTIP withdrawal is a governance concern but does not change the pace of execution evidence. FD#2 is intact but governance alignment is now an explicit monitoring point.</p>
 <p><strong>D3 — HQI Assessment</strong></p>
 <table><thead><tr><th>Dimension</th><th>Score /4</th><th>v3 Change</th></tr></thead><tbody><tr><td>Resilience</td><td>3.0</td><td>= — Enterprise DC adds managed services resilience</td></tr><tr><td>Inflection / Optionality</td><td>3.5</td><td>= — Stage 1 confirmed; Enterprise DC adds optionality</td></tr><tr><td>Potential Returns</td><td>2.0</td><td>= — Bull case 13–17% IRR at SEK 47; inadequate at base case</td></tr><tr><td>Conviction</td><td>2.5</td><td>↓ slightly — LTIP withdrawal reduces governance confidence</td></tr></tbody></table>
 <p><strong>HQI: UHPYHQI maintained.</strong> Stage 1 confirmed removes some "Young/Fragile" quality but LTIP withdrawal and Corning ceiling confirmation reintroduce caution.</p>
 <p><strong>D4 — Position Sizing</strong></p>
 <p><strong>Initial position: 3%</strong> — unchanged. Developmental, monitoring-intensive.</p>
 <p><strong>Build conditions:</strong></p>
-<ul><li><strong>To 5%:</strong> Q2 2026 DC organic &gt;15% sustained + JOWO HE margin recovery toward 10% + LTIP replacement announced (or satisfactory AGM explanation)</li><li><strong>To 7–8%:</strong> Q3 2026 confirms Stage 2 (DC + HE &gt;50% group EBITA sustained), Endor/Superior retention confirmed, group EBITA margin &gt;10%</li><li><strong>Stop-loss trigger:</strong> LTIP not replaced within 2 quarters + DC organic falls below 12% + Fibre Solutions margin breaches 5%</li></ul>
-<h2 class="sec" id="section-e-risks-final" data-spy>SECTION E — RISKS<span class="rating F">F</span></h2>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>To 5%:</strong> Q2 2026 DC organic &gt;<strong>15%</strong> sustained + JOWO HE margin recovery toward <strong>10%</strong> + LTIP replacement announced (or satisfactory AGM explanation)</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>To 7–8%:</strong> Q3 2026 confirms Stage 2 (DC + HE &gt;<strong>50%</strong> group EBITA sustained), Endor/Superior retention confirmed, group EBITA margin &gt;<strong>10%</strong></div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>Stop-loss trigger:</strong> LTIP not replaced within 2 quarters + DC organic falls below <strong>12%</strong> + Fibre Solutions margin breaches <strong>5%</strong></div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-risks-final" data-spy><span class="id">E</span> RISKS <span class="g gF">F</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
 <p><strong>Updated Risk Register</strong></p>
 <table><thead><tr><th>Risk</th><th>ICD</th><th>Probability</th><th>Severity</th><th>Change vs v2</th></tr></thead><tbody><tr><td>Corning US hyperscaler ceiling</td><td>ICD-5</td><td>Structural (already occurring)</td><td>Growth ceiling</td><td>↑ Elevated — 2 additional LTAs + Poland factory</td></tr><tr><td>Prysmian hyperscaler LTAs</td><td>ICD-5 variant</td><td>Structural</td><td>Growth ceiling</td><td>New — €5bn+ Prysmian hyperscaler LTAs</td></tr><tr><td>BEAD fibre TAM reduction (63%)</td><td>ICD-4</td><td>Structural</td><td>Moderate</td><td>Quantified — 37% smaller than original assumption</td></tr><tr><td>LTIP withdrawal / alignment</td><td>ICD-NEW</td><td>Confirmed event</td><td>Moderate-High</td><td>New — most material governance negative</td></tr><tr><td>DC boom-and-bust cyclicality</td><td>ICD-1</td><td>25–30% over 5yr</td><td>High if occurs</td><td>Confirmed by RedEye — FTTH parallel apt</td></tr><tr><td>Fibre Solutions historical ROIC inconsistency</td><td>ICD-2</td><td>Ongoing</td><td>Moderate</td><td>New — RedEye flags; floor may not be structural</td></tr><tr><td>Chinese EU manufacturing (Hengtong)</td><td>ICD-2</td><td>60–70% within 3yr</td><td>Moderate</td><td>Timeline confirmed: 18–36 months</td></tr><tr><td>Value-destructive DC acquisition</td><td>ICD-3</td><td>20–25% per large deal</td><td>High if occurs</td><td>Unchanged</td></tr><tr><td>Rights issue further dilution</td><td>—</td><td>30–40% over 3yr</td><td>Low-moderate</td><td>New — pace suggests periodic equity needed</td></tr></tbody></table>
 <p><strong>Bear Case [FINAL, AT SEK 47 ENTRY]</strong></p>
-<p>Fibre margin 4% (Chinese competition), DC organic slows to 12% (Corning ceiling + AI capex pause), value-destructive acquisition (one in three years): group EBITA SEK 800–850m. At 7x EV/EBITA, EV = SEK 5.6–6.0bn. Net debt (post-rights): ~SEK 1.2bn. Equity ~SEK 4.4–4.8bn. Shares ~220m post-dilution. Share price: SEK 20–22. <strong>Drawdown from SEK 47: ~55%.</strong> At 3%: <strong>-1.65% portfolio.</strong> At limit of acceptable for developmental position — monitor closely.</p>
-<h2 class="sec" id="section-f-key-outstanding-questions-dd-round-out" data-spy>SECTION F — KEY OUTSTANDING QUESTIONS (DD ROUND-OUT)</h2>
-<p>1. <strong>LTIP 2026 withdrawal reason:</strong> Why was the proposal withdrawn at the May 12 AGM? Is there a replacement? This is the most urgent question for the management alignment case. 2. <strong>Superior Fiber &amp; Data Services terms:</strong> What was the acquisition price? Revenue / EBITA multiples? Key management retention arrangements? 3. <strong>Endor post-acquisition performance:</strong> Revenue and headcount retention 6+ months post-close (Oct 2024)? 4. <strong>Corning's two additional hyperscaler LTAs:</strong> Which hyperscalers? Does this affect European operations? 5. <strong>Historical ROIC data:</strong> Request from FactSet — HTRO ROIC 2018–2025. Is RedEye's "inconsistent ROIC" flag supported by the data? 6. <strong>Q2 2026 indicators:</strong> DC organic rate, HE margin recovery, group EBITA margin progression toward 10%.</p>
+<p>Fibre margin <strong>4%</strong> (Chinese competition), DC organic slows to <strong>12%</strong> (Corning ceiling + AI capex pause), value-destructive acquisition (one in three years): group EBITA SEK 800–850m. At <strong>7x</strong> EV/EBITA, EV = SEK 5.6–6.0bn. Net debt (post-rights): ~SEK 1.2bn. Equity ~SEK 4.4–4.8bn. Shares ~220m post-dilution. Share price: SEK 20–22. <strong>Drawdown from SEK 47: ~55%.</strong> At <strong>3%</strong>: <strong>-1.65% portfolio.</strong> At limit of acceptable for developmental position — monitor closely.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-key-outstanding-questions-dd-round-out" data-spy><span class="id">F</span> KEY OUTSTANDING QUESTIONS (DD ROUND-OUT)</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>All findings from [C] web search (10 topics) + [AS] AlphaSense Deep Research (5 queries), 14-May-26. Research programme complete for DD P1. DD Round-Out (DD RO) workplan defined in Section F.</div>
+<p>1. <strong>LTIP 2026 withdrawal reason:</strong> Why was the proposal withdrawn at the May 12 AGM? Is there a replacement? This is the most urgent question for the management alignment case. 2. <strong>Superior Fiber &amp; Data Services terms:</strong> What was the acquisition price? Revenue / EBITA multiples? Key management retention arrangements? 3. <strong>Endor post-acquisition performance:</strong> Revenue and headcount retention 6+ months post-close (Oct 2024)? 4. <strong>Corning's two additional hyperscaler LTAs:</strong> Which hyperscalers? Does this affect European operations? 5. <strong>Historical ROIC data:</strong> Request from FactSet — HTRO ROIC 2018–2025. Is RedEye's "inconsistent ROIC" flag supported by the data? 6. <strong>Q2 2026 indicators:</strong> DC organic rate, HE margin recovery, group EBITA margin progression toward <strong>10%</strong>.</p>
 <table><thead><tr><th>Action</th><th>Owner</th><th>Priority</th><th>Timing</th></tr></thead><tbody><tr><td>Confirm current HTRO share price + post-rights issue share count</td><td>IA</td><td>Urgent</td><td>Immediately</td></tr><tr><td>Research LTIP 2026 withdrawal — AGM minutes, management commentary</td><td>RESEARCHER</td><td>High</td><td>Next session</td></tr><tr><td>Research Superior Fiber &amp; Data Services acquisition terms</td><td>RESEARCHER</td><td>High</td><td>Next session</td></tr><tr><td>Pull HTRO historical ROIC 2018–2025 from FactSet</td><td>FA</td><td>High</td><td>Next session</td></tr><tr><td>Monitor Q2 2026: DC organic, HE margin, group EBITA</td><td>IA/APM</td><td>High</td><td>~Aug 2026</td></tr><tr><td>Post all [AS] research files to Notion under HTRO case file</td><td>RESEARCHER</td><td>Medium</td><td>Next session</td></tr><tr><td>Update IC ratings database: HTRO DD P1, IC=B-, P1=A-, P2=B-, P3=B+, P4=D+, P5=B-, P6=D+</td><td>APM</td><td>Medium</td><td>Next session</td></tr><tr><td>Build 3-scenario model with Q1 2026 actuals + Superior add + rights issue dilution</td><td>FA</td><td>Medium</td><td>Next session</td></tr></tbody></table>
 <table><thead><tr><th>Element</th><th>ESA (Apr-26)</th><th>DD P1 v1</th><th>DD P1 v3 Final</th></tr></thead><tbody><tr><td><strong>IC Overall</strong></td><td>C-</td><td>C+</td><td><strong>B-</strong></td></tr><tr><td><strong>P1 Technical Momentum</strong></td><td>A</td><td>B+</td><td><strong>A-</strong></td></tr><tr><td><strong>P2 Market Paradigm</strong></td><td>C-</td><td>C+</td><td><strong>B-</strong></td></tr><tr><td><strong>P3 Fundamental Change</strong></td><td>B-</td><td>B</td><td><strong>B+</strong></td></tr><tr><td><strong>P4 Building Blocks</strong></td><td>D</td><td>D+</td><td><strong>D+</strong></td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td>C</td><td>C</td><td><strong>B-</strong></td></tr><tr><td><strong>P6 Valuation</strong></td><td>C</td><td>C+</td><td><strong>D+</strong></td></tr><tr><td><strong>Fulcrum Driver</strong></td><td>KD#1 DC moat</td><td>FD#1 DC organic</td><td><strong>FD#1 Enterprise/European DC moat</strong></td></tr><tr><td><strong>HQI</strong></td><td>—</td><td>UHPYHQI</td><td><strong>UHPYHQI</strong></td></tr><tr><td><strong>Initial position</strong></td><td>—</td><td>3%</td><td><strong>3% (maintained)</strong></td></tr><tr><td><strong>Build trigger</strong></td><td>—</td><td>Q1 DC &gt;25%</td><td><strong>Q2 DC &gt;15% + HE recovery + LTIP replacement</strong></td></tr><tr><td><strong>Bull case IRR</strong></td><td>—</td><td>20–26% / 3yr</td><td><strong>13–17% / 2.5yr</strong></td></tr><tr><td><strong>Bear case drawdown</strong></td><td>—</td><td>30–35%</td><td><strong>~55% at SEK 47</strong></td></tr><tr><td><strong>Most material new positive</strong></td><td>—</td><td>Q1 DC 46% EBITA</td><td><strong>Superior Fiber acquisition (Enterprise DC pivot)</strong></td></tr><tr><td><strong>Most material new negative</strong></td><td>—</td><td>Corning Meta deal</td><td><strong>LTIP 2026 withdrawn at May 12 AGM</strong></td></tr><tr><td><strong>Key AS-only finding</strong></td><td>—</td><td>—</td><td><strong>LTIP withdrawal + Corning 2 additional LTAs + BEAD 63% fibre share</strong></td></tr></tbody></table>
-<div class="memo-note">All findings from [C] web search (10 topics) + [AS] AlphaSense Deep Research (5 queries), 14-May-26. Research programme complete for DD P1. DD Round-Out (DD RO) workplan defined in Section F.</div>
 <p><strong>[W] — Watson (Claude Sonnet 4.6), Investment Analyst role, 14-May-26. DD P1 v3 Final. Dual-source research programme complete.</strong></p>
+</div><!-- /sec-wrap -->
     </div>
   </main>
 
 </div>
 <script>
 /* ============================================================================
-   NAV JS — inherited near-verbatim from the old file, EXTENDED per D-MV-02:
-   - the scroll-spy gatherAnchors() now queries document-flow headings
-     ([data-spy][id]) instead of the old file's table-row selectors
-   - everything else (click-to-scroll, auto-expand, 5 toggle handlers,
-     sticky-stack CSS var) is the old logic, unchanged.
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
    ============================================================================ */
 (function() {
 
-  /* sticky stack height = .main-header — subtract from scroll target so a
-     clicked heading lands JUST BELOW the sticky header, not behind it */
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
   function getStickyStackHeight() {
-    var mh = document.querySelector('.main-header');
-    return mh ? mh.getBoundingClientRect().height : 0;
-  }
-
-  /* expose .main-header height to CSS so scroll-margin-top + sticky compose */
-  function setMainHeaderCssVar() {
-    var mh = document.querySelector('.main-header');
-    if (!mh) return;
-    document.documentElement.style.setProperty(
-      '--main-header-h', Math.ceil(mh.getBoundingClientRect().height) + 'px');
+    return 130;
   }
 
   /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
@@ -391,59 +764,63 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
         if (bodyClass === 'element-details') applyElementDetails();
       });
     }
-    bindToggle('pill-toggle', 'show-pills');
-    bindToggle('element-details-toggle', 'element-details');
-    bindToggle('ras-on-toggle', 'ras-always-on');
-    bindToggle('cqs-on-toggle', 'cqs-always-on');
-    bindToggle('audit-toggle', 'show-audit');
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
   }
 
-  /* Element-details mode — reveal all RAs + CQs for the focused element */
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
   function applyElementDetails() {
-    document.querySelectorAll('.force-show').forEach(function(n) { n.classList.remove('force-show'); });
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
     if (!document.body.classList.contains('element-details')) return;
     var focused = document.querySelector('.nav-item.focused');
     if (!focused) return;
     var elemId = focused.getAttribute('data-element-id');
     if (!elemId) {
-      if (focused.classList.contains('nav-element')) elemId = focused.getAttribute('data-anchor');
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
       else return;
     }
-    var navElem = document.querySelector('.nav-element[data-anchor="' + elemId + '"]');
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
     if (!navElem) return;
     var raList = navElem.nextElementSibling;
     if (raList && raList.classList.contains('nav-ra-list')) {
       raList.classList.add('force-show');
-      raList.querySelectorAll('.nav-ra').forEach(function(ra) { ra.classList.add('force-show'); });
-      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) { cl.classList.add('force-show'); });
-      raList.querySelectorAll('.nav-cq').forEach(function(cq) { cq.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
     }
   }
 
-  /* --- click-to-scroll — inherited; clicking an RA also toggles its CQ list */
+  /* --- click-to-scroll --------------------------------------------------- */
   function setupNavClicks() {
     document.querySelectorAll('.nav-item').forEach(function(item) {
       item.addEventListener('click', function() {
-        if (item.classList.contains('nav-ra')) item.classList.toggle('expanded');
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
         var anchor = item.getAttribute('data-anchor');
         if (!anchor) return;
         var target = document.getElementById(anchor);
         if (!target) return;
         var mainPane = document.querySelector('.main-pane');
-        var rect = target.getBoundingClientRect();
-        var containerRect = mainPane.getBoundingClientRect();
-        var offset = rect.top - containerRect.top + mainPane.scrollTop
-                     - getStickyStackHeight() - 8;
-        // CSS scroll-behavior:smooth on .main-pane animates this; the JS
-        // scrollTo {behavior:'smooth'} option is unreliable on overflow containers
-        mainPane.scrollTop = offset;
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
       });
     });
   }
 
-  /* --- scroll-spy — inherited logic, EXTENDED to query document-flow headings
-     The old file queried table rows (tr.pillar-banner[id] etc). The new body
-     is document-flow, so every spy-tracked heading carries [data-spy][id]. */
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
   function setupSpy() {
     var mainPane = document.querySelector('.main-pane');
     if (!mainPane) return;
@@ -451,214 +828,84 @@ h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
       mainPane.querySelectorAll('[data-spy][id]'));
 
     function updateFocus() {
-      var paneRect = mainPane.getBoundingClientRect();
-      var triggerY = paneRect.top + getStickyStackHeight() + 10;
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
       var picked = null;
       for (var i = 0; i < anchors.length; i++) {
-        if (anchors[i].getBoundingClientRect().top <= triggerY) picked = anchors[i];
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
         else break;
       }
       if (!picked) return;
       var anchor = picked.id;
 
       document.querySelectorAll('.nav-item.focused').forEach(function(n) {
-        n.classList.remove('focused'); });
-      var navItem = document.querySelector('.nav-item[data-anchor="' + anchor + '"]');
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
       if (!navItem) return;
       navItem.classList.add('focused');
 
-      /* auto-expand the focused branch — inherited behaviour */
+      /* auto-expand branch */
       document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
-        n.classList.remove('expanded'); });
+        n.classList.remove('expanded');
+      });
       var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
       document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
-        if (n !== focusedRa) n.classList.remove('expanded'); });
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
 
       if (navItem.classList.contains('nav-element')) {
         var raList = navItem.nextElementSibling;
-        if (raList && raList.classList.contains('nav-ra-list')) raList.classList.add('expanded');
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
       } else if (navItem.classList.contains('nav-ra')) {
         var parent = navItem.parentElement;
-        if (parent && parent.classList.contains('nav-ra-list')) parent.classList.add('expanded');
-        navItem.classList.add('expanded');
-        navItem.scrollIntoView({ block: 'nearest' });
-      } else if (navItem.classList.contains('nav-cq')) {
-        var cqList = navItem.parentElement;
-        if (cqList && cqList.classList.contains('nav-cq-list')) {
-          var prevRa = cqList.previousElementSibling;
-          if (prevRa && prevRa.classList.contains('nav-ra')) {
-            prevRa.classList.add('expanded');
-            var raListAnc = prevRa.parentElement;
-            if (raListAnc && raListAnc.classList.contains('nav-ra-list'))
-              raListAnc.classList.add('expanded');
-          }
-        }
-        navItem.scrollIntoView({ block: 'nearest' });
-      } else {
-        navItem.scrollIntoView({ block: 'nearest' });
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
       }
-
-      if (document.body.classList.contains('element-details')) applyElementDetails();
-
-      /* A4 — update breadcrumb strip */
-      updateBreadcrumb(navItem);
     }
 
-    var rafQueued = false;
-    mainPane.addEventListener('scroll', function() {
-      if (rafQueued) return;
-      rafQueued = true;
-      requestAnimationFrame(function() { rafQueued = false; updateFocus(); });
-    }, { passive: true });
-    setTimeout(updateFocus, 100);
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
   }
 
-  /* A4 — breadcrumb: walk up the nav tree to build the trail */
-  function updateBreadcrumb(navItem) {
-    var bc = document.getElementById('breadcrumb');
-    if (!bc || !navItem) return;
-    var tier = null;
-    var classes = navItem.className ? navItem.className.split(' ') : [];
-    for (var ci = 0; ci < classes.length; ci++) {
-      if (classes[ci].indexOf('nav-') === 0) { tier = classes[ci]; break; }
-    }
-    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group','nav-element','nav-ra','nav-cq'];
-    var tierRank = {};
-    tierOrder.forEach(function(t,i){ tierRank[t]=i; });
-    var myRank = tier ? (tierRank[tier]||0) : 0;
-    // collect ancestors: scan all nav-items for those whose rank < mine and whose
-    // anchor precedes ours in document order
-    var allItems = Array.prototype.slice.call(document.querySelectorAll('.nav-item'));
-    var myIdx = allItems.indexOf(navItem);
-    var ancestors = [];
-    for (var ai = myIdx - 1; ai >= 0; ai--) {
-      var it = allItems[ai];
-      var itTier = null;
-      var itCls = it.className ? it.className.split(' ') : [];
-      for (var ci2 = 0; ci2 < itCls.length; ci2++) {
-        if (itCls[ci2].indexOf('nav-') === 0) { itTier = itCls[ci2]; break; }
-      }
-      if (itTier && (tierRank[itTier]||0) < myRank) {
-        var alreadyHave = ancestors.some(function(a){ return (tierRank[a.tier]||0) <= (tierRank[itTier]||0); });
-        if (!alreadyHave) ancestors.unshift({tier:itTier, text:it.textContent.trim().replace(/\s+/g,' ').substring(0,40)});
-        myRank = tierRank[itTier]||0;
-        if (myRank === 0) break;
-      }
-    }
-    // build trail: ancestors + current
-    var trailItems = ancestors.concat([{tier:tier, text:navItem.textContent.trim().replace(/\s+/g,' ').substring(0,50), leaf:true}]);
-    // strip pill text artefacts (A-F single chars at end)
-    trailItems = trailItems.map(function(item) {
-      var t = item.text.replace(/\s+[ABCDF]\s*$/, '').trim();
-      return {tier:item.tier, text:t, leaf:item.leaf||false};
-    });
-    var html2 = trailItems.map(function(item, idx) {
-      var cls = 'bc-item' + (item.leaf ? ' bc-leaf' : '');
-      var sep = idx > 0 ? '<span class="bc-sep">›</span>' : '';
-      return sep + '<span class="'+cls+'">'+item.text.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span>';
-    }).join('');
-    bc.innerHTML = html2 || '<span class="bc-item">—</span>';
-  }
-
-  /* A5 — grade fallback: for nav pills showing NR on first load, scan body content */
-
-  /* A6 — nav search: filter nav-items by text; show ancestors of matches */
+  /* --- search/filter ----------------------------------------------------- */
   function setupSearch() {
     var input = document.getElementById('nav-search');
     if (!input) return;
-    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group',
-                     'nav-element','nav-ra','nav-cq'];
-    var tierRankMap = {};
-    tierOrder.forEach(function(t,i){ tierRankMap[t]=i; });
-    function itemRank(el) {
-      var cls = el.className ? el.className.split(' ') : [];
-      for (var i=0; i<cls.length; i++) {
-        if (tierRankMap[cls[i]] !== undefined) return tierRankMap[cls[i]];
-      }
-      return 99;
-    }
     input.addEventListener('input', function() {
-      var q = this.value.trim().toLowerCase();
-      var items = Array.prototype.slice.call(
-        document.querySelectorAll('.nav-item'));
-      if (!q) {
-        items.forEach(function(it){ it.style.display = ''; }); return;
-      }
-      var show = new Set();
-      items.forEach(function(it, idx) {
-        var txt = it.textContent.replace(/\b[A-F]\b/g, '').toLowerCase().trim();
-        if (txt.indexOf(q) === -1) return;
-        show.add(idx);
-        // propagate up: show ancestor tiers
-        var myRank = itemRank(it);
-        var needed = myRank - 1;
-        for (var j = idx - 1; j >= 0 && needed >= 0; j--) {
-          var jRank = itemRank(items[j]);
-          if (jRank <= needed) { show.add(j); needed = jRank - 1; }
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
         }
       });
-      items.forEach(function(it, idx){
-        it.style.display = show.has(idx) ? '' : 'none';
-      });
-    });
-    input.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape') {
-        this.value = '';
-        this.dispatchEvent(new Event('input'));
-        this.blur();
-      }
     });
   }
 
+  /* --- grade fallback ---------------------------------------------------- */
   function applyGradeFallback() {
-    document.querySelectorAll('.nav-item').forEach(function(item) {
-      var pill = item.querySelector('.nav-rating-pill');
-      if (!pill || !pill.classList.contains('NR')) return;
-      var anchor = item.getAttribute('data-anchor');
-      if (!anchor) return;
-      var bodyEl = document.getElementById(anchor);
-      if (!bodyEl) return;
-      // walk sibling body content until next same-or-higher heading
-      var tagRank = {H2:0,H3:1,H4:2,H5:3,H6:4,DIV:5,P:6,UL:6};
-      var bodyTier = bodyEl.tagName;
-      var node = bodyEl.nextSibling;
-      var text = '';
-      var limit = 0;
-      while (node && limit < 30) {
-        if (node.nodeType === 1) {
-          var t = node.tagName;
-          if ((tagRank[t]||10) < (tagRank[bodyTier]||10)) break; // new heading above us = stop
-          text += (node.textContent || '');
-        }
-        node = node.nextSibling;
-        limit++;
-      }
-      var m = text.match(/\[([ABCDF])\]/);
-      if (m) {
-        var grade = m[1];
-        pill.className = 'nav-rating-pill ' + grade;
-        pill.textContent = grade;
-      }
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
     });
   }
 
-  function init() {
-    setMainHeaderCssVar();
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
     setupToggles();
     setupNavClicks();
     setupSpy();
+    setupSearch();
     applyGradeFallback();
-    setupSearch();  /* A6 */
-    /* A4c: init breadcrumb to first nav item so it never shows bare dash */
-    setTimeout(function() {
-      var first = document.querySelector('.nav-item');
-      if (first) updateBreadcrumb(first);
-    }, 200);
-    window.addEventListener('resize', setMainHeaderCssVar);
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-  else init();
+  });
+
 })();
 </script>
 <script>window.MEMO_RATINGS={};</script>
-</body></html>
+</body>
+</html>

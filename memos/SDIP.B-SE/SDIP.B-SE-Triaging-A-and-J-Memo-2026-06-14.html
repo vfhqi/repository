@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SDIP.B-SE — Triaging Analysis &amp; Judgement Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:19px; font-weight:700; margin-top:2px; line-height:1.1; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-metadata-header">Section A — Metadata Header<span class="nav-fc">2</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">53</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-1-pillar-i-required-change-forces">Section C.1 — Pillar I: Required Change Forces<span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-double-weight">E1 — Required Input Change Forces <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">5</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-change-forces-present-external-tailwinds" data-element-id="e1-required-input-change-forces-double-weight">RA1 — Change Forces Present: External Tailwinds</span>
+<div class="nav-cq-list">
+<span class="nav-item nav-cq" data-anchor="cq1-strong-external-change-forces-tailwinds" data-element-id="e1-required-input-change-forces-double-weight">CQ1 — Strong External Change Forces / Tailwinds?</span>
+<span class="nav-item nav-cq" data-anchor="cq2-strong-internal-change-forces" data-element-id="e1-required-input-change-forces-double-weight">CQ2 — Strong Internal Change Forces?</span>
+</div>
+<span class="nav-item nav-ra" data-anchor="ra2-robust-base-present-cq1-cq5" data-element-id="e1-required-input-change-forces-double-weight">RA2 — Robust Base Present: CQ1-CQ5<span class="nav-fc">5</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e1-element-rating">E1 Element Rating<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-2-pillar-ii-core-analytical-framework">Section C.2 — Pillar II: Core Analytical Framework<span class="nav-fc">42</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-double-weight">E5 — Thematic Fit <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">18</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-t1-bear-market-top-of-bull-market" data-element-id="e5-thematic-fit-double-weight">RA1 — T1: Bear Market / Top of Bull Market<span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-t2-ai-disruption" data-element-id="e5-thematic-fit-double-weight">RA2 — T2: AI Disruption<span class="nav-fc">5</span></span>
+<span class="nav-item nav-ra" data-anchor="ra3-t3-iran-war-oil-price" data-element-id="e5-thematic-fit-double-weight">RA3 — T3: Iran War / Oil Price<span class="nav-fc">5</span></span>
+<span class="nav-item nav-ra" data-anchor="ra4-paradigm-fit" data-element-id="e5-thematic-fit-double-weight">RA4 — Paradigm Fit<span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e7-case-simplicity-double-weight">E7 — Case Simplicity <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">12</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-focused-bet" data-element-id="e7-case-simplicity-double-weight">RA1 — Focused Bet<span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-narrow-perimeter" data-element-id="e7-case-simplicity-double-weight">RA2 — Narrow Perimeter<span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="ra3-zero-headwinds" data-element-id="e7-case-simplicity-double-weight">RA3 — Zero Headwinds<span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="ra4-handful-change-from-current" data-element-id="e7-case-simplicity-double-weight">RA4 — Handful Change-From-Current<span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="ra5-conservative-ir" data-element-id="e7-case-simplicity-double-weight">RA5 — Conservative IR<span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">E8 — Fit to Investment Archetypes<span class="nav-fc">8</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-quality-compounder" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA1 — Quality Compounder<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-garp-compounder" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA2 — GARP Compounder<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra3-post-restructuring-value-recovery" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA3 — Post-Restructuring Value Recovery<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra4-turnaround-play" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA4 — Turnaround Play<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra5-contrarian-value" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA5 — Contrarian Value<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra6-serial-acquirer-platform" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA6 — Serial Acquirer Platform<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra7-dividend-compounder" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA7 — Dividend Compounder<span class="nav-fc">1</span></span>
+<span class="nav-item nav-ra" data-anchor="ra8-deep-value-asset-play" data-element-id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras">RA8 — Deep Value / Asset Play<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e11-business-quality-and-foundation">E11 — Business Quality and Foundation<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-2-group-ratings">Section C.2 Group Ratings</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii">Section D — Pillar III</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="e-1-verdict-progress">E.1 — Verdict: Progress</span>
+<span class="nav-item nav-subsection" data-anchor="e-2-investment-thesis-in-one-sentence">E.2 — Investment Thesis in One Sentence</span>
+<span class="nav-item nav-subsection" data-anchor="e-3-three-binary-esa-triggers-q3-2026-checkpoint-october-202">E.3 — Three Binary ESA Triggers (Q3 2026 checkpoint: October 2026 interim)</span>
+<span class="nav-item nav-subsection" data-anchor="e-4-supporting-actions">E.4 — Supporting Actions</span>
+<span class="nav-item nav-subsection" data-anchor="e-5-what-would-change-the-verdict-to-park-before-esa">E.5 — What Would Change the Verdict to Park Before ESA<span class="nav-fc">4</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-sources-and-quality-audit">Section F — Sources and Quality Audit</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">SDIP.B-SE — Triaging Analysis &amp; Judgement Memo</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-metadata-header" data-spy>
+<div class="snap-bar"><span class="id">SDIP.B-SE</span> SDIP.B-SE — Triaging Analysis &amp; Judgement Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 14-Jun-26 12:19</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">SDIP.B-SE</span></div>
+<div class="dr"><span class="k">Exchange</span><span class="v">Nasdaq Stockholm</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">04.066 — SA Tier 6 Low quality: Swedish lower-quality serial acquirers</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">53 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<p><strong>BLUF</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>A strategically improved but structurally constrained second-tier serial acquirer at a critical inflection point:</strong> Sdiptech has executed a genuine and decisive strategic pivot since June 2025. CEO Mattson divested 10 of 11 non-core legacy units within 10 months, generating SEK 258m in cash at above-<strong>6x</strong> EBITA multiples. He immediately took a SEK 400-500m goodwill write-down acknowledging historical capital misallocation, introduced a <strong>20%</strong> IRR hurdle on new acquisitions, installed a group ROCE target above <strong>15%</strong>, and restarted M&amp;A with two small but discipline-consistent acquisitions. Q1 2026 delivered <strong>6%</strong> core organic growth and the balance sheet deleveraged to <strong>2.81x</strong> net debt/EBITDA, below the <strong>3.0x</strong> ceiling. The case is real. The Tier 6 cohort label is also real: historical ROCE of 11-<strong>13%</strong>, UK revenue concentration at <strong>49%</strong>, SEK 914m in contingent earn-out liabilities, and a holding-level management team that is entirely new and unproven at scale under the new discipline framework.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>The FALSE FRIEND risk is the load-bearing analytical concern at this stage:</strong> The Risks report pre-mortem Analysis of Competing Hypotheses assigns 45-<strong>55%</strong> probability of failure over a 24-month horizon and identifies the FALSE FRIEND profile as the ACH winner with only two hard inconsistencies versus seven each for the bullish YES and bearish NO directional profiles. The mechanism is specific: SEK 914m in contingent earn-out liabilities generates non-cash paper profit when acquired subsidiaries miss targets, optically inflating reported net income while cash generation deteriorates. Wild quarterly cash-conversion swings from <strong>134%</strong> in Q4 2025 to <strong>54%</strong> in Q1 2026 are consistent with a working-capital posture that can temporarily inflate near-term metrics. This risk is not speculative; it is grounded in auditable balance sheet facts and explicitly validated by the market <strong>40%</strong> EV/EBITA discount to tier-1 compounder peers.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The M&amp;A engine is the fulcrum driver and it remains unproven under new management:</strong> DNB Carnegie <strong>15%</strong> EPS CAGR target requires M&amp;A to contribute 7-10 percentage points annually. The new M&amp;A head Peter Helsing, appointed May 2025 from Essity, has not yet demonstrated a track record at Sdiptech. The pipeline is described as active. The balance sheet constraint, net debt/EBITDA at <strong>2.81x</strong> with SEK 500m+ in earn-out payments due in 2026-2027, creates a genuine mathematical ceiling on M&amp;A capacity. The new management team walked away from two deals for valuation discipline, which is commendable; it also confirms the pipeline is not unconstrained. Rail Safety Systems and STORR are the first two post-restructuring acquisitions; both are small and within the cluster strategy. The M&amp;A restart at the pace required by the <strong>15%</strong> EPS CAGR thesis remains unproven.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The UK concentration is a structural vulnerability, not a temporary headwind:</strong> <strong>49%</strong> of group sales are denominated in GBP. Management own sensitivity shows a <strong>10%</strong> GBP/SEK move impacts operating profit by SEK 83m. Total GBP forward contracts at end-2025: SEK 186m, all maturing within 12 months, a fatal duration mismatch against a multi-year currency regime. Consensus macro forecasts SEK strengthening against GBP. The UK economy remains in prolonged industrial and construction softness. The Water and Bioeconomy segment faces structural wage-inflation margin compression that multi-year fixed-price contracts with insurance companies prevent being passed through on a 6-9 month lag. This is not cyclical normalisation; it is structural until contracts reprice.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>Sector calibration supports a cautious verdict:</strong> Bravida and Bufab are both graded B- at Triaging with demonstrably higher organic-growth breadth, stronger governance profiles, and more conservative capital structures than Sdiptech. Sdiptech cohort is explicitly Tier 6. The combination of a lower-quality cohort prior and a less robust structural profile versus comparably graded sector peers is a bearish composite signal. The correct grade reflects this: Sdiptech is a Progress candidate in the sense that the case is not dead, but ESA must rigorously interrogate the FALSE FRIEND hypothesis before conviction can increase.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>Verdict: Progress with a short leash and three binary ESA triggers:</strong> The divestment execution, the organic inflection, the deleveraging trajectory, and the revised M&amp;A discipline are genuine positives that prevent Park. The Tier 6 cohort label, the FALSE FRIEND risk, the UK FX structural vulnerability, the management team transition risk, and the market pre-existing <strong>40%</strong> discount for these precise reasons combine to make a strong-Progress verdict inappropriate. The correct call is Progress with three explicitly defined binary triggers testable at the Q3 2026 checkpoint.</div></div>
+<p><strong>Master Ratings (First Pass — Triaging)</strong></p>
+<p><strong>MR1 — Technical Momentum: [C+]</strong> Price SEK 238.80, sitting <strong>6.2%</strong> above the 50D MA (224.77) and <strong>23.1%</strong> above the 200D MA (193.94). The 52-week range is SEK 164.50-256.20, placing the current price at <strong>45%</strong> above the annual low and <strong>7%</strong> below the 52-week high, a significant absolute recovery from the trough. The 200D MA is rising in only 2 of the last 12 months, a structurally weak trending signal contrasting sharply with Bufab (12/12 rising) and Bravida (10/12 rising). RS percentile of 79 is solid at the market level but the MA200 rising-months metric indicates the structural uptrend is early rather than established. Momentum is net constructive at the absolute level but structurally immature relative to sector peers already at B- MR1 quality. The MA200 rising-months signal is load-bearing for this assessment.</p>
+<p><strong>MR2 — Sell-Side Earnings Momentum: [C+]</strong> Highly concentrated two-broker pool: DNB Carnegie (Buy, SEK 310 target, recently raised from SEK 305) and RedEye (Base case SEK 290, recently raised from SEK 280). Both analysts were cutting estimates through 2024-2025; DNB Carnegie cut adjusted EPS by up to <strong>21%</strong> over 18 months on FX headwinds and organic misses. Q1 2026 showed a sales beat (+<strong>3%</strong> versus consensus) but a modest EBITA miss (-<strong>2%</strong>). Near-term consensus revisions are marginally negative at L3M driven by SEK strengthening. Pool concentration at two brokers limits the reliability of the consensus read: two unanimous bulls do not constitute a crowd and create groupthink risk. The LTM pattern of estimate cuts, thin pool, and persistent FX headwind on forward EPS prevent a B-range reading.</p>
+<p><strong>MR3 — Thematic Fit: [B-]</strong> Four business areas positioned across multiple structural megatrends: electrification and data-centre build-out (Energy and Electrification, <strong>14%</strong> organic growth Q1 2026), water infrastructure and regulatory mandates (Water and Bioeconomy), safety systems and fire protection (Safety and Security), and cold-chain and logistics infrastructure (Supply Chain and Transportation). T1 bear-market positioning is net positive given regulated, GDP-plus demand drivers. T2 (AI disruption) is positive via the data-centre demand tailwind, evidenced in current revenue. T3 (Iran/oil) has negative channels (GBP headwinds, input cost inflation) and an energy-renovation tailwind. Thematic fit is genuinely above the Tier 6 cohort baseline. Held below B by Energy segment concentration on the T2 tailwind, UK FX structural vulnerability without adequate hedging, and Rolec hardware commoditisation.</p>
+<p><strong>MR4 — Pillar I (Change Forces): [C+]</strong> The strategic pivot is genuine and evidenced in reported financials. The divestment programme delivered at stated pace and organic inflection is occurring. Change forces are substantially offset by execution risk: the management team is almost entirely new at holding level, the M&amp;A engine has not been restarted at scale, the UK wage inflation pass-through lag is unresolved, and the Water and Bioeconomy margin recovery is unconfirmed. Against the Tier 6 cohort prior, C+ reflects that the change forces are real but the transition completion is in early stages with material execution risk on every critical dimension.</p>
+<p><strong>MR5 — Pillar II (Core Analytical Framework): [C+]</strong> Thematic fit is B-range. Case simplicity is reasonable with two clearly defined fulcrum drivers. Value chain position is appropriate, proprietary niche product assembly at <strong>67%</strong> of core sales. Archetype fit (GARP post-restructuring) is coherent. What prevents B-range: ROCE of <strong>13.5%</strong> versus 18-<strong>22%</strong> of tier-1 compounders is a hard quality gap; the FALSE FRIEND accounting risk creates genuine ambiguity about whether reported metrics reflect cash-generating reality; and the management team is unproven at scale under the new framework.</p>
+<p><strong>MR6 — Overall Case Verdict: [C+]</strong> A Progress recommendation at the weaker end of that verdict. The Tier 6 cohort label, the FALSE FRIEND ACH risk, the UK structural constraints, and the unproven management team collectively prevent a B-range MR6. The genuine positives, divestment execution, organic inflection, discipline markers in M&amp;A, proprietary product quality, prevent Park. This case can upgrade to B territory at ESA if the FALSE FRIEND hypothesis is disconfirmed across three binary quarterly metrics; it cannot be rated B at Triaging given current evidence.</p>
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-1-pillar-i-required-change-forces" data-spy><span class="id">C</span> 1 — Pillar I: Required Change Forces <span class="secn">5 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-double-weight" data-spy><span class="id">E1</span> Required Input Change Forces <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">5 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-change-forces-present-external-tailwinds" data-spy><span class="id">RA1</span> Change Forces Present: External Tailwinds</div>
+<div class="cq-head" id="cq1-strong-external-change-forces-tailwinds" data-spy>Strong External Change Forces / Tailwinds?</div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1 — Electrification and data-centre build-out is a structural, high-conviction demand tailwind with current revenue evidence:</strong> The Energy and Electrification segment grew <strong>14%</strong> organically in Q1 2026 and <strong>18%</strong> at adjusted EBITA level, driven by UK and European data-centre construction capacity expansion and accelerating electrification of commercial and industrial properties. DNB Carnegie identifies this as a multi-year structural pulse tied to AI computing capacity constraints across Northern Europe that are fully funded and not macro-correlated. Sdiptech Unipower and IDE Systems subsidiaries are positioned in power connectivity and smart control networks at the highest value-add stage of this infrastructure investment cycle. This is evidenced in current quarterly results rather than forecast.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ1 — European infrastructure deficit and regulatory mandates create GDP-plus demand that is non-deferrable across three of four business areas:</strong> Ageing infrastructure across Sdiptech target markets including water treatment, cold-chain refrigeration, fire safety, and rail safety is subject to progressively tightening EU and UK compliance standards that mechanically force customer investment regardless of economic cycle. Purchase timing is controlled by regulation rather than customer preference. Customers cannot defer a mandated equipment upgrade without risking certification withdrawal. This provides genuine defensive earnings resilience absent in discretionary industrial capital goods.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ1 — Post-pandemic cold-chain and logistics infrastructure investment cycle provides a durable demand floor with a flagship customer lock-in example:</strong> GAH has built a dominant position in UK commercial refrigerated vehicle equipment, with Ocado running exclusive annual orders of 300-500 vehicles. Expert testimony confirms GAH co-developed lightweight payload specifications locking Ocado into a switching-cost relationship unavailable to Thermo King and Carrier, with EBITA growth of <strong>76%</strong> post-acquisition demonstrating the pricing power embedded in this niche. The fleet customer base faces regulatory temperature-chain compliance requirements that prevent indefinite deferral of equipment upgrades.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA1 CQ1 — Fragmented European niche infrastructure acquisition universe provides a structural long-duration M&amp;A runway:</strong> The European niche infrastructure supplier market is hyper-fragmented with thousands of founder-led operators approaching succession. Target profile: companies generating SEK 20-50m EBIT, ROCE above <strong>50%</strong>, in specialised infrastructure niches. DNB Carnegie models Sdiptech M&amp;A pipeline sustaining <strong>8%</strong> acquired growth annually through 2032. The cluster strategy now offers acquired entrepreneurs a niche-community context improving pipeline quality relative to a pure financial-buyer relationship. The SEK 3.8bn credit facility (lower rates, three-year maturities, secured 2025) provides the financial infrastructure to pursue this pipeline within the leverage ceiling.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA1 CQ1 — Nordic and European energy renovation investment provides a counter-cyclical element for electrification segments:</strong> Elevated energy costs across Sweden, the UK, and Europe are mechanically driving energy-efficiency investment, including HVAC upgrades, building electrification, and energy monitoring, that feeds directly into the Energy and Electrification portfolio. Management confirmed in Q1 2026 commentary that improving demand visibility in Supply Chain and Transportation reflects delayed orders beginning to release, consistent with the broader Nordic industrial early-recovery evidenced in Bravida and Bufab Q1 2026 results.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA1 CQ1 — Safety regulation tightening creates hard demand floors across fire, safety, and security niches at the highest margins in the portfolio:</strong> The Safety and Security segment generates <strong>29.9%</strong> adjusted EBITA, the highest in the group, driven by the combination of proprietary product IP and non-deferrable regulatory compliance mandates. Certification requirements prevent customers from substituting Sdiptech solutions for unaccredited alternatives. Accreditation is unit-specific rather than generically transferable, creating structural barriers to entry that protect pricing power even in soft economic environments.</div></div>
+<div class="cq-head" id="cq2-strong-internal-change-forces" data-spy>Strong Internal Change Forces?</div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ2 — Divestment programme delivered at stated pace, removing the earnings drag from 11 non-core legacy units with quantified financial impact:</strong> CEO Mattson delivered 10 of 11 divestment completions within 10 months of appointment, generating SEK 258m in cash at above-<strong>6x</strong> EBITA multiples. The divested units represented <strong>15%</strong> of historical group sales but only <strong>5%</strong> of adjusted EBITA, mechanically elevating the retained portfolio margin baseline to <strong>21.5%</strong> (core operations) versus the reported group EBITA margin of <strong>19.6%</strong> in 2025. This is evidenced execution: the cash has been received, the entities are legally separated, and the financial impact is confirmed in Q1 2026 interim results with core operations isolated as the continuing portfolio.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ2 — New M&amp;A discipline framework replaces the prior regime volume-over-returns posture with measurable standards:</strong> The <strong>20%</strong> IRR hurdle on new acquisitions, cash-flow parameters in earn-out terms, and group ROCE target above <strong>15%</strong> are structural improvements absent in the pre-2025 regime. Management explicitly walked away from two deals in 2025-2026 because multiples exceeded safety parameters. DNB Carnegie confirms recent acquisitions (STORR, Rail Safety Systems) were completed at multiples below historical group averages, validating that the new discipline is applied in practice. RedEye explicitly labels this capital allocation posture as particularly noteworthy for a serial acquirer.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ2 — Cluster strategy installs an organic development mechanism absent from the prior pure-acquisition model:</strong> The four business area structure (January 2025) is supplemented by a cluster strategy grouping related subsidiaries for cross-selling, R&amp;D sharing, and procurement leverage. TEL outsourced-manufacturing model and GAH exclusive co-development partnership with Ocado represent early evidence of cluster-driven organic compound value rather than purely financial roll-up mechanics. Bernstein Research identifies the cluster strategy as differentiated versus generic serial acquirers, consistent with how the highest-quality Scandinavian compounders sustain organic growth above 3-<strong>4%</strong> annually through niche-depth.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA1 CQ2 — Balance sheet has deleveraged below the management ceiling with M&amp;A capacity restored:</strong> Net debt/adjusted EBITDA fell to <strong>2.81x</strong> in Q1 2026 (from <strong>3.39x</strong> in mid-2025), below the <strong>3.0x</strong> ceiling. Financial net debt excluding contingent earn-outs is <strong>2.12x</strong>, a more manageable level providing real acquisition capacity within credit facility headroom. Post-quarter, management simultaneously repurchased SEK 250m of sustainability-linked bonds and resumed M&amp;A with Rail Safety Systems, demonstrating concurrent deleveraging and M&amp;A restart capability. Contingent earn-out provisions are tapering from over <strong>50%</strong> of total net debt historically to <strong>25%</strong> currently, mechanically releasing balance sheet capacity as legacy earn-outs pay out in 2026-2027.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA1 CQ2 — Mattson capital allocation acts-not-talks signal is a meaningful positive differentiator within the Tier 6 cohort context:</strong> Within a cohort labelled as lower-quality acquirers, an incoming CEO who immediately executes a SEK 400-500m goodwill write-down rather than defending the legacy portfolio, redeems SEK 184m in preference shares eliminating an expensive financing layer, and repurchases SEK 250m in bonds to reduce interest costs is demonstrating capital allocation culture rather than just communicating it. DNB Carnegie, which initially rated the appointment as neutral, has upgraded to high conviction precisely because of the speed and transparency of execution. This is above-Tier-6 behaviour.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-robust-base-present-cq1-cq5" data-spy><span class="id">RA2</span> Robust Base Present: CQ1-CQ5 <span class="secn">5 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA2 CQ1 — Revenue base durability: proprietary products at 67% of core sales with regulatory replacement cycles provide structural recurring demand:</strong> The core revenue model is deliberately positioned at the product design and assembly stage with 50-<strong>65%</strong> gross margins, avoiding commodity manufacturing upstream and pure installation contracting downstream. <strong>67%</strong> proprietary products, <strong>27%</strong> service, <strong>6%</strong> installation. No single customer accounts for more than <strong>5%</strong> of group turnover. B2C exposure is below <strong>5%</strong>. Primary buyers are stable, solvent entities including municipalities, critical infrastructure operators, and large industrial stakeholders. The revenue base is structurally more defensible than pure-play industrial services and generates higher gross margins than distribution intermediaries.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ2 — Earnings quality: adjusted EBITA margin has structurally defended the 19-20% floor through the cycle, confirmed in annual cash generation:</strong> The group adjusted EBITA margin held in the 19-<strong>20%</strong> range through the 2024-2025 macro downturn despite negative organic growth and UK wage inflation pressure. Core operations reached <strong>21.5%</strong> adjusted EBITA in 2025, above the sector median of approximately <strong>17%</strong> for Swedish mid-cap industrials and higher than larger peers Addtech and Indutrade on this single margin metric. FCF per share expanded to SEK 16.97 in 2025 from SEK 12.90 in 2024, confirming that the margin is translating into cash at the annual level, though with substantial quarterly volatility that creates the FALSE FRIEND monitoring requirement.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA2 CQ3 — Financial base: new credit facility with improved terms and extended maturities provides adequate runway for M&amp;A pipeline:</strong> The SEK 3.8bn credit facility secured in 2025 (lower rates, three-year maturities) provides headroom for the M&amp;A pipeline under the <strong>3.0x</strong> leverage ceiling. Capital expenditure runs at approximately <strong>3%</strong> of net sales, keeping the model asset-light and preserving free cash flow. Working capital normalisation from the <strong>54%</strong> Q1 2026 conversion toward the LTM <strong>82%</strong> average is expected in subsequent quarters based on the quarter-end sales-concentration and seasonal inventory patterns management describes as standard for this portfolio type.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA2 CQ4 — Market position: leadership in specific niches with limited direct competition and accreditation barriers in each vertical:</strong> GAH in UK refrigerated vehicle equipment, TEL in airflow control, Unipower in power connectivity, Rail Safety Systems in rail track infrastructure, each micro-vertical typically has fewer than five significant competitors. Specification, accreditation, and established installer-relationship barriers prevent easy entry at the unit level. Bernstein Research confirms that Sdiptech niche positioning captures the most lucrative stage of the infrastructure value chain (proprietary design and assembly: 50-<strong>65%</strong> gross margins, 15-<strong>25%</strong> EBIT margins) while deliberately avoiding the commoditised downstream installation stage. Portfolio average is above the Tier 6 cohort baseline but with significant intra-portfolio variance.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ5 — Culture and talent: decentralised entrepreneurial model with cluster overlays is structurally appropriate, with improving turnover trend:</strong> The 41 independent business units under decentralised P&amp;L ownership preserve the entrepreneurial culture that makes small infrastructure companies worth acquiring and retaining. Staff turnover of <strong>18%</strong> in 2025 (down from <strong>21.4%</strong> in 2023) is declining on a clear trend though still elevated relative to Instalco at <strong>15.3%</strong>. The 2025 AGM approved a 650,000 warrant programme at strike prices of SEK 268-282, requiring 120-<strong>126%</strong> premium above volume-weighted average, aligning management incentives with genuine long-term compounding. Board Chair Samuelson holds 326,000 Class B shares providing strong principal-level skin in the game at the oversight layer.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-element-rating" data-spy><span class="id">E1</span> Element Rating <span class="g gC">C</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<p><strong>[C+]</strong> E1 — Required Change Forces: Sdiptech presents a genuine and evidenced set of external structural tailwinds (electrification/data-centre, European infrastructure mandate, regulatory demand floors) and internal change forces (divestment programme complete, M&amp;A discipline upgraded, balance sheet below ceiling, CEO acts-not-talks delivery on capital allocation). The change forces are not fabricated or forward-looking: the divestment cash has been received, the organic inflection is confirmed in Q1 2026 financials, the deleveraging is auditable, and the margin defence through the trough is documented across six consecutive years. <strong>vs cohort:</strong> against the Tier 6 Low quality label, C+ acknowledges that Sdiptech change force profile is demonstrably above what a lower-quality serial acquirer archetype baseline would predict. <strong>Held off B by:</strong> change force delivery is entirely concentrated in Mattson first 12 months and has not been proven at scale; the M&amp;A engine has executed only two small acquisitions post-restructuring; Water and Bioeconomy margin recovery from UK wage-inflation lag is unconfirmed; UK structural FX and wage constraints represent genuine headwinds not yet resolved. One year of execution on a single strategic pivot does not overcome the Tier 6 cohort prior to B-grade standard. <strong>Held off C by:</strong> divestment execution pace is exceptional by any standard in this cohort; the organic inflection is confirmed; and the proprietary product portfolio quality (<strong>67%</strong> of sales at <strong>60%</strong> gross margins) is genuinely above what the Tier 6 designation implies.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-2-pillar-ii-core-analytical-framework" data-spy><span class="id">C</span> 2 — Pillar II: Core Analytical Framework <span class="secn">42 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-double-weight" data-spy><span class="id">E5</span> Thematic Fit <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">18 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-t1-bear-market-top-of-bull-market" data-spy><span class="id">RA1</span> T1: Bear Market / Top of Bull Market <span class="secn">6 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1 T1 — Regulated infrastructure segments are structurally defensive against a prolonged bear market scenario:</strong> The Water and Bioeconomy, Safety and Security, and portions of Energy and Electrification are driven by compliance mandates creating demand independent of economic sentiment. Customer spending on water treatment upgrades, fire safety installation, and accredited safety systems is non-deferrable in the way that discretionary industrial maintenance is deferrable. Sdiptech deliberate strategy of targeting these regulated niches provides genuine T1 resilience absent in pure-play construction services or commodity distribution. The <strong>76%</strong> of group turnover contributing to UN SDGs is a proxy for the proportion of revenues with regulatory tailwinds rather than pure discretionary demand.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 T1 — The Supply Chain and Transportation segment carries material cyclical exposure that a bear market scenario challenges directly:</strong> Cold-chain, refrigerated logistics, and transportation infrastructure units are exposed to UK and European commercial vehicle investment cycles. UK commercial vehicle orders softened through 2024-2025 as higher interest rates compressed discretionary fleet investment. Management attributed delayed Supply Chain orders in Q1 2025 to global economic uncertainty, a classic T1 vulnerability in a bear scenario where these ordering decisions are deferred again rather than released as management expects.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA1 T1 — Rolec EV charging hardware is the weakest T1 position in the portfolio, concentrated in the UK:</strong> Rolec faces a severe structural commoditisation challenge from Chinese AC charger imports at USD 25-40 per unit, with over 60 competing AC charging suppliers now operating in the UK market. In a bear scenario where EV adoption slows and UK infrastructure subsidies remain inconsistent, Rolec faces both demand softness and hardware price deflation simultaneously. Management is addressing this through a software integration partnership with Monta, but the hardware revenue stream is structurally deteriorating. This is a core-retained unit despite the structural challenge.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA1 T1 — Organic recovery concentration in Energy creates single-driver fragility if that segment normalises:</strong> Q1 2026 <strong>6%</strong> core organic growth is driven almost entirely by Energy and Electrification at <strong>14%</strong> organic. Change Forces explicitly warns that top-tier organic growth rank relies entirely on a single division experiencing a temporary data-centre boom; excluding this pulse, underlying momentum severely lags proven peers. A T1 bear scenario slowing data-centre approval timelines or reducing UK electrification capex would materially erode the organic headline without a corresponding improvement in the remaining three segments.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>E5 RA1 T1 — Recurring service and software revenues provide a partial base-load buffer against project-revenue cyclicality:</strong> Service revenues at <strong>27%</strong> of core sales and software at <strong>6%</strong> represent approximately <strong>33%</strong> of the business that is structurally recurring and less exposed to discrete project timing. This provides a base-load cushion similar in function to Bravida <strong>49%</strong> service mix, though at lower absolute scale. Maintenance contracts on installed water treatment, fire safety, and airflow control systems provide revenue continuity even when new-installation volumes decline.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>T1 verdict: grade B-</strong> (above neutral, not strongly positive, specifically weaker than the regulatory-mandate framing alone would suggest due to UK concentration and Rolec structural deterioration).</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-t2-ai-disruption" data-spy><span class="id">RA2</span> T2: AI Disruption <span class="secn">5 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA2 T2 — Data-centre and electrification demand is the clearest direct AI positive with current revenue evidence:</strong> The AI computing boom is driving documented power demand growth and data-centre capacity expansion across Northern Europe that Sdiptech Energy and Electrification segment addresses directly. Power connection hardware, smart control systems, and monitoring networks for data-centre facilities are specialist products with high complexity that reward accredited suppliers. The <strong>14%</strong> organic growth in Q1 2026 is directly attributable to data-centre project orders in the UK and Europe. As AI deployment accelerates, the infrastructure requirement grows structurally and Sdiptech is positioned at the value-add end of the supply chain.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2 T2 — Smart building and IoT integration creates software moat deepening over time:</strong> IDE Systems provides smart building control and monitoring networks generating recurring software-layer revenue on top of initial hardware installation. Building management systems that are AI-enhanced create deeper switching costs and higher replacement friction than pure hardware. The digitisation of infrastructure management, including tracking airflow, monitoring temperature control, and automating safety responses, is a structural tailwind for subsidiaries positioned at the control layer, creating durable customer dependency rather than transactional hardware purchases.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA2 T2 — AI does not threaten the technical certification and safety accreditation moat across the core segments:</strong> The core competitive positioning in Safety and Security, Water and Bioeconomy, and Rail Safety Systems rests on technical accreditation and regulatory certification that is unit-specific, audit-intensive, and fundamentally human-expertise-driven. An AI tool can assist a certified technician but cannot replace the regulatory certification requirement. The professional expertise these units sell, including physical installation, calibration, and certification with regulatory accountability, is not the pattern-recognition work that large language models are displacing.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA2 T2 — AI-driven logistics optimisation is a slow-developing mild headwind to cold-chain hardware over a multi-decade horizon:</strong> Advanced logistics route optimisation driven by AI may over time reduce total refrigerated vehicle fleet sizes if delivery efficiency increases route density. This is currently hypothetical rather than imminent. GAH co-developed bespoke specifications for Ocado fleet provide near-term protective moat. This risk does not affect the Triaging investment case.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>T2 verdict: grade B</strong> (positive, the direct AI tailwind through data-centre demand is evidenced in reported numbers, the moat deepening through smart systems is structural, and the cold-chain logistics risk is slow-developing).</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra3-t3-iran-war-oil-price" data-spy><span class="id">RA3</span> T3: Iran War / Oil Price <span class="secn">5 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA3 T3 — GBP structural vulnerability is amplified in oil-price shock scenarios through dual channels:</strong> Management own sensitivity shows a <strong>10%</strong> GBP/SEK move impacts operating profit by SEK 83m. Total GBP forward contracts at end-2025: SEK 186m, all maturities within 12 months, a fatal duration mismatch against a multi-year currency regime. A multi-year period of SEK strength against GBP, which consensus macro already anticipates, permanently erodes translation earnings from the <strong>49%</strong> UK revenue base in a way that cannot be hedged within the current balance sheet currency composition. This is not a scenario risk in isolation; it is the base-case trajectory.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA3 T3 — Energy cost inflation in the UK directly compounds Water and Bioeconomy margin recovery timeline:</strong> UK minimum wage increases with a 6-9 month pass-through lag interact multiplicatively with energy cost inflation in a high oil-price scenario. UK pipe-repair and water-treatment units operate on one-to-three-year fixed-price contracts with insurance companies, meaning energy and labour cost escalations between renewals are absorbed as margin compression rather than passed through immediately. This prevents margin defense during currency shocks, transforming translation risk into permanent economic impairment rather than temporary accounting noise.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA3 T3 — Nordic energy renovation investment is a partial counter-cyclical positive already reflected in run-rate revenues:</strong> Elevated energy prices accelerate the investment economics of energy-efficiency upgrades that Sdiptech Energy and Electrification segment partially addresses. This offset is genuine but already reflected in the <strong>14%</strong> organic growth figure and cannot fully absorb the cost-base and FX impacts of sustained oil-price escalation on the UK portfolio.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA3 T3 — Supply chain resilience posture provides protection against procurement disruption at cost of near-term cash conversion:</strong> Accelerated localised sourcing and strategic inventory buffering, which drove the <strong>54%</strong> Q1 2026 cash conversion, provide structural protection against worst-case T3 supply disruption scenarios. The posture absorbs cash in the near term but avoids the supply-chain exposure that would devastate companies with more fragile Asian sourcing dependencies. Management explicitly cited this as a deliberate decision rather than an operational management failure.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>T3 verdict: grade C</strong> (net headwind, concentrated in the UK FX and wage-cost channels; the energy renovation offset is real but already in the run-rate).</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra4-paradigm-fit" data-spy><span class="id">RA4</span> Paradigm Fit <span class="secn">2 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA4 — ESG paradigm alignment is structural and verified by revenue attribution, not marketing:</strong> <strong>76%</strong> of group turnover directly contributes to UN Sustainable Development Goals per management reporting, including water quality, cold-chain food safety, fire safety, and energy efficiency. This is a product portfolio consequence of targeting regulated infrastructure niches rather than a post-hoc ESG overlay. The CSRD and EU taxonomy alignment is structural and creates procurement preference from regulated infrastructure operators subject to their own ESG reporting obligations.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA4 — Supply chain resilience paradigm shift benefits the cluster and localisation strategy:</strong> Post-COVID and post-Ukraine, the dominant infrastructure procurement philosophy has shifted toward supply certainty and local provider preference. Sdiptech strategy of building knowledge clusters with deep local regulatory expertise is aligned with this paradigm. The deliberate reshoring of production (Rolec controller production from China to UK) and cluster-based procurement consolidation reflect a posture consistent with the prevailing corporate supply-chain-resilience mandate.</div></div>
+<p><strong>[C+]</strong> E5 — Thematic Fit: above-neutral overall. T2 (grade B) and the ESG paradigm alignment are the strongest positives. T3 (grade C) and the UK FX structural vulnerability without adequate hedging are the primary drags. <strong>vs cohort:</strong> against the Tier 6 label, Sdiptech thematic fit is clearly above what a lower-quality serial acquirer baseline would predict. <strong>Held off B by:</strong> Energy segment concentration on the T2 tailwind, UK FX structural vulnerability without adequate hedging, and Rolec hardware commoditisation. <strong>Held off C by:</strong> ESG product alignment, data-centre tailwind with evidenced revenue impact, and regulatory demand floor across three of four business areas.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-case-simplicity-double-weight" data-spy><span class="id">E7</span> Case Simplicity <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-focused-bet" data-spy><span class="id">RA1</span> Focused Bet <span class="secn">3 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1 CQ1 — The core investment bet has a clear single mechanism:</strong> Buy a post-restructuring second-tier Swedish serial acquirer with a newly cleaned proprietary-product portfolio trading at a <strong>40%</strong> discount to tier-1 compounder peers at the moment a new management team installs capital allocation discipline, while the organic recovery from the 2024-2025 trough continues and the M&amp;A engine restarts. Returns come from two simultaneously occurring drivers: organic improvement as the cleaned portfolio expresses its full earnings power, and multiple re-rating as the market gains confidence that the FALSE FRIEND risk has been disconfirmed. DNB Carnegie frames this as a comeback story at an unjustified <strong>40%</strong> discount with SEK 310 target implying <strong>30%</strong> upside from current levels.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ2 — The case has two fulcrum drivers and one monitored risk:</strong> Driver 1: M&amp;A restarts at the new discipline standard, adding 7-<strong>10%</strong> acquired sales growth annually with ROCE above <strong>15%</strong>, evidenced by two post-restructuring deals and an active described pipeline. Driver 2: Water and Bioeconomy and Supply Chain segments recover as UK wage contracts reprice and delayed orders release, broadening the organic growth base from Energy dependence to all four areas. Monitored risk: FALSE FRIEND hypothesis, whether reported earnings metrics accurately reflect cash-generating reality or are being temporarily inflated by earn-out accounting mechanics and working-capital management. These three elements define the case completely.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA1 CQ3 — The drivers are not dependent on macro recovery; only the monitored risk requires positive cash flow confirmation:</strong> Driver 1 (M&amp;A restart) requires available targets, credit headroom, and management discipline, none requiring macro recovery. Driver 2 (segment broadening) requires contract repricing completion in Water and Bioeconomy and order release in Supply Chain, both internal execution events on one-to-three quarter timelines. The FALSE FRIEND risk is monitored through specific quarterly metrics: cash conversion LTM stability, Level 3 contingent liability footnote movements, and statutory EPS versus adjusted EPS divergence.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-narrow-perimeter" data-spy><span class="id">RA2</span> Narrow Perimeter <span class="secn">3 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA2 CQ1 — Geography has a dominant perimeter (UK at 49%) with a clear secondary growth geography (Germany as primary new consolidation market):</strong> Two primary markets accounting for approximately <strong>65%</strong> of revenue define a tractable geographic perimeter for analytical monitoring. Germany is the primary new consolidation market, with rail safety and supply chain clusters providing the initial platform. The Nordics contribute <strong>16%</strong> and are recovering alongside the broader Nordic industrial cycle evidenced in Bravida and Bufab results.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2 CQ2 — Value chain position is clearly defined and now purified by the divestment programme:</strong> <strong>67%</strong> proprietary products, <strong>27%</strong> service, <strong>6%</strong> installation. The divestment of 11 service-heavy, installation-heavy, low-margin units has concentrated the portfolio at the target value chain stage. The value chain clarity means the business competes on certified technical expertise rather than price, and the competitive set is narrow accredited niche suppliers rather than broad industrial services companies.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA2 CQ3 — Four business areas provide adequate portfolio structure without an unmanageable monitoring perimeter:</strong> Supply Chain and Transportation, Energy and Electrification, Water and Bioeconomy, and Safety and Security are four distinct but coherent niche groupings with identifiable external demand drivers and peer-benchmarkable margin profiles. No single unit accounts for more than <strong>10%</strong> of group EBITA. The cluster strategy groups related units within each area, reducing the monitoring burden from 41 independent business units to a smaller number of coherent clusters.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra3-zero-headwinds" data-spy><span class="id">RA3</span> Zero Headwinds <span class="secn">2 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA3 CQ1 — The zero-headwind test fails on four identifiable, substantive dimensions:</strong> First, UK wage inflation with a 6-9 month pass-through lag in Water and Bioeconomy, confirmed by management, unresolved in Q1 2026, ongoing in multi-year fixed-price insurance contracts. Second, Rolec EV charging hardware commoditisation, confirmed by expert network, confirmed by market data (60 AC charging suppliers), unresolved despite the Monta software partnership. Third, the SEK 914m contingent earn-out liability representing <strong>25%</strong> of total net debt, creating both a SEK 500m+ cash consumption obligation in 2026-2027 and an earnings-quality risk from the non-cash paper-profit mechanism when subsidiaries miss targets. Fourth, the holding-level management team is entirely new and has not demonstrated a full M&amp;A acquisition-to-integration-to-ROCE cycle under the new discipline framework.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA3 CQ2 — The core organic drivers face no structural impediments, only execution and timing risks:</strong> The data-centre electrification demand is real and growing. The water infrastructure compliance mandate is non-deferrable. Rail Safety Systems is integrated into an existing cluster. Safety and Security at <strong>29.9%</strong> EBITA has minimal headwinds. On three of four business areas the structural picture is clean; the headwinds are concentrated in Water and Bioeconomy (wage/FX) and Rolec (hardware commoditisation), which together represent a meaningful but not dominant share of portfolio earnings.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra4-handful-change-from-current" data-spy><span class="id">RA4</span> Handful Change-From-Current <span class="secn">2 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA4 CQ1 — The specific changes required for the base case are defined and measurable on a quarterly basis:</strong> Change 1: Water and Bioeconomy adjusted EBITA margins must recover from <strong>20.7%</strong> to above <strong>22%</strong> within two quarters, confirming contract repricing is taking effect. Change 2: Three to four acquisitions must close in 2026-2027 at or below <strong>9x</strong> EBITA without breaching <strong>3.0x</strong> net debt/EBITDA, demonstrating M&amp;A engine restart at new discipline standard. Change 3: LTM cash conversion must stabilise at 75-<strong>85%</strong> without the <strong>54%</strong>/<strong>134%</strong> extremes widening further, confirming earnings quality matches reported adjusted metrics. All three are observable from quarterly interim reports.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA4 CQ2 — Tracking metrics are available, specific, and unambiguous:</strong> Net debt/EBITDA quarterly (interim reports); adjusted EBITA margin by business area (reported by segment); acquired EBITA contribution (stated in management commentary); LTM cash conversion (guided and tracked by management); contingent liability Level 3 revaluation (disclosed in quarterly footnotes). No measurement ambiguity exists that could obscure a deteriorating case before it materialises.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra5-conservative-ir" data-spy><span class="id">RA5</span> Conservative IR <span class="secn">2 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA5 CQ1 — CEO Mattson has established a genuine honest-tracker posture in his first 12 months:</strong> Mattson acknowledged unacceptably negative historical organic growth at the CMD, executed the goodwill write-down immediately rather than defending the legacy portfolio, and has provided cautious near-term demand guidance while exceeding on strategic delivery metrics. DNB Carnegie confirmed Q1 2026 EBITA landed exactly in line with Modular Finance consensus. The honest-tracker archetype provides structural buffer against consensus-miss risk. However, the track record is 12 months under a new CEO, not a multi-cycle established posture.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA5 CQ2 — The prior guidance posture under the previous CEO was mixed, establishing a prior-period credibility gap:</strong> Under the previous CEO, Sdiptech repeatedly missed top-line sales estimates through 2024-2025 (Q3 2025: -<strong>4%</strong> miss, Q2 2025: -<strong>2%</strong> miss, Q4 2025: -<strong>2%</strong> miss) and was subject to sustained broker estimate cuts totalling up to <strong>21%</strong> over 18 months. The transition to the honest-tracker posture is genuine but thin in track record. This prior-period gap is part of why the stock trades at a <strong>40%</strong> discount to peers rather than at a premium, and it cannot be erased in one year of execution.</div></div>
+<p><strong>[C+]</strong> E7 — Case Simplicity: the case has clear drivers, a defined change-from-current, a focused bet, and a tractable geographic and value chain perimeter. These qualify for C+ rather than C. <strong>vs cohort:</strong> against the Tier 6 label, case simplicity is above the cohort baseline: the case is not operationally complex, the metrics are available, and the FALSE FRIEND risk is explicitly identified and monitorable rather than hidden. <strong>Held off B by:</strong> the four active headwinds are substantive, the honest-tracker posture is not proven over a multi-cycle track record, and the Energy concentration on the organic growth driver creates case fragility. <strong>Held off C by:</strong> case mechanics are clear, tracking metrics are available and unambiguous, the FALSE FRIEND risk is disclosed rather than hidden, and geographic and value-chain perimeters are well-defined.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-to-investment-archetypes-3-bullet-carve-out-all-8-ras" data-spy><span class="id">E8</span> Fit to Investment Archetypes <span class="secn">8 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-quality-compounder" data-spy><span class="id">RA1</span> Quality Compounder <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA1 — Sdiptech is a quality compounder aspirant, not yet a confirmed quality compounder:</strong> The archetype requires demonstrated ROCE above <strong>20%</strong>, multi-decade M&amp;A track record with consistent per-share value creation, and capital allocation culture institutionalised rather than CEO-dependent. Sdiptech current ROCE is <strong>13.5%</strong>, improving but well below the 18-<strong>22%</strong> required for tier-1 compounder designation. Historical acquisitions at <strong>9x</strong>+ EBITA requiring a SEK 500m goodwill write-down are inconsistent with the archetype capital efficiency standard. The new discipline (<strong>20%</strong> IRR, <strong>15%</strong> ROCE target) is a 12-month-old aspirational posture rather than a demonstrated multi-cycle track record. Fit: partial, aspirational, requires multi-year confirmation.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-garp-compounder" data-spy><span class="id">RA2</span> GARP Compounder <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA2 — The GARP archetype is the strongest current fit at 11x EV/EBITA with confirmed 6% core organic growth:</strong> At <strong>11x</strong> EV/EBITA versus 15-<strong>22x</strong> for peers, and with Q1 2026 organic growth of <strong>6%</strong> and a legitimate recovery case, Sdiptech screens as a potential GARP setup for investors willing to accept the execution risk of the post-restructuring transition. The <strong>40%</strong> discount provides the reasonable price component; the question is whether <strong>6%</strong> core organic growth and the M&amp;A restart confirm the growth component is sustainable and broad-based. RedEye SEK 290 base case (<strong>29%</strong> upside) and DNB Carnegie SEK 310 target (<strong>30%</strong> upside) quantify the GARP opportunity. The risk is that the discount is warranted rather than unjustified, which is precisely what the FALSE FRIEND hypothesis posits.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra3-post-restructuring-value-recovery" data-spy><span class="id">RA3</span> Post-Restructuring Value Recovery <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA3 — The post-restructuring value recovery archetype is the most precise fit at this stage:</strong> A previously capital-undisciplined serial acquirer has hired a new CEO who executed rapid portfolio rationalisation, introduced structural financial discipline, and rebuilt the financial architecture for a new cycle. The stock prices the recovery premium at a discount because the market is appropriately uncertain whether the restructuring has addressed root causes or merely symptoms. This archetype typical risk is exactly the FALSE FRIEND hypothesis. The key confirmatory evidence required at ESA: three to four quarters of cash conversion stability at 75-<strong>90%</strong>, M&amp;A execution at the new discipline standard, and Water and Bioeconomy margin recovery through contract repricing.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra4-turnaround-play" data-spy><span class="id">RA4</span> Turnaround Play <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA4 — Partial fit, but the turnaround archetype overstates severity:</strong> Turnaround plays imply businesses in genuine distress with solvency risk or structural market position collapse. Sdiptech does not fit this; the core portfolio maintained above-<strong>19%</strong> EBITA through the trough and the balance sheet remained below the covenant ceiling. The correct characterisation is post-restructuring value recovery (RA3). The distinction matters because turnaround plays carry existential risk while this case primary risk is FALSE FRIEND optical inflation, a different failure mode requiring different monitoring metrics.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra5-contrarian-value" data-spy><span class="id">RA5</span> Contrarian Value <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA5 — Contrarian value elements are present but the discount is grounded in verifiable facts rather than temporary sentiment pessimism:</strong> The <strong>40%</strong> discount to tier-1 peers creates apparent contrarian value. However, genuine contrarian value requires conviction that the market is wrong about a specific thesis. The market discount for Sdiptech is grounded in verifiable facts including ROCE gap, earn-out mechanics, UK FX vulnerability, and management transition, rather than temporary sentiment pessimism. The correct classification is GARP post-restructuring recovery rather than pure contrarian value.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra6-serial-acquirer-platform" data-spy><span class="id">RA6</span> Serial Acquirer Platform <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA6 — The serial acquirer platform archetype is the correct structural description but is currently in a rebuilding phase:</strong> Sdiptech declared architecture is a serial acquirer platform with decentralised operations, cluster-based organic development, and an M&amp;A engine funded by ongoing free cash flow. This is accurate. The platform is currently rebuilding: M&amp;A head is new (12 months), first two post-restructuring acquisitions are small, and earn-out obligations from the previous cycle constrain capital deployment. Platform quality will be defined over the next 18-24 months by whether the new team can execute acquisitions at the pace and returns required. Current evidence is directionally positive but insufficient to confirm platform-quality serial acquirer designation against the tier-1 Nordic compounder standard.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra7-dividend-compounder" data-spy><span class="id">RA7</span> Dividend Compounder <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA7 — No fit:</strong> Sdiptech pays zero ordinary dividend, explicitly retaining capital for M&amp;A compounding. The preference shares were redeemed to eliminate the expensive dividend obligation on that instrument. The archetype does not apply.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra8-deep-value-asset-play" data-spy><span class="id">RA8</span> Deep Value / Asset Play <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA8 — Minimal fit:</strong> The <strong>40%</strong> EV/EBITA discount is a quality-gap valuation discount rather than a deep-value asset play. The business is not asset-heavy; goodwill and intangibles constitute the dominant asset class. Deep value requires tangible asset backing that does not exist here.</div></div>
+<p><strong>[C+]</strong> E8 — Archetype Fit: the GARP compounder and post-restructuring value recovery archetypes provide a coherent framework, and the serial acquirer platform architecture is the correct structural description. The quality compounder designation remains aspirational. <strong>vs cohort:</strong> within the Tier 6 label, a GARP post-restructuring setup at <strong>11x</strong> EV/EBITA is a recognisable and potentially rewarding archetype, but the quality compounder re-rating that the bulls implicitly price in requires evidence not yet present. <strong>Held off B by:</strong> quality compounder fit is aspirational not confirmed, the M&amp;A platform is rebuilding not proven, and the FALSE FRIEND risk creates archetype ambiguity between genuine GARP recovery and value trap. <strong>Held off C by:</strong> GARP and post-restructuring archetypes are clear and well-supported, the quantitative discount is real and quantified, and the operational evidence of the pivot is genuine.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-business-quality-and-foundation" data-spy><span class="id">E11</span> Business Quality and Foundation <span class="secn">4 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>E11 — Proprietary product positioning in regulated infrastructure niches provides structural quality above the Tier 6 cohort label:</strong> The core business quality metric is <strong>67%</strong> proprietary product revenue share at <strong>60%</strong> gross margins, generated from infrastructure segments where compliance mandates create non-deferrable demand and accreditation barriers limit competition. Safety and Security at <strong>29.9%</strong> adjusted EBITA and Energy and Electrification at <strong>26.4%</strong> adjusted EBITA are not easily replicable by commodity manufacturers or pure-service operators; they require technical IP, certification infrastructure, and established customer relationships developed over years. The gap between these margins and the installation-service tier (Bravida at 8-<strong>10%</strong> EBITA) quantifies the value of the proprietary product position. This quality is genuine and above the Tier 6 cohort implication.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>E11 — The ROCE gap versus tier-1 peers is the most important quality metric and requires direct confrontation:</strong> Group ROCE of <strong>13.5%</strong> versus Addtech at <strong>18%</strong>, Indutrade at <strong>20%</strong>, Lagercrantz at <strong>19%</strong>, and Lifco at <strong>22%</strong>+ is a hard fact defining quality against the compounder peer set. The primary cause is goodwill inflation from historical acquisitions at above-market multiples (<strong>9x</strong> EBITA versus 6-<strong>8x</strong> paid by tier-1 peers), combined with earn-out liabilities further inflating invested capital. Excluding acquired intangibles and central costs, core unit ROCE exceeds <strong>60%</strong>, consistent with tier-1 peers at the subsidiary level. The quality gap is therefore a holding-level capital allocation problem rather than an underlying business quality problem. If new management can demonstrate <strong>20%</strong> IRR acquisitions at lower multiples over 12-18 months, the ROCE gap will narrow structurally. This is the central quality case. It is plausible but unproven.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>E11 — Customer lock-in quality varies significantly across the four segments, with one structural weak spot:</strong> GAH lock-in via co-developed bespoke specifications for Ocado fleet, annual orders of 300-500 vehicles on a design-locked specification, represents near-captive revenue and the highest-quality customer relationship in the portfolio. Rail Safety Systems holds regulatory-compliance lock-in as a certified track equipment supplier. Water treatment and fire safety customers are locked in by accreditation requirements and the cost of recertifying alternative suppliers. Rolec EV charging customer relationship is the lowest-quality lock-in in the portfolio: hardware is being commoditised, the software partnership (Monta) is early-stage, and customer willingness to substitute Chinese alternatives is structurally high. Portfolio average is above the Tier 6 cohort baseline but with significant intra-portfolio variance.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>E11 — Governance quality requires a direct assessment: dual-class shares, low insider ownership, and former-CEO board presence are genuine structural discounts:</strong> Founder Ashkan Pouya controls <strong>14.7%</strong> of voting rights from <strong>5.1%</strong> of economic capital through Class A shares (10 votes versus 1 vote for Class B), conferring effective veto power over major strategic decisions without proportional economic accountability. CEO Mattson holds 23,003 shares, a negligible fraction, with RedEye explicitly flagging this as a negative that reduces the benefits of founder-led culture. The board is <strong>83%</strong> independent (5 of 6 directors), adequate but below the <strong>100%</strong> standard of best-in-class Nordic governance. Former CEO Jakob Holm sits on the board as the sole dependent director, introducing potential shadow-management risk during the critical transition. These are structural governance discounts already reflected in the market multiple.</div></div>
+<p><strong>[C+]</strong> E11 — Business Quality and Foundation: proprietary product positioning and regulated-infrastructure demand drivers represent genuine above-average business quality within the Tier 6 cohort context. The ROCE gap is a holding-level capital allocation problem rather than underlying business problem, a meaningful distinction for the investment case. Customer lock-in is above-average for the cohort but with Rolec as a specific weak spot. Governance has identifiable structural weaknesses. Composite grade C+ against the Tier 6 cohort baseline: Sdiptech underlying business quality is above the cohort label, but the governance and ROCE metrics prevent a B-range designation at Triaging.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-2-group-ratings" data-spy><span class="id">C</span> 2 Group Ratings</div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<table><thead><tr><th>Group</th><th>Grade</th><th>Rationale</th></tr></thead><tbody><tr><td>G1 — Change Forces</td><td>C+</td><td>Real and evidenced; concentrated in Mattson first year; not proven at scale</td></tr><tr><td>G2 — Analytical Framework</td><td>C+</td><td>GARP/post-restructuring archetypes clear; thematic fit B-range; case simplicity adequate</td></tr><tr><td>G3 — Business Quality</td><td>C+</td><td>Above Tier 6 cohort baseline; ROCE gap and governance discounts prevent B</td></tr><tr><td>G4 — Risks</td><td>D+</td><td>FALSE FRIEND ACH winner; earn-out mechanics; UK FX structural; management transition; bear case on verifiable facts</td></tr></tbody></table>
+<p>G5: Not in scope at Triaging stage.</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii" data-spy><span class="id">D</span> Pillar III</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<p>Pillar III analysis (competitive positioning depth, long-term moat structure, terminal value assessment) first appears at ESA.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">4 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-1-verdict-progress" data-spy><span class="id">E.1</span> Verdict: Progress</div>
+<div class="desc">Overall Assessment -- The headline ESA grade, key pillar ratings driving it, and a plain-English verdict: go to Deep Dive, monitor, or close.</div>
+<p>The evidence base supports Progress rather than Park. The case is not dead, not structurally impaired, and not a definitive value trap. The divestment execution pace, the Q1 2026 organic inflection, the deleveraging trajectory below the covenant ceiling, the revised M&amp;A discipline, and the genuine proprietary product quality in three of four business areas all constitute positive evidence that the strategic pivot has a rational and achievable endpoint. Against the Tier 6 cohort label, a C+ MR6 is the appropriate Triaging grade: Sdiptech is above-cohort on multiple dimensions, the case has a clear and monitorable thesis, and the discount to peers quantifies the potential return if the FALSE FRIEND hypothesis is disconfirmed.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-2-investment-thesis-in-one-sentence" data-spy><span class="id">E.2</span> Investment Thesis in One Sentence</div>
+<div class="desc">Pre-Conditions Before Acting -- The specific gating events or conditions that must be satisfied before initiating or sizing a position.</div>
+<p>Buy a post-restructuring Swedish serial acquirer with a newly cleaned proprietary-product portfolio trading at a <strong>40%</strong> discount to tier-1 compounder peers, at the moment a new management team installs capital allocation discipline and the organic recovery from the 2024-2025 trough continues, while monitoring three specific quarterly metrics that will confirm or deny whether the reported recovery is genuine cash-generating improvement or a FALSE FRIEND optical inflation that would crystallise into permanent capital impairment.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-3-three-binary-esa-triggers-q3-2026-checkpoint-october-202" data-spy><span class="id">E.3</span> Three Binary ESA Triggers (Q3 2026 checkpoint: October 2026 interim)</div>
+<div class="desc">Deep Dive Work Plan -- Phased research agenda: which elements require full depth, which experts to contact, and in what sequence.</div>
+<p><strong>Trigger 1 — Cash conversion normalisation (Pass: LTM cash conversion stabilises at 75-90% for four consecutive quarters without payable-stretching patterns expanding; Fail: LTM deteriorates below 70% or Q1/Q4 oscillation widens beyond the 54%/134% range):</strong> The wild quarterly swing is the most important near-term signal for the FALSE FRIEND hypothesis. Four consecutive quarters with LTM cash conversion in the 75-<strong>90%</strong> target range provides strong evidence against it. Deterioration or widening oscillation confirms that working-capital management is covering earnings-quality deterioration.</p>
+<p><strong>Earn-out / M&amp;A mathematical constraint (directly linked to Trigger 1):</strong> The SEK 500m+ in earn-out payments due in 2026-2027 creates a three-way constraint that is mathematically incompatible with all three conditions being simultaneously true: (a) leverage held at or below <strong>2.81x</strong> net debt/EBITDA; AND (b) meaningful M&amp;A deployment restarted at the pace required by the <strong>15%</strong> EPS CAGR thesis; AND (c) earn-out payments made in full on schedule. One of three outcomes is necessary: (i) leverage rises above <strong>3.0x</strong> (covenant territory) as earn-outs are paid — detectable in quarterly balance sheet; (ii) M&amp;A is suspended during the earn-out payment period — detectable in absence of acquisitions in H2 2026; OR (iii) earn-out payments come in below modelled levels because subsidiaries miss their targets — which is the mechanistic confirmation signature of the FALSE FRIEND hypothesis (subsidiaries underperforming → non-cash earn-out liability reduction → optical net income inflation while FCF deteriorates). Watch which of these three resolves: only outcome (i) or (ii) is consistent with the bull case; outcome (iii) is the FALSE FRIEND confirmation signal.</p>
+<p><strong>Trigger 2 — M&amp;A restart at new discipline standard (Pass: two to three acquisitions closed at or below 9x EBITA with expected ROCE above 15% and without breaching 3.0x net debt/EBITDA by end-2026; Fail: no acquisitions, acquisitions above historical multiples, or leverage breach):</strong> Rail Safety Systems and STORR are encouraging but small. Two to three additional acquisitions at the stated discipline standard would confirm the pipeline is real and the discipline is systemic. Failure to deploy capital or deployment at inflated multiples validates the bear case that the <strong>20%</strong> IRR target is too restrictive to find adequate deal flow at the pace required for the <strong>15%</strong> EPS CAGR.</p>
+<p><strong>Trigger 3 — Water and Bioeconomy margin recovery (Pass: adjusted EBITA margin in W&amp;B recovers above 22% for two consecutive quarters; Fail: W&amp;B margin remains below 21% at Q3 2026 reporting):</strong> Water and Bioeconomy at <strong>20.7%</strong> in Q1 2026 is the weakest business area and the primary demonstration of the UK wage-inflation pass-through claim. Contract renegotiations delivering pricing uplift should be visible in the Q3 2026 interim. If not recovered above <strong>22%</strong> by Q3 2026, this confirms the wage-cost lag is either longer than guided or structural rather than temporary.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-4-supporting-actions" data-spy><span class="id">E.4</span> Supporting Actions</div>
+<p><strong>Action 1 — Commission ESA batch focused on four specific questions:</strong> (a) Expert call on GAH Ocado contract renewal risk and competitive response from Carrier and Thermo King, to verify whether the cold-chain moat is as durable as the bull case assumes or whether the co-developed specification can be replicated within two to three vehicle model generations. (b) Expert call on the UK EV charging market evolution and Rolec actual market share trajectory, to calibrate whether hardware commoditisation is accelerating, stabilising, or being mitigated by the Monta software partnership in practice. (c) Detailed analysis of the earn-out payment schedule by subsidiary against the FCF model, to stress-test the FALSE FRIEND scenario quantitatively and determine whether the SEK 500m+ obligations in 2026-2027 create a genuine liquidity constraint that forces equity issuance or covenant breach in a downside organic scenario. (d) CFO Lejdstrom actual capital allocation decisions during his prior 2018-2023 CFO tenure, specifically whether the acquisitions requiring the SEK 500m goodwill write-down were approved under his tenure, to assess whether returning CFO with institutional knowledge is genuinely additive or reinstates the prior-regime decision-making culture.</p>
+<p><strong>Action 2 — Establish monitoring cadence before Q3 2026 interim:</strong> Set October 2026 interim as the primary ESA trigger checkpoint. All three binary triggers are testable from that single report. If all three pass: escalate to ESA immediately. If one fails: continue monitoring focused on the failing dimension and re-evaluate at Q4 2026. If two or more fail: initiate Park review.</p>
+<p><strong>Action 3 — FALSE FRIEND quarterly check protocol (20 minutes per quarter):</strong> Each quarterly report, check explicitly: (a) statutory net income versus adjusted EBITA, widening non-GAAP gap signals earn-out mechanics at work; (b) contingent consideration movement in balance sheet footnotes, reduction in earn-out liability while subsidiaries are underperforming confirms the FALSE FRIEND mechanism; (c) Q1/Q4 cash conversion pattern versus LTM, diverging seasonal pattern signals working-capital management rather than operational improvement. These three checks provide early warning before a compounding capital loss occurs.</p>
+<p><strong>Action 4 — Obtain and review the full DNB Carnegie DCF model:</strong> The FactSet consensus FY26E EPS of SEK 16.00 at SEK 238.80 current price implies approximately <strong>15x</strong> P/E. Understanding the underlying EPS build, including organic growth assumptions, M&amp;A acquired growth assumptions, and FX translation assumptions, from the most detailed available broker model will clarify whether consensus already adequately prices the three identified failure risks.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-5-what-would-change-the-verdict-to-park-before-esa" data-spy><span class="id">E.5</span> What Would Change the Verdict to Park Before ESA <span class="secn">4 findings</span></div>
+<p>The following evidence combinations would make a Park verdict appropriate before the ESA stage:</p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext">LTM cash conversion deteriorates below <strong>65%</strong> while adjusted EBITA margins expand: classic FALSE FRIEND confirmation signature</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext">Net debt/EBITDA breaches <strong>3.0x</strong> ceiling due to earn-out payment obligations without corresponding M&amp;A deployment: leverage ceiling break before M&amp;A engine demonstrates capacity</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext">Water and Bioeconomy margins deteriorate further in H2 2026 despite the stated contract repricing timeline: structural UK margin compression rather than temporary lag</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext">CEO Mattson departs within 18 months: the holding-level management team is thin enough that his departure would strand the pivot at its most critical inflection point with no confirmed successor</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-sources-and-quality-audit" data-spy><span class="id">F</span> Sources and Quality Audit</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<p><strong>Sources Used</strong></p>
+<table><thead><tr><th>Source</th><th>Coverage</th><th>Quality</th></tr></thead><tbody><tr><td>SDIP.B-SE 41-change-forces/highlighted.md</td><td>Sections 1-9: leadership, strategy, external forces, financials, Q1 2026, peer ranking, SS commentary, key drivers</td><td>Primary; high coverage, ~77K characters, DNB Carnegie + RedEye + expert calls</td></tr><tr><td>SDIP.B-SE 42-business-foundations/highlighted.md</td><td>Business model, financial profile, industry structure, value chain, customer analysis, peer benchmarking</td><td>Primary; high coverage, ~83K characters</td></tr><tr><td>SDIP.B-SE 43-leadership-foundations/highlighted.md</td><td>CEO track record, leadership style, CFO, board composition, governance, culture, insider ownership</td><td>Primary; high coverage, ~108K characters</td></tr><tr><td>SDIP.B-SE 44-risks/highlighted.md</td><td>Short interest, bear case, accounting flags, FALSE FRIEND pre-mortem, ACH matrix, FX sensitivity analysis</td><td>Primary; high coverage, ~190K characters; load-bearing for E8 risk treatment and Section E triggers</td></tr><tr><td>BRAV-SE Triaging A&amp;J Memo 2026-06-03</td><td>Sector calibration: Nordic industrial organic growth Q1 2026, governance context, E1 grade B-, MR6 B-</td><td>Sector context; BLUF and E1 rating extracted</td></tr><tr><td>BUFAB-SE Triaging A&amp;J Memo 2026-06-03</td><td>Sector calibration: Nordic compounder organic growth Q1 2026, M&amp;A execution quality, E1 grade B-, MR6 B-</td><td>Sector context; BLUF and E1 rating extracted</td></tr><tr><td>prices.json (master-dashboard/data/)</td><td>Price 238.80, 52w high 256.20, 52w low 164.50, 50D MA 224.77, 200D MA 193.94, MA200 months rising 2, RS percentile 79, RS vs sector 77, RS vs industry 81</td><td>Quantitative; verified from source</td></tr></tbody></table>
+<p><strong>Cohort Peer Injection Audit</strong></p>
+<p>No cohort peers (Addnode ANOD.B-SE, Fasadgruppen FG-SE, Green Landscaping GREEN-SE) have research reports on disk at any stage. Cohort integration was performed exclusively through: (a) the Tier 6 Low quality cohort label as a structural bearish prior applied consistently through the grading methodology; and (b) the explicit statement throughout this memo that B in this cohort means top-quartile within Tier 6, not B-quality against the full compounder universe. The absence of peer reports does not cause grade inflation; it causes the cohort label to function as a bearish baseline that must be overcome by evidence rather than a neutral starting point. This is conservative and appropriate.</p>
+<p><strong>Sector Calibration Notes</strong></p>
+<p>Bravida Q1 2026 organic growth: +<strong>1%</strong> versus consensus -<strong>0.5%</strong>. E1 grade: B-. Sector read applied: Nordic industrial organic recovery is early-stage, not broad acceleration; Sdiptech <strong>6%</strong> core organic growth is nominally stronger but is Energy-concentrated and not comparable to Bravida broad-based service-and-installation mix. Bufab Q1 2026 organic growth: +<strong>2.2%</strong> versus consensus +<strong>1.0%</strong>. E1 grade: B-. Sector read applied: Bufab eleven consecutive quarters of gross margin expansion is a higher-quality evidence base for structural pricing power than Sdiptech single-year pivot; Bufab ROCE of <strong>13.9%</strong> is comparable to Sdiptech <strong>13.5%</strong>, but Bufab operates without the SEK 914m contingent earn-out obligation that creates Sdiptech specific earnings-quality risk. Both sector context memos grade at B-/C+ range, consistent with Sdiptech C+ overall grade given the additional Tier 6 cohort prior and the FALSE FRIEND risk absent in the sector comparators.</p>
+<p>Quality Control Audit: see §7 of the self-review debrief — memory/skills/investment-analyst/self-review-debriefs/SDIP.B-SE-Triaging-self-review-debrief-2026-06-03.md</p>
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"E1":{"grade":"C","label":"E1 Element Rating"},"E8.RA8":{"grade":"C","label":"Deep Value / Asset Play"}};</script>
+</body>
+</html>

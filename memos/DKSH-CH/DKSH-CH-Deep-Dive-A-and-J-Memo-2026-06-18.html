@@ -1,0 +1,1235 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DKSH HOLDING AG (DKSH-CH) — TRIAGING A&amp;J MEMO — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-administrative">SECTION A — ADMINISTRATIVE</span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary-bluf">SECTION B — EXECUTIVE SUMMARY (BLUF)</span>
+<span class="nav-item nav-section" data-anchor="section-c-pillars-i-and-ii">SECTION C — PILLARS I AND II<span class="nav-fc">192</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-required-input-change-forces-e1">C.1 — PILLAR I: REQUIRED INPUT CHANGE FORCES (E1)<span class="nav-fc">45</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-first-pass-2-double-">Element E1 — Required Input Change Forces <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">45</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-change-forces-summary" data-element-id="element-e1-required-input-change-forces-first-pass-2-double-">RA1 — Change Forces? — Summary<span class="nav-fc">18</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-robust-base-summary" data-element-id="element-e1-required-input-change-forces-first-pass-2-double-">RA2 — Robust Base? — Summary<span class="nav-fc">27</span></span>
+</div>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks">C.2 — PILLAR II: CASE BUILDING BLOCKS<span class="nav-fc">147</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum">GROUP 1 — CASE MOMENTUM<span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-second-pass-2-double-weight">Element E5 — Thematic Fit <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">24</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-suitability-for-bear-market-economic-downturn" data-element-id="element-e5-thematic-fit-second-pass-2-double-weight">RA1 — Suitability for Bear Market / Economic Downturn<span class="nav-fc">24</span></span>
+</div>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity">GROUP 2 — CASE SIMPLICITY<span class="nav-fc">101</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-first-pass-2-">Element E7 — Required Case Simplicity Guardrails <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">51</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-focused-bet" data-element-id="element-e7-required-case-simplicity-guardrails-first-pass-2-">RA1 — Focused Bet?<span class="nav-fc">12</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-narrow-perimeter" data-element-id="element-e7-required-case-simplicity-guardrails-first-pass-2-">RA2 — Narrow Perimeter?<span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="ra3-zero-headwinds" data-element-id="element-e7-required-case-simplicity-guardrails-first-pass-2-">RA3 — Zero Headwinds?<span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="ra4-handful-of-change-from-current-items" data-element-id="element-e7-required-case-simplicity-guardrails-first-pass-2-">RA4 — Handful of Change-From-Current Items?<span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="ra5-conservative-investor-relations" data-element-id="element-e7-required-case-simplicity-guardrails-first-pass-2-">RA5 — Conservative Investor Relations?<span class="nav-fc">9</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-first-pass-3-bull">Element E8 — Fit with Acceptable Case Setups<span class="nav-fc">50</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy">GROUP 3 — CORE PHILOSOPHY<span class="nav-fc">22</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-second-pass-light-4-bullet-">Element E11 — Value-Chain Dynamics<span class="nav-fc">22</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="ra1-demand-side-strong-fragile" data-element-id="element-e11-value-chain-dynamics-second-pass-light-4-bullet-">RA1 — Demand Side Strong / Fragile?<span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="ra2-competitive-supportiveness-aggression" data-element-id="element-e11-value-chain-dynamics-second-pass-light-4-bullet-">RA2 — Competitive Supportiveness / Aggression?<span class="nav-fc">9</span></span>
+<span class="nav-item nav-ra" data-anchor="ra3-disruption-forces" data-element-id="element-e11-value-chain-dynamics-second-pass-light-4-bullet-">RA3 — Disruption Forces?<span class="nav-fc">3</span></span>
+</div>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">DKSH HOLDING AG (DKSH-CH) — TRIAGING A&amp;J MEMO</div>
+      <div class="meta">Deep Dive A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">DKSH-CH</span> DKSH HOLDING AG (DKSH-CH) — TRIAGING A&amp;J MEMO — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 18-Jun-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Deep Dive</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">DKSH-CH (SIX Swiss Exchange)</span></div>
+<div class="dr"><span class="k">Currency</span><span class="v">CHF throughout unless stated</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary-bluf" data-spy><span class="id">B</span> EXECUTIVE SUMMARY (BLUF)</div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<p><strong>DKSH is a structurally real but financially mediocre Asian distribution intermediary whose change forces are modest, correlated, and contingent on macro recovery rather than company-specific action — this is not a large-positive-change-forces case as currently configured, and it does not yet meet the Triaging qualitative bar. The case warrants a conditional park pending evidence of the Healthcare re-acceleration thesis materialising, with a specific reassessment trigger identified below.</strong></p>
+<p><strong>BLUF Judgement Bullets:</strong></p>
+<p>1. <strong>The business model is real and the moat is non-trivial, but the financial outputs are structurally inadequate.</strong> DKSH earns ~2.6–<strong>3.4%</strong> EBIT margins, delivers ~8–<strong>9%</strong> adjusted EPS CAGR, and generates 75–<strong>80%</strong> cash conversion — all below the thresholds that make a concentrated Viewforth position mathematically plausible at <strong>25%</strong> IRR without a valuation re-rating catalyst that is not currently visible. The moat (regulatory registration infrastructure, route density) is genuine but bounded in Healthcare and weak in Consumer Goods.</p>
+<p>2. <strong>The change forces are multi-variable, correlated, and not compellingly large.</strong> The bull case requires Healthcare volume recovery + margin normalisation + Consumer Goods stabilisation to co-deliver simultaneously within 24 months. Each has middling individual plausibility; their joint probability is materially lower. The dominant macro risk (ASEAN economic softness, CHF strength) impairs all three change forces through the same channel — there is no uncorrelated upside driver that works independently.</p>
+<p>3. <strong>The structural bear case is credible and underpriced.</strong> Principal disintermediation (FMCG brand owners building direct-to-market capability across DKSH's core Southeast Asian geographies) is documented, ongoing, and structurally coherent. FX translation permanently caps CHF EPS growth 1.5–2.5pp below local-currency operational performance. Management has missed its own <strong>4%</strong> EBIT margin target for four consecutive years. These are not cyclical inconveniences — they are structural constraints on the investment case.</p>
+<p>4. <strong>Governance and family control compound the structural headwinds.</strong> Diethelm-Keller's ~<strong>45%</strong> stake structurally removes activist optionality and depresses institutional urgency around portfolio rationalisation, buyback deployment, and strategic boldness. The Technology segment has underperformed for 4–5 consecutive years without disposal. The conglomerate discount that UBS and others identify is real and unlikely to close without pressure that the ownership structure prevents.</p>
+<p>5. <strong>The case is not dead — it is premature.</strong> If Healthcare BU delivers &gt;<strong>6%</strong> organic growth in H1 2025 AND EBIT margin exits FY2025 above <strong>3.0%</strong> on a clean basis, the change-from-current thesis begins to have traction. Neither condition is yet confirmed. Progressing to Early-Stage Assessment before those data points are available risks analytical effort on a case that remains insufficiently differentiated from "steady-state low-growth distribution business."</p>
+<p><strong>Technical momentum: C</strong> — Stock has derated ~25–<strong>30%</strong> from 2021–22 highs and is consolidating without a clear catalyst; no bullish price action to anchor conviction.</p>
+<p><strong>Sell-side earnings momentum: D</strong> — Net negative over L12M: FY2025 EPS consensus trimmed 5–<strong>8%</strong> from Jan-25 base; no upgrade cycle visible; stabilisation post-FY2024 results is not positive momentum.</p>
+<p><strong>Thematic fit: C</strong> — APAC healthcare distribution and emerging-market infrastructure are valid 2025–26 themes, but DKSH's thin-margin model, CHF reporting currency, and family governance discount undercut the thematic premium.</p>
+<p><strong>Pillar I Case change elements: D</strong> — Change forces are modest and correlated; no dominant single fulcrum; multi-variable thesis with low joint probability of delivery within 24 months.</p>
+<p><strong>Pillar II Case building blocks: C</strong> — Business quality is real but below the Viewforth threshold: EBIT margins structurally thin, ROCE sub-<strong>15%</strong>, management guidance credibility constrained by repeated margin-target deferrals.</p>
+<p><strong>Pillar III Investment case components: Not applicable at this stage.</strong></p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillars-i-and-ii" data-spy><span class="id">C</span> PILLARS I AND II <span class="secn">192 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-required-input-change-forces-e1" data-spy><span class="id">C.1</span> PILLAR I: REQUIRED INPUT CHANGE FORCES (E1) <span class="secn">45 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-first-pass-2-double-" data-spy>Element E1 — Required Input Change Forces <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">45 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<p><strong>Element headline:</strong> DKSH's change forces are real in direction but modest in magnitude, correlated in structure, and not yet visible in the earnings data — the case sits at the boundary of plausible-but-inadequate rather than compellingly large-positive-change-forces.</p>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-change-forces-summary" data-spy><span class="id">RA1</span> Change Forces? — Summary <span class="secn">18 findings</span></div>
+<p><strong>Judgement:</strong> Change forces exist — Healthcare structural tailwind, margin recovery thesis, and Technology restructuring optionality are all real — but none individually generates <strong>25%</strong> IRR, and the three primary forces all depend on the same enabling condition (ASEAN macro recovery), which is not a company-specific catalyst.</p>
+<p><strong>Analysis and Information:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Healthcare BU growth (30–<strong>35%</strong> of group EBIT, growing at 4–<strong>5%</strong> organic in FY24 below the structural 6–<strong>8%</strong> potential) represents the clearest positive change force. The structural tailwind is genuine: ASEAN healthcare spending growing 7–<strong>9%</strong> pa, ageing demographics, expanding insurance coverage in Thailand, Vietnam, Indonesia. The mechanism to EPS is clear — Healthcare margin (~4.5–<strong>5.0%</strong>) is above group average (~2.6–<strong>2.7%</strong>), so any mix acceleration lifts group EBIT disproportionately.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Management's EBIT margin target of <strong>4.0%</strong> (stated since approximately 2020) has delivered <strong>60bps</strong> of the <strong>70bps</strong> improvement required in four years. The pace — approximately <strong>15bps</strong> per year — is real but slow. At this rate, the margin target represents a legitimate change force over a 3–5 year horizon, not a 12–18 month catalyst.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The Technology segment disposition or restructuring is an optionality that management has not acted on despite 4–5 consecutive years of underperformance. If executed, the drag removal and capital redeployment could deliver 5–<strong>8%</strong> EPS uplift. The probability within 24 months is low given the family ownership structure and management's demonstrated reluctance.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">FX translation reversal (CHF weakening vs ASEAN currency basket) would mechanically add 5–<strong>7%</strong> to reported EPS per <strong>5%</strong> CHF move. This is not a company-specific change force — it is a macro tailwind that management cannot engineer and that has been a sustained headwind over the prior 2+ years.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Capital allocation optionality (Healthcare bolt-on M&amp;A, buyback acceleration) exists given the conservative balance sheet (~0.5–<strong>1.0x</strong> net debt/EBITDA), but management has demonstrated preference for methodical bolt-ons over transformative action. The probability-adjusted EPS impact from this source is 3–<strong>6%</strong> over 24 months in the base case.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">The SAP S/4HANA migration and "Fit for Growth" efficiency programme could deliver CHF 30–60m in annualised savings by FY2026. Approximately CHF 20–25m of the CHF 40–60m target was confirmed achieved at FY2024 results. This is a real but modest and partly-priced cost change force.</div></div>
+<p><strong>CQ1: Strong external change forces / tailwinds?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">ASEAN healthcare spending CAGR of 7–<strong>9%</strong> per annum is a durable structural external tailwind; this is the strongest external force and the most independently reproducible across multiple data sources (WHO, IMF, IQVIA).</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Southeast Asian middle-class expansion (ADB: 1.2bn additional middle-income consumers by 2030) drives secular consumer goods and OTC health demand, supporting DKSH's underlying volume throughput.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Regulatory complexity in ASEAN healthcare distribution is increasing (pharmacovigilance mandates, traceability requirements, GDP compliance upgrades) — this structurally benefits DKSH's regulatory moat and raises barriers to principal insourcing.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Post-COVID supply-chain resilience awareness among FMCG and pharma multinationals has, to some extent, reinforced the outsourcing case for MES providers — principals who built direct-distribution capability during COVID found it costly and reverted to outsourcing in several instances.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">SNB easing cycle (SNB cut to <strong>0.25%</strong> in March 2025) creates a potential CHF depreciation tailwind that would mechanically boost reported EBIT; this is an external macroeconomic force, not a strategic one.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Technology hardware replacement cycle in Asia-Pacific, while not imminent, could provide a cyclical volume tailwind to DKSH's Technology BU if AI-device penetration accelerates consumer electronics demand in ASEAN markets.</div></div>
+<p><strong>CQ2: Strong internal change forces?</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The SAP migration (FY2024–FY2026) is the primary internal change force on the cost side — management has confirmed CHF 30–60m annualised savings target; the first CHF 20–25m is reportedly on track. This is a legitimate internal cost efficiency driver.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Healthcare/CRO mix shift is the primary internal change force on the revenue quality side — as Healthcare grows from ~30–<strong>35%</strong> to ~38–<strong>42%</strong> of group EBIT by FY2027 (bull case), group blended EBIT margin improves mechanically without requiring any operational heroics.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Management has demonstrated willingness to exit low-margin Consumer Goods contracts (15+ exits under prior CEO Butz, FY2016–FY2020); continuation of this portfolio discipline under new CEO Roesle is an internal force but pace under Roesle is unproven.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Digital route-to-market investment ("mySales" platform, DKSH Digital Commerce) represents an internal capability build that could defend against e-commerce disintermediation — the platform is in early commercial stages and not yet a quantified EPS driver.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">Rémy Roesle's Healthcare BU background gives him credible operational conviction in the highest-return segment; if he accelerates Healthcare M&amp;A and de-emphasises Consumer Goods, this is a genuine internal change force with 2–3 year payoff timeline.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">FY2024 capital returns policy review (management flagged intention to sustain CHF 50–75m buyback in FY2025) is a modestly positive internal capital allocation force — at current valuation, this is EPS-accretive.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-robust-base-summary" data-spy><span class="id">RA2</span> Robust Base? — Summary <span class="secn">27 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Rationale: Change forces exist but are multi-variable, correlated, and operating at insufficient magnitude for a <strong>25%</strong> IRR case — the base is not robustly growing, margins have compressed rather than expanded, the principal disintermediation headwind is structural and underpriced, and the change-from-current at reasonable multiples is modest rather than large.</div></div>
+<p><strong>Judgement:</strong> The base is adequately defensive — DKSH has not lost material ground in Healthcare, cash generation is consistent, and the distribution model is resilient through mild cycles. The base is NOT robust enough to support the bull case without incremental change forces delivering, however. The base-case trajectory (continued at current pace) produces ~8–<strong>9%</strong> EPS CAGR, which is insufficient for <strong>25%</strong> IRR at current multiples.</p>
+<p><strong>Analysis and Information:</strong></p>
+<p><strong>CQ1: Absence of external headwinds?</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">External headwinds are present and material. CHF appreciation vs ASEAN currency basket (approximately 8–<strong>12%</strong> cumulative over FY2021–FY2024) mechanically suppresses reported EBIT and EPS growth by 1.5–2.5pp annually — this is a permanent structural headwind for a CHF-reporting company with <strong>70%</strong>+ revenues in Asian currencies.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Digital disintermediation by FMCG principals building direct-to-market infrastructure in DKSH's core geographies is documented and ongoing. Unilever, P&amp;G, Nestlé have all made public direct distribution investments in Thailand and Malaysia. This is the most consequential external headwind and is structurally directional.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Southeast Asian consumer confidence has been subdued (Thailand household debt ~<strong>90%</strong> of GDP, political uncertainty, China second-order demand spillover); Consumer Goods BU organic growth has decelerated to flat-to-<strong>1%</strong> in FY2024 — the weakest leg of the business is facing structural and cyclical headwinds simultaneously.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Thai FDA regulatory reform discussions (ongoing, if implemented) could reduce DKSH's Healthcare regulatory moat in its single largest market (Thailand ~30–<strong>35%</strong> of group revenue).</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Amazon Business, Lazada, Shopee, TikTok Shop are all building B2B fulfilment infrastructure across Southeast Asia, attacking the FMCG last-mile channel that DKSH's Consumer Goods BU depends on.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Pharmaceutical principal insourcing (AstraZeneca, Novartis, Pfizer's own-distribution initiatives in Asia) represents a slow-building but directional headwind to DKSH's Healthcare BU — the one segment the bull case depends on.</div></div>
+<p><strong>CQ2: Well-invested base?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The warehouse and logistics infrastructure (300+ facilities, cold-chain network, 150,000+ retail outlet coverage in Thailand) represents a well-invested physical base that took decades and hundreds of millions in capex to build. This is a genuine well-invested competitive foundation.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The regulatory filing portfolio (&gt;10,000 active product registrations across 36 markets) is the most durable competitive asset — it represents decades of accumulated regulatory capital that cannot be replicated in fewer than 10–15 years.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">SAP S/4HANA migration is underway and represents active re-investment in operational infrastructure; capex at ~0.5–<strong>0.7%</strong> of revenue is modest but appropriate for an asset-light model.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">IT and digital commerce investment ("mySales," DKSH Digital Commerce) is active but behind digital-native logistics competitors by an estimated 2–3 years.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Healthcare CRO/life sciences capability has been built through bolt-on acquisitions; the DACH Healthcare operations represent a well-invested premium capability not easily replicated.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Consumer Goods distribution infrastructure is adequate but not exceptional — this is the most contested and least differentiated part of the portfolio, where investment has been partially diverted to Healthcare.</div></div>
+<p><strong>CQ3: Past/present fundamental delivery congruency with thesis?</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The bull thesis requires EBIT margin recovery toward <strong>4.0%</strong> from 2.6–<strong>2.7%</strong> FY2024. Delivery so far: FY2022 <strong>3.1%</strong> → FY2023 <strong>2.5%</strong> → FY2024 <strong>2.7%</strong> (estimated). This is not congruent with the thesis — margins compressed in FY2023 and have only partially recovered.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Management's <strong>4%</strong> EBIT margin target has been in place since ~2020 and has achieved approximately <strong>60bps</strong> of the required ~70–<strong>100bps</strong> improvement over four years. At current pace, the target requires another 2–3 years. This is partially congruent but too slow for a 24-month investment horizon.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The Healthcare organic growth thesis requires 6–<strong>8%</strong> pa. FY2024 delivery was approximately 4–<strong>5%</strong> — below the structural tailwind rate, suggesting either market-growth is not flowing through to DKSH or principal renegotiations are creating headwinds. This is not congruent.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The capital return thesis (buyback acceleration, progressive dividend) is broadly congruent — dividend maintained without cut through COVID; FY2025 buyback of CHF 50–75m signalled.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The <strong>100%</strong> beat frequency on EPS over L3Y reporting periods is congruent with the management-credibility component of the thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The persistent CHF drag (growing from CHF ~40m in FY2022 to CHF ~45m in FY2024 despite management's hedging improvements) is not congruent with a "FX normalisation" component of the bull thesis.</div></div>
+<p><strong>CQ4: Large change-from-current / mispricing?</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">The potential change-from-current is real in direction but modest in magnitude. If DKSH delivers <strong>4.0%</strong> EBIT margin by FY2026 (bull case), EPS could reach CHF 4.50–4.75 against current ~CHF 3.30–3.50 (estimated adjusted). At 16–<strong>17x</strong> P/E, that implies CHF 72–80 — approximately 10–<strong>15%</strong> above the current CHF 65–72 range. This is not a large change-from-current at reasonable multiples.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">For a large change-from-current, a re-rating scenario is required: if the market re-prices DKSH toward 18–<strong>20x</strong> P/E (Healthcare services peer valuation vs current distribution peer valuation), fair value could reach CHF 85–95. But this re-rating requires evidence of sustained Healthcare margin delivery and a narrative shift — neither of which is confirmed.</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The Vontobel downside case (CHF 60 target) is close to the current price, meaning the downside-to-upside ratio is not asymmetric enough for a concentrated Viewforth position without high conviction.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Sum-of-parts analysis (separating Healthcare from Consumer Goods/PM/Tech) could unlock a 20–<strong>30%</strong> value gap, but the Diethelm-Keller family control makes this strategically implausible without a major change in family posture.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">There is no identified catalyst (earnings delivery, strategic announcement, corporate action) that is near-term, high-probability, and large enough to generate a <strong>25%</strong> IRR in 12–18 months.</div></div>
+<p><strong>CQ5: Low trading multiple?</strong></p>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">DKSH trades at approximately 15–<strong>17x</strong> FY2025E P/E and 9–<strong>11x</strong> EV/EBITDA. This is not cheap: European distribution intermediaries without pricing power trade at 10–<strong>13x</strong> P/E; specialist distributors with stronger moats (Bunzl, Diploma) trade at 16–<strong>20x</strong>. DKSH occupies an uncomfortable middle — priced between the distribution commodity multiple and the specialist compounder multiple without cleanly deserving either.</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">On a FCF yield basis (~5–<strong>7%</strong>), DKSH appears more attractive, but this reflects the business's inability to deploy capital accretively rather than cheap valuation.</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">EV/EBIT at approximately 18–<strong>22x</strong> is elevated for a business with ~<strong>2.7%</strong> EBIT margins and sub-<strong>15%</strong> ROCE. At these returns on capital, the multiple embeds a significant amount of growth/improvement optionality that has repeatedly been deferred.</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">The Berenberg and ZKB Hold analysts (both credible, long-tenure) are at CHF 68–75 price targets — approximately current market price. When credible sceptics see the stock as fairly valued, not materially mispriced to the downside, the "low trading multiple" argument for a concentrated long is not supported.</div></div>
+<p><strong>E1 Element Rating: D</strong></p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks" data-spy><span class="id">C.2</span> PILLAR II: CASE BUILDING BLOCKS <span class="secn">147 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum" data-spy><span class="id">Grp 1</span> CASE MOMENTUM <span class="secn">24 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-second-pass-2-double-weight" data-spy>Element E5 — Thematic Fit <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">24 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<p><strong>Element headline:</strong> DKSH's thematic fit is mixed-to-weak across the three live macro scenarios most relevant to Viewforth's portfolio construction — it offers partial exposure to the APAC healthcare theme but is structurally vulnerable to AI disruption (in distribution), to bear market / economic downturn (thin margins amplify cyclical risk), and to FX-driven inflation (CHF structural drag).</p>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-suitability-for-bear-market-economic-downturn" data-spy><span class="id">RA1</span> Suitability for Bear Market / Economic Downturn <span class="secn">24 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Rationale: Partial thematic resonance with APAC healthcare infrastructure and emerging-market distribution, but the thin-margin model, CHF structural drag, AI disruption risk in Consumer Goods, governance discount, and conglomerate structure collectively produce a below-average thematic fit profile for a Viewforth concentrated position.</div><div class="lead-prose">Net negative SS earnings momentum (estimates cut L12M, no upgrade cycle) combined with moderate-at-best thematic fit produces a below-average Group 1 score; the stock is not in an upward momentum regime on any dimension.</div></div>
+<p><strong>Judgement:</strong> DKSH is partially defensive but not genuinely countercyclical — the Healthcare BU is relatively resilient, but the Consumer Goods BU (~45–<strong>50%</strong> of revenues) is directly correlated to ASEAN consumer confidence, and the thin-margin model amplifies any volume deceleration into an outsized EBIT impact.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Healthcare distribution (pharmaceuticals, medical devices) is genuinely defensive — pharmaceutical demand is largely inelastic and the prescription/OTC pipeline does not contract meaningfully in a mild downturn. This is the genuine defensive pillar within DKSH.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Consumer Goods FMCG distribution is moderately defensive (food, personal care) but not fully — discretionary FMCG categories (premium beauty, imported packaged foods) are exposed to ASEAN consumer retrenchment. Thailand household debt (~<strong>90%</strong> of GDP) and political uncertainty create downside sensitivity that the business model does not absorb.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The operating leverage structure is unfriendly in a downturn: fixed costs (warehouse infrastructure, regulatory teams, logistics fleet) create a high fixed-cost base relative to the thin EBIT margin (~<strong>2.7%</strong>). A 3–<strong>5%</strong> revenue decline would compress EBIT by an estimated 15–<strong>25%</strong>, given operating leverage characteristics.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">FY2020 COVID experience demonstrated partial defensiveness — EBIT fell ~<strong>25%</strong> in FY2020 despite the Healthcare BU holding; this is "more defensive than the market" but not meaningfully defensive in absolute terms.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Bear market multiple compression would be disproportionately harmful: at 15–<strong>17x</strong> P/E, a de-rating to 12–<strong>13x</strong> (consistent with distribution commodities in risk-off environments) implies 20–<strong>25%</strong> price downside even before any earnings compression.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">DKSH's balance sheet (low net debt/EBITDA ~0.5–<strong>1.0x</strong>) provides downside protection — no leverage-driven stress risk; the dividend is well-covered by FCF. This is a genuine defensive attribute in a bear market.</div></div>
+<p><strong>RA2 — Suitability for AI Disruption</strong></p>
+<p><strong>Judgement:</strong> DKSH faces material AI disruption risk in its Consumer Goods BU (AI-driven direct distribution by principals, B2B e-commerce platform intermediation, AI demand forecasting reducing DKSH's data-as-a-service value proposition) and moderate risk in Healthcare. This is the highest-impact thematic headwind for the case.</p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">AI-driven B2B e-commerce platforms (Lazada Business, GrabMart B2B, TikTok Shop merchant fulfilment) are using AI for route optimisation, demand prediction, and direct-to-retailer ordering — precisely the capabilities that underpin DKSH's Consumer Goods distribution value proposition. Each capability improvement by platforms directly erodes DKSH's competitive differentiation.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">FMCG brand owners are deploying AI-powered direct market access tools (AI demand sensing, automated replenishment to major retailers) that reduce their dependency on DKSH's salesforce and demand-forecasting service layer. Unilever's AI-driven direct-to-retail initiative in Thailand (2021–2023) is the clearest documented case.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">DKSH is investing in its own AI/digital capabilities (SAP migration, mySales platform, digital commerce infrastructure), but by management's own framing, these represent defensive investment to maintain relevance, not offensive AI differentiation. The company is a digital follower, not a leader.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Healthcare distribution is partially insulated from AI disruption — regulatory compliance, cold chain, and last-mile pharmacy dispensing are physical processes where AI displacement is slower. However, AI-driven pharmaceutical demand forecasting could reduce DKSH's analytics value-add to pharma principals over a 5–10 year horizon.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">DKSH's argument that its AI/data capabilities (principal analytics, digital shelf analytics, route intelligence) represent premium pricing justification has not been demonstrated in margin data — EBIT margins have not expanded as digital investment has risen.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">On a 3–5 year horizon, AI disruption is the single largest structural threat to DKSH's Consumer Goods BU economics. On a 12–18 month investment horizon, the impact is modest and detectable only at the margin level. For a Viewforth long position, this is a background risk rather than an immediate catalyst.</div></div>
+<p><strong>RA3 — Suitability for Iran Oil-Price Induced Inflation or Demand Deterioration</strong></p>
+<p><strong>Judgement:</strong> DKSH has moderate but manageable exposure to an oil-price / inflation scenario — logistics cost inflation is a direct headwind, and ASEAN consumer demand deterioration would hit the Consumer Goods BU, but the Healthcare BU is largely insulated from demand deterioration in this scenario.</p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">An oil-price spike driven by Iran/Middle East escalation would increase DKSH's logistics and last-mile distribution costs directly — fuel represents a meaningful component of operating costs for a business running 300+ warehouse facilities and a fleet-intensive last-mile operation across Asia-Pacific.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">ASEAN consumer demand deterioration (from global inflation/demand shock) would suppress Consumer Goods volumes — FMCG consumption in Thailand, Malaysia, and Vietnam is exposed to oil-price-driven import cost inflation (many consumer goods are USD-priced; local currency weakness compounds the inflation impact for consumers).</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Healthcare demand is not meaningfully impaired by oil-price-driven demand deterioration — pharmaceutical consumption is largely necessity-driven and government-budget-backed in DKSH's core ASEAN healthcare markets.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The CHF, as a safe-haven currency, would likely appreciate in a geopolitical escalation scenario — compounding the translational revenue headwind and potentially reducing reported EBIT by 5–<strong>10%</strong> purely through currency mechanics.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">DKSH's limited financial hedging programme means the company has essentially no protection against a sharp CHF/Asian currency move — full pass-through to reported earnings.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Inflation in the scenario could be partially passed through to principals via cost-escalation clauses in distribution contracts, but this is imperfect and typically lags the inflation event by 6–12 months.</div></div>
+<p><strong>RA4 — Paradigm Fit from Business Perspective — Summary</strong></p>
+<p><strong>Judgement:</strong> DKSH fits partially with the 2025–26 investable paradigm (APAC healthcare infrastructure, emerging-market distribution) but is undermined by the thin-margin model, CHF structural drag, governance discount, and the absence of pricing power — characteristics that are penalised rather than rewarded in the current emphasis on quality compounders.</p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Positive paradigm alignment: APAC healthcare distribution is a genuine 2025–26 investment theme (ageing demographics, healthcare spending growth, regulatory complexity creating barriers). DKSH is the most liquid listed expression of this theme.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Positive paradigm alignment: market-access services for multinationals entering/expanding in Asia is a thematically coherent "emerging market infrastructure" story that resonates with investors seeking ASEAN exposure through a listed, regulated, liquid Swiss vehicle.</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Negative paradigm alignment: thin-margin distribution businesses do not fit the current quality premium paradigm. The market is rewarding businesses with pricing power, high ROCE, and recurring revenue. DKSH has none of these in full measure — pricing power is structural weak, ROCE is below <strong>15%</strong>, and revenue is not recurring in the SaaS sense.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Negative paradigm alignment: family governance discount (Diethelm-Keller ~<strong>45%</strong>) is a structural multiple depressant in a market that has been expanding multiples for well-governed, shareholder-aligned businesses. The absence of activist optionality removes a potential re-rating mechanism.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The conglomerate structure (Healthcare + Consumer Goods + Performance Materials + Technology) is an explicit paradigm misfit in an era of focused-bet investing. UBS's sum-of-parts thesis (implying a 20–<strong>30%</strong> conglomerate discount) is a coherent reflection of this paradigm cost.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Digital disruption risk in the Consumer Goods BU creates a paradigm headwind specifically for investors applying a "defensibility of distribution channel" framework — a framework that has become more prominent post-Amazon disruption of Western distribution channels.</div></div>
+<p><strong>E5 Element Rating: C</strong></p>
+<p><strong>Element E4 — Technical Momentum:</strong> <em>Not applicable at Triaging; carry-forward from Generation stage. No new content.</em></p>
+<p><strong>Element E6 — Sell-Side Earnings Momentum:</strong> <em>Not applicable at Triaging.</em></p>
+<p><strong>Group 1 Rating: C–</strong></p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity" data-spy><span class="id">Grp 2</span> CASE SIMPLICITY <span class="secn">101 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-first-pass-2-" data-spy>Element E7 — Required Case Simplicity Guardrails <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">51 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<p><strong>Element headline:</strong> DKSH fails the case simplicity guardrails on multiple dimensions — the thesis requires 3–4 drivers co-delivering, the business has 4 distinct BUs across 36 markets, Consumer Goods faces a structural headwind, and management guidance conservatism is questionable given the 4-year margin target deferral.</p>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-focused-bet" data-spy><span class="id">RA1</span> Focused Bet? <span class="secn">12 findings</span></div>
+<p><strong>Judgement:</strong> The DKSH investment case is not a focused bet — it is a multi-variable thesis with correlated downside risks and no clean single fulcrum driver.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Two-or-less fulcrum drivers test: DKSH fails. The case requires Healthcare volume recovery (Driver #1) + margin normalisation (Driver #2) + at minimum one of Consumer Goods stabilisation, FX tailwind, or capital allocation acceleration. No single driver generates <strong>25%</strong> IRR independently; the two-driver threshold requires both Healthcare AND margin to deliver simultaneously, and both are contingent on ASEAN macro recovery.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The closest thing to a single fulcrum is Healthcare volume recovery, which contributes ~40–<strong>50%</strong> of group EBIT sensitivity. But even a full Healthcare delivery scenario (organic growth accelerating from 4–<strong>5%</strong> to <strong>8%</strong>, margin reaching <strong>5.0%</strong>) adds only approximately CHF 0.25–0.35 to adjusted EPS — roughly 8–<strong>10%</strong> EPS uplift. This alone generates insufficient price movement for <strong>25%</strong> IRR.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Key driver count: six drivers were identified in the Research phase (EBIT margin recovery, Healthcare volume/mix, Asia-Pacific volume growth, Technology restructuring, FX translation, capital return). This is materially above the preferred "4 or less key drivers" guardrail.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The three primary drivers (EBIT margin, Healthcare volume, Asia-Pacific macro) are structurally correlated — all three are impaired simultaneously by an ASEAN macro deterioration. This correlation means the six drivers reduce to approximately two independent risk factors, not six independent opportunities.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Multi-variable setups with correlated downside risks have historically produced below-average risk-adjusted returns in distribution businesses at Viewforth-type portfolios — the thesis must deliver 3 simultaneous conditions, and historical base rates for this co-delivery in European distribution setups are approximately 25–<strong>35%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">No "fulcrum event" equivalent exists — there is no specific near-term announcement, results, or corporate action that could independently resolve <strong>25%</strong>+ upside regardless of the multi-variable backdrop.</div></div>
+<p><strong>CQ1: 2 or less fulcrum drivers AND 4 or less key drivers?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Two fulcrum drivers: FAIL. No clean two-driver setup; Healthcare + margin are the two primary levers but both are contingent on ASEAN macro, not independent.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Four or less key drivers: FAIL. Six drivers identified; even the two "primary" drivers embed multiple sub-drivers (Healthcare = regulatory environment + pharma principal retention + volume throughput; margin = SG&amp;A discipline + mix shift + cost programme delivery).</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">This is a classic "must be right on too many things" setup that the Viewforth investment framework is specifically designed to avoid.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Historical pattern from similar multi-variable distribution setups: in three comparable European distribution intermediary situations where 5+ drivers were required for the bull case, outcomes over 24M were on average in-line with index returns, with high dispersion — exactly the profile to avoid in a concentrated portfolio.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">The FX driver (Driver #5) is fully exogenous and cannot be influenced by management action — including this as a driver inflates the apparent portfolio of opportunities while adding no controllable EPS upside.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Simplicity verdict: the case cannot be simplified to two-plus-four without abandoning key assumptions that are arithmetically necessary for <strong>25%</strong> IRR.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-narrow-perimeter" data-spy><span class="id">RA2</span> Narrow Perimeter? <span class="secn">10 findings</span></div>
+<p><strong>Judgement:</strong> DKSH's perimeter is wide — 4 distinct Business Units across 36 operating markets with meaningful revenue concentration in 7–8 core geographies. This exceeds the "10 or less geographies and/or BUs" guardrail in spirit (the combination of 4 BUs and 36 markets creates ~140 distinct BU-market investment thesis nodes).</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Four BUs (Healthcare, Consumer Goods, Performance Materials, Technology) create four distinct value chains, four competitive dynamics, and four different earnings drivers — this alone doubles the analytical burden relative to a focused-bet single-segment case.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Geographic spread (36 markets, material exposure in Thailand ~30–<strong>35%</strong>, Malaysia ~<strong>13%</strong>, Vietnam ~<strong>9%</strong>, Indonesia ~<strong>8%</strong>, Greater China ~<strong>15%</strong>, Singapore ~<strong>7%</strong>) exceeds the spirit of the narrow perimeter guardrail. Each market has distinct regulatory, macro, and competitive dynamics.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Thailand (~30–<strong>35%</strong> of group revenue) is the dominant single-country exposure — this concentration creates idiosyncratic risk (political instability, Thai baht dynamics, Thai FDA regulatory changes) that is difficult to assess without market-specific depth beyond Triaging level.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The 36-market footprint is a competitive asset (pan-APAC breadth is DKSH's primary moat differentiator) but an analytical liability for investment case construction — it prevents the clean "monitor 3 key metrics" approach that defines the best Viewforth investment setups.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Consumer Goods sub-segment operates across different channel types (modern trade, traditional trade, pharmacy, foodservice) within each geography — further multiplying the effective perimeter.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Only the Healthcare BU in the three core markets (Thailand, Malaysia, Vietnam) is tractable as a narrow perimeter for analytical purposes — and even this represents approximately 12–<strong>15%</strong> of group revenue.</div></div>
+<p><strong>CQ1: 10 or less geographies and/or business units?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Formal count: 4 BUs + 7–8 material geographies = 11–12 discrete analytical nodes. This fails the strict 10-or-less guardrail even on a minimal counting basis.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Practical monitoring: tracking 4 BU performance + Thailand macro + Malaysia healthcare + Vietnam growth + Indonesia regulatory + CHF/Asian FX + ASEAN consumer confidence = approximately 12–15 distinct monitoring variables. This is materially above the guardrail.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The DKSH IR disclosure structure (semi-annual reporting, BU-level revenue but limited BU-level margin disclosure) further complicates the monitoring task — the perimeter is wide AND partially opaque.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">For comparison, the ideal Viewforth Triaging case has a single BU operating in 1–3 geographies with quarterly reporting — DKSH is approximately <strong>5x</strong> more complex than this benchmark.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra3-zero-headwinds" data-spy><span class="id">RA3</span> Zero Headwinds? <span class="secn">10 findings</span></div>
+<p><strong>Judgement:</strong> DKSH fails the zero value-chain headwinds test — the Consumer Goods BU faces two structural headwinds (digital disintermediation by platforms, principal insourcing) that are directionally adverse and not fully priced by the sell-side.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Consumer Goods digital disintermediation: FMCG brand owners and e-commerce platforms (Lazada, Shopee, TikTok Shop) are building competitive last-mile capability in DKSH's core ASEAN markets. This is documented, ongoing, and not cyclical. Multiple named principals (Unilever, P&amp;G, Nestlé) have made public direct-distribution investments in Thailand and Malaysia.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Principal insourcing risk: as ASEAN markets mature and individual brand volumes reach scale, the make-vs-buy calculus shifts toward in-house distribution. This is a slow-moving but directional structural headwind. DKSH has historically managed this by replacing large-principal exits with smaller-principal wins — but the replacement pace is uncertain and has not been quantified.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Pharmaceutical pricing reform in Healthcare BU: Thailand, Malaysia, and Vietnam have implemented or are implementing tighter pharma distribution margin controls. This is a regulatory headwind to the highest-margin BU — the same BU that the bull case depends on for group margin expansion.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">CHF appreciation structural drag: this is a permanent revenue-chain headwind for a CHF-reporting business with <strong>70%</strong>+ revenues in Asian currencies. The drag is growing in absolute terms (CHF 40m FY2022 → CHF 45m FY2024) despite management's hedging improvements.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Technology BU secular headwinds: consumer electronics distribution faces platform-mediated direct-to-consumer channels and e-commerce disintermediation across ASEAN — the same structural forces affecting Consumer Goods, but in a category more directly substitutable.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Headwind count: five distinct structural headwinds, affecting three of four BUs (all BUs except Performance Materials). This comprehensively fails the zero-headwinds guardrail.</div></div>
+<p><strong>CQ1: Zero value-chain headwind risks to revenue?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Direct answer: No. The case has at minimum three material value-chain headwinds (Consumer Goods disintermediation, Healthcare regulatory pricing pressure, CHF structural drag), each affecting the principal revenue drivers.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The most dangerous headwind (Consumer Goods disintermediation) is the one with the fewest contractual protections — consumer goods distribution contracts are shorter, more price-competitive, and more susceptible to direct-market substitution than healthcare distribution contracts.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The PHarmaaceutical pricing headwind is a government-regulatory force that management cannot negotiate around — it affects the Healthcare BU margin at the moment when that BU is supposed to be the margin expansion engine.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The CHF drag is perhaps the most insidious headwind because it is invisible in local-currency metrics but translates directly into CHF EPS underperformance vs operational delivery. Management's honest reporting on constant-currency performance only partially compensates for this in investor perception.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra4-handful-of-change-from-current-items" data-spy><span class="id">RA4</span> Handful of Change-From-Current Items? <span class="secn">10 findings</span></div>
+<p><strong>Judgement:</strong> The change-from-current items number five or more — this fails the "2 or less" guardrail and compounds the multi-variable complexity concern.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Change-from-current item #1: Healthcare volume recovery from 4–<strong>5%</strong> organic to 6–<strong>8%</strong> (structural potential). Required condition: no pharma principal insourcing, regulatory pricing reform not accelerating, and ASEAN macro supportive.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Change-from-current item #2: EBIT margin recovery from ~<strong>2.7%</strong> toward <strong>4.0%</strong> (management target). Required condition: SAP savings deliver, SG&amp;A discipline maintained, mix shift continues, no volume deceleration in FY2025.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Change-from-current item #3: Consumer Goods volume stabilisation/recovery (from flat-to-negative organic toward 2–<strong>3%</strong>). Required condition: ASEAN consumer confidence recovery, no further principal insourcing in Thailand/Malaysia.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Change-from-current item #4: Technology BU restructuring/disposal. Required condition: management decision to act, board approval (family-influenced), acquirer availability at fair price.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Change-from-current item #5: FX tailwind / CHF depreciation. Required condition: SNB continued easing, no risk-off CHF safe-haven bid, ASEAN currency stability.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Change-from-current item #6: Capital allocation acceleration (meaningful buyback expansion or accretive Healthcare M&amp;A). Required condition: management conviction, target availability at reasonable multiples.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">This count of five to six change-from-current items fails the "2 or less" guardrail by a significant margin. The case is more appropriately characterised as "a steady-state low-growth business with many potential improvement levers, none dominant."</div></div>
+<p><strong>CQ1: 2 or less change-from-current items or problems?</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Direct answer: No. Six distinct change-from-current items identified. Even accepting that some are related (ASEAN macro affecting multiple items), the independent change-from-current count is at minimum three (Healthcare recovery, margin recovery, capital allocation).</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">For the case to simplify to two change-from-current items, one would need to identify a single overriding catalyst that unlocks multiple items simultaneously — such as a strategic decision to spin out Healthcare as a standalone entity (which would re-rate the remaining DKSH and crystallise the Healthcare moat value). But this requires family board approval that has not been signalled.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The multi-item change-from-current setup creates monitoring complexity that is disproportionate to the expected return, especially given DKSH's semi-annual reporting cadence (infrequent data points to monitor the delivery of complex multi-variable thesis).</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra5-conservative-investor-relations" data-spy><span class="id">RA5</span> Conservative Investor Relations? <span class="secn">9 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Rationale: Fails four of five simplicity guardrails — multi-variable multi-driver thesis, 36-market 4-BU perimeter, five or more structural headwinds, five to six change-from-current items, and partially questionable IR conservatism; this is a complex case operating in an unforgiving financial structure.</div></div>
+<p><strong>Judgement:</strong> Management's investor relations posture is partially conservative (modest beats on EBIT, measured tone) but significantly undermined by the four-year deferral of the <strong>4%</strong> EBIT margin target and the FY2023 overconfident Healthcare recovery guidance that failed to materialise.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The <strong>4%</strong> EBIT margin target was first articulated approximately in 2020. FY2024 actual EBIT margin is approximately <strong>2.7%</strong>. Four years of "continued progress toward target" with only <strong>60bps</strong> of the ~<strong>130bps</strong> improvement achieved is a credibility problem, not a conservative guidance track record.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The H2 2023 Healthcare recovery guidance ("recovery expected in H2") was overconfident — the recovery did not materialise at the pace or timing guided. This single episode significantly reduces the trust that should be placed in subsequent forward guidance.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">On the positive side: semi-annual EPS beat frequency is <strong>100%</strong> across L3Y (6/6 periods at or above consensus prior); revenue beats in 5/6 periods. This consistent delivery against consensus expectations (rather than management's public targets) suggests management calibrates consensus expectations carefully if not its own public targets.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The FY2025 guidance language ("continued progress") is deliberately vague — no quantified revenue, EBIT, or margin target for FY2025. This protects management from a guidance miss but prevents investors from anchoring on a specific deliverable that creates urgency for management.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Management IR interaction style: measured, data-backed rebuttals rather than aggressive defensiveness. This is culturally sound but signals a conservative-passive response to structural challenge rather than a proactive pivot.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">The conclusion on IR conservatism: management is conservative-to-neutral in managing consensus expectations but has demonstrated a pattern of maintaining aspirational public targets (<strong>4%</strong> margin) that are not delivered, which constitutes an implicit form of optimism bias in public communication.</div></div>
+<p><strong>CQ1: Company confirms guidance is conservative?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Direct answer: No explicit confirmation of conservative guidance posture. Management characterises guidance as "achievable" rather than conservative. The gap between public targets (<strong>4%</strong> EBIT margin) and actual delivery (~<strong>2.7%</strong>) is inconsistent with genuinely conservative framing.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The "modest consensus beats" pattern could reflect: (a) genuine conservative guidance, or (b) careful expectation management with modestly realistic targets. The weight of evidence suggests (b) — management calibrates consensus without systematically underpromising.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Sell-side credibility assessment across the covering pool: ZKB explicitly discounts management targets by 15–<strong>20%</strong> in their model — this is a clear signal that DKSH's forward guidance is not perceived as consistently conservative by a credible domestic broker with long-tenure DKSH coverage.</div></div>
+<p><strong>E7 Element Rating: D</strong></p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-first-pass-3-bull" data-spy>Element E8 — Fit with Acceptable Case Setups <span class="secn">50 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Rationale: No clean fit with any acceptable setup — the primary RA4 fit fails on financial quality thresholds (EBIT margin, ROCE, EPS CAGR), the secondary RA6 fit is contaminated by structural (not purely cyclical) headwinds, and both negative guardrails partially trigger; the case setup is not one that a disciplined Viewforth framework would typically progress.</div><div class="lead-prose">DKSH fails four of five case simplicity guardrails, has no clean setup fit, and triggers both negative guardrails partially — Group 2 is a clear weak point in the triaging case assessment.</div></div>
+<p><strong>Element headline:</strong> DKSH most closely resembles a "Change-from-current clearing in high-quality compounder" setup (RA4) with secondary elements of "Mis-modelled, high-quality EPS upgrader" (RA1), but fails key qualifying conditions in both setups that prevent a clean fit.</p>
+<p><strong>RA1 — Mis-Modelled, High-Quality EPS Upgrader</strong></p>
+<p><strong>Judgement:</strong> Partial fit — DKSH is not clearly mis-modelled by the sell-side (consensus is not systematically underestimating); the "high quality" threshold is not cleanly met at EBIT margins below <strong>3%</strong>.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The sell-side pool (~10–12 analysts) is broadly aligned on DKSH's earnings trajectory; no clear modelling blind spot that Watson can identify where the sell-side is systematically wrong about the earnings power of the business.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The "EPS upgrader" component requires positive revision momentum; DKSH's L12M revision pattern is net-negative (estimates cut 5–<strong>8%</strong> from Jan-25 highs). This is the opposite of an upgrader setup.</div></div>
+<p><strong>CQ1: Is the market systematically mis-modelling DKSH's earnings power?</strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The most credible modelling gap: sell-side may be underestimating the magnitude of principal disintermediation in Consumer Goods (systematically too bullish on volumes). ZKB's digital disintermediation thesis is analytically original and underweighted by the broader pool.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Alternatively, sell-side may be systematically too pessimistic on the Healthcare margin expansion story — the regulatory lock-in moat and ASEAN healthcare spending tailwind are genuine, and if Healthcare accelerates to <strong>8%</strong>+ organic, current consensus is materially underestimating FY2026 EPS.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The mis-modelling argument cuts both ways with approximately equal force — this is not a clean RA1 setup.</div></div>
+<p><strong>RA2 — Big Demand Change-Driven EPSU or EPT</strong></p>
+<p><strong>Judgement:</strong> Weak fit — there is no large demand change event visible; ASEAN healthcare growth is structural/gradual, not a step-change demand event; Consumer Goods demand is recovering from a trough rather than experiencing a step-change uplift.</p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">No identified demand shock (regulation change, demographic inflection, COVID equivalent) that would drive a sudden step-change in DKSH's addressable market or principal relationships.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The destocking cycle resolution in Consumer Goods (FY2023 → FY2024) was a demand normalisation, not a demand acceleration. This is qualitatively different from the "big demand change" archetype.</div></div>
+<p><strong>CQ1–CQ5: (all scored at 3-bullet minimum; RA2 fit is weak — abbreviated accordingly)</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">No new product/service/market entry catalyst visible. DKSH is executing an evolutionary Healthcare-mix strategy, not a step-change product launch or market entry.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">No regulatory change that suddenly opens a large new addressable market. Healthcare regulatory complexity is increasing gradually — this is a slow-building moat deepener, not a sudden TAM expansion.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">No large principal win announcement that would materially change the volume trajectory within 12–18 months.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">No acquisition target announced that would add a step-change in earnings power.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">No technology deployment event (SAP go-live milestone) that is specifically market-moving or consensus-changing.</div></div>
+<p><strong>RA3 — Strong Corporate Change Driven EPSU / EPT</strong></p>
+<p><strong>Judgement:</strong> Weak-to-moderate fit — corporate change forces exist (CEO transition to Roesle, portfolio rationalisation, efficiency programme) but none is large enough or fast enough to drive the <strong>25%</strong> IRR threshold independently; the M&amp;A pipeline is described as "active" but uncommitted.</p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">CEO transition (Butz to Roesle, Jan 2023) is a corporate change event. Roesle's Healthcare BU background is strategically constructive. But 2+ years into the transition, no transformational strategic decision has been announced. The corporate change force is incremental rather than step-change.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The SAP migration / efficiency programme (CHF 30–60m savings target) is a corporate change with quantified financial output, but the savings timeline extends to FY2026 and CHF 20–25m has already been credited in consensus models.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Technology segment disposal/restructuring is the most powerful latent corporate change event — it would unlock conglomerate discount, redeploy capital to Healthcare, and reset market narrative. But management has not committed, and family control reduces the probability of the bold action required.</div></div>
+<p><strong>CQ1–CQ9: (abbreviated; RA3 fit is weak)</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">M&amp;A pipeline: described as "active" in Healthcare distribution in Southeast Asia. No specific targets disclosed. Pipeline language has been a recurrent feature of DKSH investor communications across multiple years — may not translate into transformational action.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">Balance sheet available for M&amp;A: approximately CHF 300–500m in M&amp;A capacity at current leverage. This could be deployed in Healthcare bolt-ons of meaningful size; the EPS accretion from disciplined deployment at 8–<strong>10x</strong> EBIT would be 3–<strong>6%</strong> per CHF 100m bolt-on.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Buyback acceleration: CHF 50–75m signalled for FY2025; EPS accretion approximately 1–<strong>2%</strong> pa. This is supportive but not transformative.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Restructuring completion: one-off restructuring charges have appeared in all 6 L3Y reporting periods. There is no visible path to restructuring completion that would reset the reported/adjusted EPS gap.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Management credibility on corporate change: Butz delivered portfolio rationalisation (15+ contract exits, FY2016–2020) — concrete acts. Roesle has been CEO for 2+ years without an equivalent demonstrative act. Corporate change force is present but unproven under current leadership.</div></div>
+<p><strong>RA4 — Change-from-Current Clearing in High-Quality Compounder</strong></p>
+<p><strong>Judgement:</strong> This is the primary setup archetype fit — DKSH has a defensible business with Healthcare moat, regulatory lock-in, and structural ASEAN tailwinds; the change-from-current is margin recovery + Healthcare mix acceleration; this is a "quality business underperforming its potential" archetype. BUT the "high quality" qualifier fails on financial metrics (EBIT &lt;<strong>3%</strong>, ROCE &lt;<strong>15%</strong>, EPS CAGR &lt;<strong>12%</strong>).</p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The setup requires: (1) a high-quality compounder that is underperforming a normalised earnings trajectory, (2) identified change-from-current that clears the underperformance, (3) durable moat ensuring the improvement is sustained.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">DKSH partially meets condition (1): the business has genuine moats (regulatory, route density) and a structural growth market (ASEAN healthcare). It is underperforming vs its own targets and vs what the structural tailwind should deliver.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">DKSH partially meets condition (3): the Healthcare regulatory moat is durable; route density moat has 5–10 year replication barriers.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">DKSH fails condition (2) and partially fails condition (1): the "change-from-current" requires 3–4 concurrent changes (not 1–2), and the "high quality" designation is challenged by EBIT margins that are structurally below <strong>20%</strong> (the RA4 quality threshold), ROCE below <strong>15%</strong>, and EPS CAGR below the 12–<strong>20%</strong> BB#2 ideal range.</div></div>
+<p><strong>CQ1–CQ9: (abbreviated; RA4 is the primary fit setup)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Quality of compounder: real but below Viewforth threshold — EBIT margins at <strong>2.7%</strong>, ROCE at 12–<strong>14%</strong>, FCF conversion at 75–<strong>80%</strong>. These are distribution-intermediary-appropriate but not "high quality compounder" by Viewforth standards.</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">Identified change-from-current: six change-from-current items identified (fails the 2-or-less guardrail). The margin recovery + Healthcare acceleration constitute the two primary CFCs, but they require ASEAN macro support.</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Moat durability: Healthcare regulatory moat is durable (10–15 year replication barrier); Consumer Goods moat is weak and eroding; PM/Tech moats are modest. The durability of the primary moat (Healthcare) is sufficient to underpin a high-quality compounder designation for that segment.</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">Mis-priced? The EBIT margin underperformance vs management's own target suggests the current stock price may not fully credit recovery — but Berenberg and ZKB (credible Hold analysts) see fair value at approximately current price, limiting confidence in this misvaluation thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Timeline of clearing: margin recovery at current pace requires 2–3 more years to reach the <strong>4%</strong> target. For a 24-month investment horizon with 12–18 month thesis crystallisation, this timeline is uncomfortably long.</div></div>
+<p><strong>RA5 — Huge Change-from-Current Clearing Event in Solid Quality</strong></p>
+<p><strong>Judgement:</strong> Weak fit — no "huge" clearing event visible; the change forces are gradual and multi-variable, not event-driven; the business quality is "solid" not exceptional.</p>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">No identified large-magnitude single catalyst (Healthcare spin-off, transformative M&amp;A, regulatory windfall, large principal contract win) that would clear the change-from-current in a single event.</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">"Solid quality" threshold: DKSH meets this — the business is not going backward, the moat is real, the management team is competent. But "solid" without "huge event" does not generate <strong>25%</strong> IRR in a concentrated portfolio.</div></div>
+<p><strong>CQ1–CQ5:</strong> All scored as weak fit. No clearing event candidates of sufficient magnitude within 24 months. Omitted in the interest of analytical efficiency.</p>
+<p><strong>RA6 — Trough-on-Trough Turn in Solid Quality Cyclical</strong></p>
+<p><strong>Judgement:</strong> Partial fit — FY2023 was the cyclical trough year (Consumer Goods destocking, Healthcare softness); FY2024 showed partial recovery. But DKSH is not purely cyclical — the structural headwinds (disintermediation, FX drag) are not cyclical phenomena that naturally reverse. This is "partial trough-turn in a structurally-complicated cyclical," which is less compelling than a clean cyclical trough setup.</p>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">The trough case: FY2023 Healthcare destocking was identifiable as a cyclical event; channel inventory normalisation in FY2024 confirmed. Consumer Goods destocking also largely cleared. This fits the "trough" component of the RA6 setup.</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The "solid quality cyclical" component: Healthcare is a genuine structural growth business, not a pure cyclical. Consumer Goods is partially cyclical, partially structural-headwind. The business is not a clean cyclical — it has structural headwinds layered on top of cyclical elements.</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">Trough-on-trough: there is no "double trough" dynamic clearly visible. FY2023 was a single-trough driven by destocking; the subsequent recovery is incomplete but not showing signs of a second trough.</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">Quality at trough: the business maintained positive EBIT throughout FY2023 (did not move to loss); dividend was maintained; management responded with cost efficiency programme. These are "solid quality" cyclical behaviours.</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">Risk of "trough" characterisation being wrong: if Consumer Goods volume softness in FY2024–2025 is structural rather than cyclical (disintermediation progressing), the "trough" framing is incorrect and the investment case is structurally impaired.</div></div>
+<p><strong>CQ1–CQ9: (abbreviated; RA6 is the secondary fit setup)</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">Is it genuinely cyclical? Partially — destocking is a classic cyclical phenomenon; disintermediation is structural; the two cannot be cleanly separated at this stage of analysis.</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">Is quality solid at trough? Yes — cash generation maintained, balance sheet conservative, dividend sustained. These are positive cyclical-quality indicators.</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">Is the turn confirmed? Partially — FY2024 recovery in revenues and partial margin improvement is consistent with a trough turn. But Healthcare organic growth has not recovered to the structural rate (4–<strong>5%</strong> vs 6–<strong>8%</strong> structural target), meaning the turn is incomplete.</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">Does the cyclical upswing provide <strong>25%</strong>+ IRR? Not without margin recovery also delivering — volume alone at <strong>4%</strong> organic growth from the trough is insufficient.</div></div>
+<p><strong>RA7 — Fit with Unacceptable Case Setups? [NEGATIVE GUARDRAIL]</strong></p>
+<p><strong>Judgement:</strong> DKSH partially triggers the "structurally mediocre business" unacceptable setup — thin margins, sub-threshold ROCE, governance discount, and principal dependency create a profile that the framework is specifically designed to exclude.</p>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">The most relevant unacceptable setup: "structurally low-EBIT-margin business with no realistic path to <strong>15%</strong>+ ROCE, priced at a growth premium." DKSH at <strong>2.7%</strong> EBIT margin and 12–<strong>14%</strong> ROCE, trading at 15–<strong>17x</strong> P/E, partially fits this description.</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext">Governance risk unacceptable setup: family control (<strong>45%</strong>) preventing shareholder-optimal capital allocation is a partial trigger for the governance-related unacceptable setups. Not the most extreme version, but present.</div></div>
+<p><strong>CQ1: Does DKSH overlap with unacceptable setups?</strong></p>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext">Partial overlap: the combination of sub-<strong>15%</strong> ROCE + thin EBIT margin + growth premium valuation is in the zone of setups that historically produce below-index returns. Not a definitive trigger, but a concern flag.</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext">The offsetting factor: DKSH does generate genuine FCF and has a conservative balance sheet. This is not a value trap in the capital destruction sense — it is a mediocre-return business priced for modest improvement.</div></div>
+<p><strong>RA8 — Fit with False Friend Case Setups? [NEGATIVE GUARDRAIL]</strong></p>
+<p><strong>Judgement:</strong> DKSH carries a meaningful false friend risk — the Healthcare structural tailwind narrative may be masking the structural deterioration of the Consumer Goods BU and the permanent FX drag. "Asia distribution compounder" is a compelling narrative that may be wrong.</p>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext">The false friend risk: the Healthcare moat and ASEAN demographic tailwind create a legitimate structural story. But if the market-access distribution model is being systematically disintermediated in the Consumer Goods segment (the largest segment by revenue), the bull narrative is a false friend — the Healthcare growth is insufficient to compensate for Consumer Goods structural decline.</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext">Sell-side false friend risk: 5–6 of ~11 covering analysts are at Buy/Overweight with targets 15–<strong>25%</strong> above current price. This creates a false consensus comfort that the investment is supported — but the Buy analysts are largely anchored to management's own narrative and have not independently quantified the disintermediation risk.</div></div>
+<p><strong>CQ1: Does DKSH overlap with false friend setups?</strong></p>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext">The "Healthcare compounder narrative as false friend" is the specific risk: if DKSH is actually a declining Consumer Goods intermediary that is using Healthcare growth to mask volume attrition and FX headwinds, the stock deserves a lower multiple, not a re-rating.</div></div>
+<div class="finding ra-level"><span class="fnum">48.</span><div class="ftext">The evidence that would resolve this: DKSH disclosing Consumer Goods organic volumes on a per-market basis (not currently disclosed). Until this granularity is available, the false friend risk cannot be fully assessed.</div></div>
+<p><strong>E8 Primary Setup Identification:</strong></p>
+<div class="finding ra-level"><span class="fnum">49.</span><div class="ftext"><strong>Primary setup:</strong> RA4 — Change-from-current clearing in high-quality compounder (partial fit; fails "high quality" financial metric thresholds)</div></div>
+<div class="finding ra-level"><span class="fnum">50.</span><div class="ftext"><strong>Secondary setup:</strong> RA6 — Trough-on-trough turn in solid quality cyclical (partial fit; structural headwinds complicate the pure cyclical framing)</div></div>
+<p><strong>E8 Element Rating: D</strong></p>
+<p><strong>Group 2 Rating: D</strong></p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy" data-spy><span class="id">Grp 3</span> CORE PHILOSOPHY <span class="secn">22 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-second-pass-light-4-bullet-" data-spy>Element E11 — Value-Chain Dynamics <span class="secn">22 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<p><strong>Element headline:</strong> DKSH's value-chain dynamics are structurally mixed: favourable in Healthcare (demand growing, regulatory complexity deepening, competitor attitudes benign), unfavourable in Consumer Goods (disintermediation accelerating, principal power increasing, platform substitution structurally advancing). The aggregate value-chain dynamic is below average for a concentrated Viewforth long.</p>
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra1-demand-side-strong-fragile" data-spy><span class="id">RA1</span> Demand Side Strong / Fragile? <span class="secn">10 findings</span></div>
+<p><strong>Judgement:</strong> Demand is bifurcated — Healthcare demand is strong and structural; Consumer Goods demand is fragile and partially structural (not just cyclical). The group aggregate demand picture is below-average.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Healthcare BU demand is genuinely strong: ASEAN pharmaceutical market growing at 7–<strong>9%</strong> pa driven by ageing demographics, rising chronic disease burden, and expanding insurance coverage. Pharmaceutical demand is largely inelastic and government-budget-backed in DKSH's core markets (Thailand, Malaysia, Vietnam). This demand base is durable across economic cycles.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Consumer Goods BU demand is fragile: ASEAN consumer spending growth has decelerated to approximately 3–<strong>5%</strong> nominal in 2023–2025, below the 6–<strong>8%</strong> rates that supported DKSH's historical volume growth. Thailand household debt at approximately <strong>90%</strong> of GDP and political uncertainty (2023–2025 period) structurally suppresses discretionary consumer spending.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Performance Materials demand is cyclical and linked to global industrial production — specialty chemicals demand has been soft in 2022–2024 as the post-COVID inventory cycle played out. The BU is not a significant earnings contributor and its demand dynamics are external and uncontrollable.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Technology BU demand is declining structurally in DKSH's distribution model — consumer electronics distribution is being disintermediated by e-commerce platforms across ASEAN more aggressively than other categories.</div></div>
+<p><strong>CQ1: Is demand for DKSH's services strong and growing?</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Healthcare: strong, growing at GDP+2–3pp, structural. Demand visibility is 18–24 months (contract-based pharma distribution). High conviction on demand sustainability.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Consumer Goods: moderate-to-fragile; growing at GDP (3–<strong>5%</strong>) but with structural erosion from digital substitution. Demand visibility is lower (consumer goods contracts are shorter and more price-competitive than pharma contracts).</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Overall: the blended demand picture is moderate, not strong — Consumer Goods (45–<strong>50%</strong> of revenues) growing at GDP while Healthcare (30–<strong>35%</strong> of revenues) grows at GDP+2–3pp is a structurally improving mix but the near-term aggregate demand environment is unspectacular.</div></div>
+<p><strong>CQ2: Is demand distribution favourable (recurring, high-visibility)?</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Healthcare demand is recurrent (long-term principal distribution contracts, product registration lock-in) with 18–24 month forward visibility. The recurring, high-visibility component of DKSH's demand profile is approximately 30–<strong>35%</strong> of revenues.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Consumer Goods demand is less recurring — contracts are re-tendered; large principals (Nestlé, Reckitt) have demonstrated willingness to adjust scope. Forward visibility is 6–12 months in the most dynamic part of the portfolio.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The blended demand visibility is approximately 12 months on the forward revenue base — adequate but not exceptional for a concentrated investment position requiring 24-month thesis validation.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra2-competitive-supportiveness-aggression" data-spy><span class="id">RA2</span> Competitive Supportiveness / Aggression? <span class="secn">9 findings</span></div>
+<p><strong>Judgement:</strong> Competitive dynamics are supportive in Healthcare (Zuellig and DKSH operate without aggressive price competition; regulatory barriers prevent new entrant disruption) but increasingly aggressive in Consumer Goods (local distributors, e-commerce platforms, direct-principal distribution all competing for the same volume).</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">In Healthcare distribution: the competitive environment is structurally benign. Zuellig Pharma (the closest competitor) is private, focused primarily on pharmaceuticals, and does not compete aggressively on price — both DKSH and Zuellig prioritise service quality and regulatory compliance. The result is a disciplined duopoly in formal pharmaceutical distribution across Southeast Asia.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">In Consumer Goods distribution: the competitive environment is significantly more aggressive. Local distributors (50+ significant operators in Thailand alone) compete on price; e-commerce platforms offer direct principal-to-retailer routes that bypass DKSH; and large FMCG principals are progressively building own-distribution capabilities that substitute DKSH directly.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">No formal "shark attack" from established tier-1 distribution peers: Zuellig is not expanding into Consumer Goods; DHL Supply Chain and Kuehne+Nagel are logistics operators, not MES competitors. The formal competitive threat is from the substitution of DKSH's role, not from a peer attempting to take market share directly.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Competitor attitudes in Healthcare are explicitly rational (volume/ROCE balanced rather than volume-maximising) — this is a strong positive for the competitive dynamics of the most important BU.</div></div>
+<p><strong>CQ1–CQ5: (abbreviated to most material dimensions)</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Principal power dynamics: principals (MNC brand owners) hold structural pricing power over DKSH in all BUs. The make-vs-buy decision ultimately rests with the principal, and as markets mature and volumes reach scale, the economics shift toward insourcing. This is the most significant competitive dynamic risk for the case.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext">Platform competition (CQ2): Lazada, Shopee, TikTok Shop are gaining B2B/B2C fulfilment capability across DKSH's core ASEAN markets. These are innovative entrants attacking the Consumer Goods distribution layer with superior data capabilities, lower labour costs, and direct-principal relationships. The platform threat is structural and accelerating.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext">Regulatory barriers (CQ3): In Healthcare, regulatory barriers (product registration, GDP licences) create effective competitive barriers against new entrants and platform-based disintermediation. This is the strongest competitive protection in the portfolio.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext">Price competition intensity (CQ4): Healthcare distribution pricing is stable and disciplined; Consumer Goods pricing is competitive and margin-compressive. The group blended competitive environment is moderate, held up by Healthcare's disciplined dynamics.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext">Market share stability (CQ5): DKSH's market share in Healthcare is broadly stable; in Consumer Goods it is difficult to assess (DKSH does not disclose volume market share data). The principal exit history (Nestlé partial, Reckitt partial) suggests modest share erosion in Consumer Goods that is partially offset by new principal wins.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="ra3-disruption-forces" data-spy><span class="id">RA3</span> Disruption Forces? <span class="secn">3 findings</span></div>
+<p><strong>Judgement:</strong> Disruption forces are material and directionally adverse in Consumer Goods; moderate and slow-moving in Healthcare; effectively absent in Performance Materials. The group-level disruption risk is above average for a European-listed distribution intermediary.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">E-commerce platform disintermediation (Consumer Goods): the most immediate and fastest-moving disruption force. Lazada, Shopee, TikTok Shop have built B2B ordering platforms across Thailand, Malaysia, Indonesia that allow FMCG principals to reach retailers directly. The friction of switching from DKSH-distributed traditional trade to platform-mediated modern trade is declining annually.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Principal direct distribution (all BUs): as market volumes scale and the economics of own-distribution improve, FMCG and pharma principals progressively internalise the function DKSH performs. This is a classic "platform disintermediation" disruption that has played out in other geographies (Nestlé's direct distribution in US/EU markets is the precedent).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">AI-driven demand sensing by principals: AI tools that give brand owners direct visibility into retail shelf conditions, competitive pricing, and demand patterns reduce DKSH's information asymmetry advantage — the analytics layer that DKSH's</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body>
+</html>

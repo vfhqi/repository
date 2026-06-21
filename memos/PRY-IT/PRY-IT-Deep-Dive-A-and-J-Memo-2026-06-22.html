@@ -1,0 +1,1293 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[W] Prysmian S.p.A. (PRY-IT) — Triaging A&amp;J Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-financials-top-line-picture-excluded-from-word-cou">Section A — Financials (top-line picture; excluded from word-count targets)</span>
+<span class="nav-item nav-section" data-anchor="section-b-investment-case-executive-summary">Section B — Investment Case: Executive Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-investment-case-attributes">Section C — Investment Case Attributes<span class="nav-fc">181</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements">C.1 — Pillar I: Case Change Elements<span class="nav-fc">41</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-internal-external-first-pass">E1 — Required Input Change Forces (internal / external) | First pass — light | ×2 double-weight | floor: 6 bullets per RA and CQ <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">41</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks">C.2 — Pillar II: Case Building Blocks<span class="nav-fc">140</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-first-pass-light">Group 1 — Case Momentum<span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-second-pass-at-triaging-2-double-weight-floo">E5 — Thematic Fit | Second pass at Triaging | ×2 double-weight | floor: 6 bullets per RA and CQ <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">24</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-first-pass-light">Group 2 — Case Simplicity<span class="nav-fc">76</span></span>
+<span class="nav-item nav-element" data-anchor="e7-required-case-simplicity-guardrails-first-pass-light-2-do">E7 — Required Case Simplicity Guardrails | First pass — light | ×2 double-weight | floor: 6 bullets per RA and CQ <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">29</span></span>
+<span class="nav-item nav-element" data-anchor="e8-fit-with-acceptable-case-setups-first-pass-light-e8-carve">E8 — Fit with Acceptable Case Setups | First pass — light | E8 carve-out applies | floor: 3 bullets per RA and CQ<span class="nav-fc">47</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-first-pass-light">Group 3 — Core Philosophy<span class="nav-fc">40</span></span>
+<span class="nav-item nav-element" data-anchor="e11-value-chain-dynamics-second-pass-at-triaging-light-floor">E11 — Value-Chain Dynamics | Second pass at Triaging | Light floor: 4 bullets per RA and CQ | No multiplier<span class="nav-fc">40</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-first-pass-light-no-element-level-con">Group 4 — Case Riskiness</span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-not-applicable-at-triaging-stage">Group 5 — Case Optionality: not applicable at Triaging stage.</span>
+<span class="nav-item nav-section" data-anchor="section-d-investment-case-components-pillar-iii">Section D — Investment Case Components (Pillar III)</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions">Section E — Actions<span class="nav-fc">8</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">15</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-sources-and-research-provenance">F.1 — Sources and Research Provenance<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-quality-control-audit-pointer">F.2 — Quality Control Audit Pointer</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-key-dates-and-catalysts-watson-inferred">F.3 — Key Dates and Catalysts (Watson-inferred)<span class="nav-fc">11</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices-2">Section F — Appendices<span class="nav-fc">9</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-sources-and-research-provenance-2">F.1 — Sources and Research Provenance<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-quality-control-audit-pointer-2">F.2 — Quality Control Audit Pointer</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-key-dates-and-catalysts-watson-inferred-2">F.3 — Key Dates and Catalysts (Watson-inferred)<span class="nav-fc">5</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">[W] Prysmian S.p.A. (PRY-IT) — Triaging A&amp;J Memo</div>
+      <div class="meta">Stage: Triaging (Stage III — first A&amp;amp;J pass) Date: 2026-05-14 Author: Investment Analyst (Watson) — Option 2 execution (IA self-initiated research; no prior Researcher batch on</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">PRY-IT</span> [W] Prysmian S.p.A. (PRY-IT) — Triaging A&amp;J Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 22-Jun-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Deep Dive</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-investment-case-executive-summary" data-spy><span class="id">B</span> Investment Case: Executive Summary <span class="secn">5 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Section-level BLUF: Prysmian is the blue-chip operator in the European cable sector — the most proven EHV track record, the broadest geographic and product footprint, and the most established sell-side relationship. It is not the pure-play that NKT is: its diversified portfolio (Energy + Telecom + Building Wire, US + Europe + RoW) adds ballast and dampens both upside and downside. The change-forces case is real and strong — but arguably less concentrated and therefore lower-EPS-leverage than NKT. PRY is a high-quality industrials compounder with an additional structural demand tailwind; NKT is the leveraged pure-play bet on the supercycle.</div></div>
+<p><strong>Master Ratings (first pass — light, Triaging)</strong></p>
+<p><strong>1. Technical momentum: B — [positive for case, medium conviction]</strong> Prysmian has performed well on Borsa Italiana, re-rating significantly over 2022–2025 as the Energy cable order book crystallised and the Encore Wire acquisition (2023) added US scale. Working assumption — no FactSet chart data this session; flag for formal technical check before ESA.</p>
+<p><strong>2. Sell-side earnings momentum: B+ — [positive, medium-high conviction]</strong> Prysmian has a well-established sell-side consensus (20+ analysts) that has been moving consistently upward. The Energy cable order book conversion provides a mechanical basis for ongoing guidance raises. Consensus is likely still underestimating the EHV margin inflection potential. Not formally in scope at Triaging; carry-forward.</p>
+<p><strong>3. Thematic fit: A— — [strongly positive; small diversification dilution vs NKT]</strong> Prysmian's Energy cable business (offshore, interconnector, EHV grid) has the same A-grade thematic fit as NKT. The Building Wire and Telecom segments slightly dilute the pure-play thematic alignment — Building Wire is partially cyclical (construction volumes), Telecom cable is in structural volume decline (copper DSL replaced by fibre). Overall A— rather than a clean A.</p>
+<p><strong>4. Pillar I — Case change elements: A— — [strongly positive; change forces are large and structural but diluted by non-Energy portfolio]</strong> The Energy cable segment's change forces are as strong as NKT's; Prysmian has a stronger EHV track record and earlier market entry. The non-Energy segments add revenue and earnings but their change forces are weaker. The blended Pillar I is A— rather than A+.</p>
+<p><strong>5. Pillar II — Case building blocks: B+ — [positive; quality is marginally higher than NKT on operator and track record; offset by more complex business]</strong> Prysmian scores higher than NKT on operator quality (management depth, capital allocation track record, M&amp;A execution) and track record. It is more complex geographically and in terms of product scope. The net building blocks assessment is B+, similar to NKT but with a different quality profile (more depth but more complexity).</p>
+<p><strong>6. Pillar III — Investment case components: not applicable at this stage.</strong></p>
+<p><strong>Page-level BLUF (3–5 judgement bullets)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Prysmian is the sector's reference operator: the company that invented modern EHV submarine cable manufacturing, executed the largest M&amp;A in the cable industry (Draka 2011, General Cable 2018, Encore Wire 2023), and established the track record against which NKT and Nexans are measured; it is the highest-quality franchise in the cohort on execution grounds</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The Prysmian change-forces case is structurally identical to NKT's at the Energy cable level; same grid-upgrade supercycle, same offshore wind cable demand, same oligopoly pricing power; but is diluted by the Building Wire and Telecom segments; the investment question is whether the diversification premium (de-risked delivery) is worth more or less than NKT's pure-play leverage</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><span class="g gD">D</span> Prysmian's primary downside risk is integration complexity: the Encore Wire acquisition (2023, ~$<strong>4bn</strong>) added significant US building wire exposure at a point when US housing and construction markets were under rate pressure; this is a drag on margins and a potential distraction from the European Energy cable execution; Watson flags this as the primary ESA investigation item</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The EPS growth story is strong but less explosive than NKT: Prysmian's more diversified portfolio means EPS growth is driven by a combination of Energy cable mix improvement, Encore Wire integration integration benefits, and telecom capex trends: more variables, lower peak leverage on any single driver</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Cohort positioning: Prysmian is the blue-chip choice within the cables theme; NKT is the high-conviction pure-play; the question for Richard's portfolio is risk-adjusted return: does the NKT leverage premium exceed the PRY quality premium?</div></div>
+<div class="memo-closing">Section-closing summary: Prysmian is a compelling Triaging PROGRESS candidate with strong change forces, the sector's best execution track record, and excellent thematic fit in its Energy cable business; the primary ESA focus should be the Encore Wire integration and the BU-level margin disaggregation.</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-investment-case-attributes" data-spy><span class="id">C</span> Investment Case Attributes <span class="secn">181 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements" data-spy><span class="id">C.1</span> Pillar I: Case Change Elements <span class="secn">41 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-internal-external-first-pass" data-spy><span class="id">E1</span> Required Input Change Forces (internal / external) | First pass — light | ×2 double-weight | floor: 6 bullets per RA and CQ <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">41 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Element-level BLUF: Prysmian's change forces are strong and well-evidenced, built on the same structural tailwinds as NKT (European grid-upgrade supercycle, offshore wind, energy security) but complemented by an additional internal change force (Encore Wire integration and US market expansion). The dilution from lower-growth segments (Building Wire, Telecom) is real but does not undermine the fundamental change-forces assessment. RA1 is A-grade; RA2 is A— grade.</div><div class="lead-prose">RA1 summary: Prysmian's external change forces are structurally identical to NKT's at the Energy cable level — among the most durable in European equities. The internal change forces are diversified across EHV capacity expansion, Encore Wire integration benefit capture, and deliberate product-mix migration within the Energy segment. The combination is highly compelling; the slight A— vs NKT's A reflects the dilutive effect of the non-Energy portfolio.</div><div class="lead-prose">RA2 summary: Prysmian's base is robust and more proven than NKT's — decades of EHV project execution, a diversified revenue base, and a management team with demonstrated M&amp;A integration capability. The mispricing angle is less acute than NKT because Prysmian is more thoroughly covered and its EHV track record is better understood by the market; the change-from-current opportunity is real but at a somewhat higher quality premium entry point.</div></div>
+<p><strong>Element rating for E1: A <span class="g gA">A</span>— [vs European industrials universe] — high conviction</strong></p>
+<p><strong>E1 RA1 — Change forces?</strong></p>
+<p><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds?</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The European grid-upgrade and offshore wind cable supercycle applies to Prysmian identically to NKT: Prysmian is the market-share leader in European EHV submarine cable; it has been executing large offshore interconnectors and offshore wind arrays for longer than NKT; the demand tailwind is the same structural driver</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Prysmian's geographic breadth extends the external tailwind beyond Europe: the US is undergoing a parallel grid modernisation and offshore wind build-out (Atlantic coast, Gulf of Mexico); Prysmian; uniquely within the three-stock cohort; is positioned to capture both European and North American grid-upgrade spend; this is a genuine differentiator vs NKT</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The Encore Wire acquisition (2023) specifically extended Prysmian's exposure to the US building wire and low-voltage power cable market: the US construction market is driven by the CHIPS Act, IRA infrastructure spending, and data centre buildout: all external change forces with multi-year duration</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Prysmian's Telecom segment is facing a structural demand decline in copper cable (DSL) offset by fibre growth: the net change force in Telecom is modestly positive (fibre rollout is a growth driver) but lower in magnitude than the Energy cable tailwind; this segment is a portfolio diversifier, not a primary growth engine</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Prysmian benefits from the European defence and data centre infrastructure buildouts: power cables for NATO military infrastructure, data centre campuses, and industrial electrification projects all represent growing demand lines that are partially unique to Prysmian's broader product scope</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Within the HV/EHV oligopoly, Prysmian's competitive position is the most proven: 100+ submarine cable projects completed globally, including the world's longest submarine HVDC interconnectors (HVDC NordLink, SuedLink approach); this track record commands a project win premium in competitive tenders for technically complex, high-value contracts</div></div>
+<p><strong>E1 RA1 CQ2 — Strong internal change forces?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The EHV capacity expansion at Pikkala (Finland) and Arco Felice (Italy) represents Prysmian's equivalent of NKT's Karlskrona: Prysmian has been expanding EHV manufacturing capacity in multiple facilities simultaneously, adding capacity across offshore cable, land cable EHV, and accessories; unlike NKT, Prysmian's EHV expansion is already partly delivering into the revenue line</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Encore Wire integration is the largest internal change force: the $<strong>4bn</strong> acquisition added ~$<strong>2.5</strong>–3bn of US revenue and brings potential integration benefits through cross-selling, procurement scale, and shared technical resources; the integration is in its 2nd–3rd year (2025–2026) and the integration benefit harvest is not yet fully visible in margins</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Product mix migration is an intentional internal change force: Prysmian's management is actively steering the portfolio away from commodity-price-sensitive Building Wire and toward high-margin EHV/offshore Energy cable; this deliberate margin-mix improvement is evidenced in the increasing share of the Energy segment in group revenues and EBITDA</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The CEO transition reinforces the strategic focus: Massimo Battaini (CEO since 2023, working assumption) has signalled a continued focus on Energy cable leadership and is associated with the EHV expansion strategy; continuity from Battista's Draka/General Cable integration era means the strategic muscle memory is in place</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Prysmian's manufacturing excellence programme (ongoing since 2018 General Cable integration) is driving structural cost reduction in the legacy manufacturing base: factory consolidation, automation investment, and lean production methodologies are improving the cost structure in higher-volume segments, freeing cash for reinvestment in EHV</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">The R&amp;D pipeline contains several near-commercial EHV technology advances: higher-voltage-class cables (600kV+), composite-core designs, and improved HVDC accessories; these advances, if successfully commercialised, widen the competitive gap vs NKT and Nexans at the technology frontier</div></div>
+<p><strong>E1 RA2 — Robust base?</strong></p>
+<p><strong>E1 RA2 CQ1 — Absence of external headwinds?</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The same permitting delay headwind applies to Prysmian as to NKT: European offshore wind permitting has been slow in Germany and Netherlands; this creates revenue conversion timing uncertainty but does not destroy demand</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Prysmian's Encore Wire US exposure introduces a building construction cycle headwind: US residential and commercial construction is sensitive to interest rates; if US rates remain elevated, Building Wire revenues may underperform; this is a diversification headwind absent from NKT's more focused profile</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Italian political risk is marginal: Prysmian is Italian-headquartered and listed; Italian political instability has historically created occasional multiple discount vs peer European industrials; under the current Meloni government (broadly business-friendly), this risk is low but should be noted</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">No material competition disruption is visible: the three-player European oligopoly is stable; no new entrant has emerged in EHV; Chinese manufacturers remain geopolitically constrained from European grid infrastructure tenders</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The telecom copper cable segment is in structural long-term decline (DSL → fibre substitution); this is a slow-moving headwind in an already-small segment; Prysmian is managing the decline through capacity reduction and fibre product investment</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Net headwind assessment: the Building Wire / US rate cycle exposure is a real but modest dilutive headwind to the group; it does not threaten the primary Energy cable thesis</div></div>
+<p><strong>E1 RA2 CQ2 — Well-invested base?</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Prysmian's manufacturing estate is the most extensive in the cable industry: 108 factories across 50+ countries as of General Cable acquisition integration; the manufacturing network has been rationalised post-General Cable but remains the world's largest cable production base by output</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">EHV manufacturing is concentrated in the most capable facilities: Pikkala (submarine cable), Arco Felice (HVDC accessories), and a small number of other specialist sites; these facilities are among the most technologically advanced in the world and have been continuously invested in since the 2000s</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The vessel fleet (Leonardo da Vinci, Cable Enterprise, Giulio Verne) is the most capable in the industry: Prysmian's CLV fleet exceeds NKT's in terms of vessel count and cumulative cable-laying experience; this is a critical competitive advantage in deep-water and long-haul offshore projects</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Workforce: Prysmian employs ~30,000 people globally; the EHV specialist workforce in the cable segment is the largest in the industry; the breadth of experience across project types is an organisational asset</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">R&amp;D investment: Prysmian's annual R&amp;D spend is among the largest in the industrial cables sector (~€<strong>200</strong>–250m per annum, working assumption); the R&amp;D programme spans EHV technology, accessories, digitally-enabled cable monitoring, and environmental performance</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">The General Cable and Encore Wire integration track records demonstrate the management capability to absorb large acquisitions and harvest integration benefits over a 3–5 year horizon: this is an asset for future M&amp;A optionality and a signal of organisational quality</div></div>
+<p><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis?</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Prysmian has delivered consistent EPS growth at or above consensus over the 2018–2025 period with the exception of the 2020 COVID disruption year: this is a strong track record of delivery that NKT cannot yet match given its shorter history as a pure-play</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">The Energy cable segment has been the driver of outperformance: every year in which Prysmian has beaten consensus, the positive surprise has come from better-than-expected Energy cable margin, stronger order backlog conversion, or a one-off EHV project milestone achieved ahead of schedule</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">M&amp;A integration has been broadly congruent with stated targets: the Draka (2011) and General Cable (2018) integrations were delivered within committed integration benefit timelines and without major balance sheet deterioration; Encore Wire (2023) is mid-integration and early signals are positive</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">The margin trajectory is consistent with the thesis: Prysmian's blended EBITDA margin has expanded from ~<strong>10%</strong> (2018) toward ~13–<strong>16%</strong> (2025) as the product mix has shifted toward Energy cable; this is the same qualitative story as NKT but with a longer evidential record</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Some project delivery variation has been visible: occasional EHV project delays (weather-related, regulatory, logistical) have created quarterly noise; but these are project-timing effects, not fundamental case deterioration</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">Track record congruency verdict: strong: Prysmian is one of the few European industrials with a decade-long track record of beating consensus estimates driven by the specific mechanism (Energy cable mix improvement) that the investment thesis depends on</div></div>
+<p><strong>E1 RA2 CQ4 — Large change-from-current / mispricing?</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">The mispricing opportunity in Prysmian is narrower than in NKT: Prysmian is more thoroughly researched (20+ analysts), has a longer EHV track record that is better understood, and trades at a multiple that partially reflects the quality premium; the EPS upgrade narrative is well-known on the sell-side</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">However, the Encore Wire integration integration benefit optionality is not fully priced: the $<strong>4bn</strong> acquisition at a premium multiple was initially poorly received; if the US business delivers higher integration benefits than modelled (~$<strong>100</strong>–150m annual run-rate; working assumption), the market will reprice the acquisition premium more positively</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The full EHV order book margin inflection is not fully priced: similar to NKT, Prysmian's consensus EBITDA margin estimates likely underestimate the sustainable margin achievable when the EHV/offshore project mix reaches full weight in the reported numbers</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">EPS upgrade probability is high: with a multi-year order book, disciplined project selection, and multiple integration benefit levers, Prysmian has a mechanically high probability of delivering guidance upgrades in H2 2026 and FY2027</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">The mispricing at Triaging depth is: "consensus underestimates the combined EHV margin inflection + Encore Wire integration benefits": less dramatic than NKT's "consensus hasn't modelled EHV at all" situation, but still material</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">Change-from-current / mispricing verdict: real but less acute than NKT; the quality premium at PRY means the entry point reflects some of the EHV premium already</div></div>
+<p><strong>E1 RA2 CQ5 — Low trading multiple?</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">Prysmian is not cheap: at €<strong>20</strong>–22bn market cap, the stock trades at approximately 20–28× 2025E earnings and ~11–15× 2025E EBITDA: in line with or at a slight premium to the cable sector peer group</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">The quality premium is justified: Prysmian's track record, geographic scale, and EHV market leadership merit a premium multiple vs NKT and Nexans; whether the current multiple leaves sufficient upside is the E3 question for ESA</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">Multiple is not a Triaging disqualifier: the same logic as NKT: the change-forces case is the primary Triaging test; the valuation entry point question belongs at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">Relative valuation cohort comment: NKT may offer better leverage to the EHV upside at a comparable multiple; PRY offers more certain compounding and lower execution risk at a similar multiple; the investor-type question (concentrated leverage vs quality compound) is a portfolio decision for the APM</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">Multiple verdict: C+ at Triaging level: not a value case; a quality growth case; multiple is appropriate but does not provide a large entry margin of safety</div></div>
+<div class="memo-closing">E1 section-closing summary: Prysmian's change forces are strong and structurally proven over a decade-long track record; they are slightly less concentrated and less leveraged to the EHV pure-play than NKT's, but they are delivered from a substantially higher-quality and more proven execution platform.</div>
+<p><strong>Counter-view considered:</strong> The bear case on Prysmian's change forces is that the stock is fully priced for the Energy cable upside and the remaining catalysts (Encore Wire integration benefits, EHV mix migration) are incremental rather than transformative. Watson assessed this. The integration benefit capture and margin inflection trajectory are not yet fully in consensus numbers; the bear case underestimates the runway on EHV margin improvement and the incremental project selectivity benefit as the order book grows.</p>
+<p><strong>Downstream actions for E1:</strong> 1. Brief Researcher to run Q2 CF (Change Forces) batch for PRY before ESA, specifically including: Encore Wire integration status and integration benefit timeline; Energy cable BU-level margin trajectory; EHV order book composition (what % EHV vs standard HV offshore). 2. At ESA, model Encore Wire integration in two scenarios — (a) on-track integration benefits ($<strong>100m</strong>+ by 2027) and (b) below-plan integration benefits ($<strong>50</strong>–60m by 2027) — to assess earnings sensitivity.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks" data-spy><span class="id">C.2</span> Pillar II: Case Building Blocks <span class="secn">140 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-first-pass-light" data-spy><span class="id">Grp 1</span> Case Momentum <span class="secn">24 findings</span></div>
+<p><strong>E4 — Technical momentum: [no change] — carry forward from Generation stage (B working assumption)</strong></p>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-second-pass-at-triaging-2-double-weight-floo" data-spy><span class="id">E5</span> Thematic Fit | Second pass at Triaging | ×2 double-weight | floor: 6 bullets per RA and CQ <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">24 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Element-level BLUF: Prysmian's thematic fit is strong but slightly diluted by the non-Energy portfolio. The Energy cable business is a pure beneficiary of all three Q2 2026 active thematics. The Building Wire business (US and European construction cycles) introduces a modest cyclical exposure to the bear market thematic. The Telecom segment is essentially thematically neutral. Net rating: A— vs NKT's clean A.</div></div>
+<p><strong>Element rating for E5: A <span class="g gA">A</span>— [vs European industrials universe] — high conviction on Energy cable; B+ at group level given non-Energy dilution</strong></p>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The Energy cable segment of Prysmian has identical bear-market resilience to NKT: TSO and energy utility customers are quasi-sovereign, revenues are contracted 3–5 years forward, demand is policy-mandated and counter-cyclical</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The Encore Wire / Building Wire segment introduces building-cycle sensitivity: US residential construction is rate-sensitive; European commercial construction follows GDP; in a severe bear market, Building Wire volumes would decline 10–<strong>20%</strong>; this is a real but partial headwind to the group's defensive characteristics</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Building Wire is approximately 20–<strong>25%</strong> of group revenue (working assumption post-Encore Wire consolidation): this segment's cyclical exposure reduces but does not eliminate Prysmian's bear-market defensive quality; the blended group is more cyclical than NKT but still materially more defensive than a typical European industrial</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The order book on the Energy segment provides the same multi-year revenue shield as NKT: the large project backlog means a bear market would not affect revenues until new order intake collapsed AND the existing backlog was exhausted: a 3–4-year runway</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Telecom cable is largely unaffected by economic downturns: telecom operators continue fibre rollout through cycles as it is structurally mandated; the segment has modest but stable cash flows</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Prysmian's European Energy cable customer base (TSOs, utilities) has stronger credit quality than the US commercial construction customer base (developers, contractors): the portfolio mix means credit risk increases modestly in a severe downturn vs NKT's purer TSO base</div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Prysmian's Energy cable business is AI-disruption-proof by the same physical logic as NKT: cables are physical infrastructure; no AI system replaces the need for physical power cable</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">AI is a demand driver for Prysmian specifically: data centre construction in Europe and the US requires power cables from the grid to the data centre and within the campus; this is a growing demand stream that uniquely benefits Prysmian's building wire and low-voltage power cable business (less relevant for NKT's HV-focused portfolio)</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The Telecom segment connects to the AI infrastructure build: fibre-optic cable demand is growing with AI-driven data centre traffic, hyperscaler buildout (AWS, Azure, Google), and national broadband rollout programmes; Prysmian's telecom cables are direct physical enablers of the AI infrastructure buildout: every AI training cluster and inference data centre requires extensive fibre interconnect; this adds a secondary AI demand tailwind entirely absent from NKT or Nexans; the telecom segment's AI exposure provides a partial hedge against any slowdown in traditional copper-based telecom demand, and reinforces the E5 RA2 (AI disruption resistance) assessment by showing that Prysmian participates in AI infrastructure demand rather than merely avoiding AI disruption risk</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">AI automation risk to Prysmian's manufacturing: same as NKT: cable manufacturing is complex, physically intensive work; AI efficiency gains are marginal rather than transformative within the investment horizon</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Prysmian is more directly embedded in the AI physical infrastructure stack than NKT: building wire in AI data centre campuses, fibre for AI networks, and EHV cables for AI-driven power demand growth; the AI demand tailwind is broader for PRY than for NKT</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">AI disruption risk rating: negligible for core business; AI is a net positive demand driver, particularly via the data centre and fibre channels</div></div>
+<p><strong>E5 RA3 — Suitability for Iran oil-price induced input cost inflation or demand deterioration</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Same underlying logic as NKT on input costs: XLPE polymer (petroleum-derived) is a raw material across all cable types; oil price increases add approximately 0.5–<strong>1%</strong> EBITDA margin headwind at a 20–<strong>30%</strong> sustained price increase; Prysmian's larger absolute purchasing volumes from Borealis, Dow, and other XLPE producers give it a modest negotiating advantage vs NKT; the multi-geographic manufacturing footprint also allows some regional substitution of polymer sources to mitigate spot price spikes; largely manageable and partially pass-through in project contract negotiations; net Iran oil price risk for Prysmian is slightly lower than for NKT on a per-unit basis given scale and geographic manufacturing flexibility</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Prysmian's US Building Wire business adds a small incremental oil/input cost sensitivity: US residential construction margins may be marginally squeezed by rising polymer and aluminium costs in a high-oil-price environment</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The energy security imperative is even more powerful for Prysmian given its broader European energy cable footprint: rising oil prices reinforce European political commitment to grid investment and energy independence, directly benefiting Prysmian's primary growth driver</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">No Iran/geopolitical exposure in PRY revenues: Prysmian has no Middle East operations of consequence; the conflict has zero direct revenue impact</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">Iran scenario net assessment: slightly more complex than NKT (US Building Wire adds a commodity cost dimension) but fundamentally the same conclusion: net positive for core Energy cable demand; manageable cost impact</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Input cost hedging: Prysmian has more sophisticated commodity hedging infrastructure than NKT (larger treasury function, longer history of commodity management): copper and polymer hedging is extensive; the financial risk management capability is a marginal positive vs NKT</div></div>
+<p><strong>E5 RA4 — Paradigm fit from business perspective</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Prysmian's Energy cable division fits the Q2 2026 risk-off investment paradigm identically to NKT: long-term contracted infrastructure revenues with multi-year visibility, oligopolistic market structure, energy security alignment, dominant domestic EU footprint in core markets</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The Encore Wire addition adds a US infrastructure investment paradigm fit: the IRA, CHIPS Act, and US AI infrastructure buildout are distinct US investment themes that Prysmian uniquely captures within the cable sector; PRY is the only European-listed pure-cable company with meaningful US IRA-beneficiary exposure; the Inflation Reduction Act allocated $<strong>369bn</strong> to climate and energy investment, a significant portion directed at grid hardening, transmission expansion, and clean energy generation; Encore Wire's established distribution relationships and manufacturing footprint in Texas position Prysmian to capture contractor and utility demand from these programmes in a way that no other European cables company can replicate; this US paradigm fit layer is a genuine differentiator vs NKT and Nexans and partially compensates for the Building Wire cyclicality discount</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The Building Wire segment dilutes paradigm purity: residential/commercial construction cycles are not what Richard is targeting in the current risk-off regime; this is where the A: vs A thematic rating materialises</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">The diversification case: an investor who wants exposure to the cables supercycle with lower single-company execution risk (NKT EHV ramp) and broader geographic/segment diversification would rationally prefer PRY; the paradigm fit is lower in purity but higher in breadth</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Paradigm fit vs NKT: PRY scores slightly below NKT on pure-play alignment but adds unique US IRA exposure via Encore Wire and a broader geographic revenue base that provides structural resilience; the trade-off is intentional diversification premium vs NKT's pure-play leverage; for a concentrated portfolio, NKT offers cleaner single-stock expression of the cables thesis; for a position that requires lower single-stock execution risk, PRY is the better anchor</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Cohort thematic comparison: NKT = A pure-play; PRY = A; diversified; NEX = B+ (most diluted; expect lower thematic rating when NEX memo is written)</div></div>
+<div class="memo-closing">E5 section-closing summary: Prysmian's thematic fit is strong across its dominant Energy cable segment, which qualifies clearly for the Q2 2026 risk-off investment paradigm; the Building Wire cyclical exposure introduces modest dilution vs NKT's purer profile; the US IRA infrastructure exposure via Encore Wire is a unique positive not replicable through NKT or Nexans.</div>
+<p><strong>Counter-view considered:</strong> The bear case on Prysmian's thematic fit is that the combination of European Energy cable (A) + US Building Wire (C cyclical) + declining Telecom copper (D) produces a portfolio-average thematic fit of B+ or below. Watson assessed this. The Energy cable segment is 60–<strong>65%</strong> of group EBITDA (working assumption); the higher-quality segment dominates the group thematic rating; the portfolio-average frame understates the strategic positioning of the primary business.</p>
+<p><strong>Downstream actions for E5:</strong> 1. At ESA, obtain segment EBITDA split (Energy cable / Building Wire / Telecom) to formally weight thematic ratings by segment contribution. 2. At ESA, assess US IRA exposure specifically — what is the addressable revenue from CHIPS Act and IRA infrastructure projects within the Encore Wire business?</p>
+<p><strong>Group 1 rating: B+ — [positive; E5 A—; E4 carry-forward B; no E6 at Triaging]</strong></p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-first-pass-light" data-spy><span class="id">Grp 2</span> Case Simplicity <span class="secn">76 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-required-case-simplicity-guardrails-first-pass-light-2-do" data-spy><span class="id">E7</span> Required Case Simplicity Guardrails | First pass — light | ×2 double-weight | floor: 6 bullets per RA and CQ <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">29 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Element-level BLUF: Prysmian is notably less simple than NKT. Three distinct business units, 50+ country operating footprint, an M&amp;A integration in process, and a complex project-based revenue recognition model across multiple EHV contracts simultaneously. E7 is the primary detractor from Prysmian's investment case quality at Triaging depth. The change forces are compelling; the simplicity guardrails are more stressed than ideal. Rating: C+.</div></div>
+<p><strong>Element rating for E7: C+ <span class="g gC">C</span> [vs Viewforth acceptable-complexity standard] — most important risk flag in this memo</strong></p>
+<p><strong>E7 RA1 — Focused bet?</strong></p>
+<p><strong>E7 RA1 CQ1 — 2 or less fulcrum drivers AND 4 or less key drivers?</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Watson identifies two primary fulcrum drivers: (FD1) <strong>Energy cable EHV mix migration + margin inflection</strong> (identical to NKT: the core value creation mechanism); (FD2) <strong>Encore Wire integration benefit harvest and US grid exposure monetisation</strong> (unique to PRY: the acquisition thesis delivering through margin improvement and US IRA contract wins)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The two FDs are partially independent of each other: a US construction market downturn could impair FD2 without affecting FD1; the two drivers add complexity to the investment thesis that is not present in the NKT single-FD case</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Key drivers at Triaging: (a) EHV/offshore project backlog conversion; (b) Encore Wire EBITDA integration benefit run-rate; (c) US IRA/infrastructure cable contract wins; (d) European permitting pace; (e) Italian political/currency stability. Five KDs: at the edge of the guardrail</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The FD count (2) passes the guardrail numerically but the independence of FD2 from FD1 is a real simplicity cost relative to NKT: monitoring and understanding the Prysmian case requires tracking two distinct business narratives in parallel</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The fulcrum driver on the US business (Encore Wire integration benefits) is harder to monitor than NKT's Karlskrona EHV ramp: integration benefit realisation is opaque (management reports annual integration benefit progress but the underlying drivers are not fully disclosed); this reduces investability at the monitoring stage</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Guardrail check: 2 FDs (within limit), 5 KDs (at the limit). MARGINAL PASS: but complexity is genuinely higher than NKT</div></div>
+<p><strong>E7 RA2 — Narrow perimeter?</strong></p>
+<p><strong>E7 RA2 CQ1 — 10 or less geographies and/or business units?</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Prysmian operates across 50+ countries with manufacturing in ~25 countries: this is categorically different from NKT's 6-market focus; the perimeter is wide by any Viewforth standard</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">However, the investment case is primarily concentrated in a sub-set of that footprint: EHV offshore (Italy, Finland, Norway, UK, US Gulf Coast), HVDC (European interconnectors), and Encore Wire (US South/Southeast) are the value-creation engines; the 50-country manufacturing network is a legacy of sequential M&amp;A, not a strategic choice about complexity</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The 3-segment structure (Energy, Telecom, Building Wire) is within the 10-unit guardrail numerically, but each segment contains multiple geographic sub-segments</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">This is the most material E7 concern for Prysmian: the analyst/investor must simultaneously understand European TSO dynamics, US construction trends, global fibre telecom capex, Italian manufacturing cost dynamics, and US/EUR FX effects: this is genuinely more difficult than NKT</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Prysmian management has historically run this complexity well (Draka, General Cable integration records); the question is whether a Viewforth-style monitoring approach (focused, concentrated) is well-suited to PRY's inherent business complexity</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Perimeter check: numerically passes (3 BUs) but depth of geographic complexity exceeds the spirit of the guardrail; SOFT FLAG</div></div>
+<p><strong>E7 RA3 — Zero headwinds?</strong></p>
+<p><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue?</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">US Building Wire construction cycle: a genuine demand headwind if US housing activity declines; at current interest rate levels, this headwind is partially live</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Telecom copper cable decline: structural but slow-moving; Prysmian is managing this into a smaller part of the portfolio</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">European permitting delays: same as NKT; applicable to the offshore Energy cable segment</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Italian wage inflation and labour market tightness: Prysmian's Italian manufacturing base is subject to Italian labour dynamics; recent Italian wage inflation has been a modest EBITDA headwind</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">Encore Wire: the acquisition was at a significant premium and the US residential construction market has been under rate pressure; this is a headwind to the acquisition thesis that is only partially resolved</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Headwind count: three identifiable headwinds for Prysmian (US Building Wire construction cycle, Telecom legacy copper structural decline, offshore wind permitting and grid connection delays) vs NKT's single headwind (EHV execution risk only); this triple headwind count vs single headwind is the primary E7 differentiator between the two companies; each headwind is individually manageable and peripheral to the core Energy EHV thesis, but their combination means Prysmian carries materially more E7 complexity; at ESA the question is whether any of the three headwinds is large enough to impair the group EBITDA case or whether all three remain genuinely subordinate to the dominant EHV demand driver; this contributes directly to the C+ simplicity rating</div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items?</strong></p>
+<p><strong>E7 RA4 CQ1 — 2 or less change-from-current items or problems?</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Watson identifies three change-from-current items: (CFC1) EHV capacity expansion and mix migration to offshore/EHV; (CFC2) Encore Wire integration benefit harvest (2023–2027); (CFC3) Telecom segment restructuring and right-sizing</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Three CFCs is one more than the Viewforth guardrail ideal: this is a real complexity cost and one reason E7 is rated C+</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The three items are at different stages of their change-cycle: CFC1 is mid-execution, CFC2 is in early-mid execution, CFC3 is ongoing restructuring; this creates a multi-variable tracking requirement</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">It is possible to argue that CFC3 (Telecom restructuring) is a non-material distraction rather than a primary CFC: if the segment is small enough in EBITDA contribution, it doesn't move the needle; this argument holds only if Telecom is &lt;<strong>10%</strong> of EBITDA</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Even on a generous 2-CFC reading, the complexity of the Encore Wire integration vs NKT's single Karlskrona milestone makes PRY's change-from-current harder to monitor</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">CFC check: 3 items (above guardrail); SOFT FLAG on complexity</div></div>
+<p><strong>E7 RA5 — Conservative investor relations?</strong></p>
+<p><strong>E7 RA5 CQ1 — Company confirms guidance is conservative?</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Prysmian has a broadly positive guidance track record: 2018–2024 shows more guidance raises than guidance cuts; the Energy cable segment delivers positive surprises mechanically (long-duration contract backlog makes outperformance achievable)</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">However, the Encore Wire acquisition guidance (integration benefit timeline, US market growth) has been more uncertain: the initial acquisition model was optimistic on US construction cycle timing; the market has been somewhat disappointed by the pace of integration benefit capture</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">CEO transition (if Battaini replaced Battista in 2023, working assumption) creates a short-period of recalibration risk: new CEOs often reset guidance conservatively to create a beat-and-raise track record; this could actually improve guidance quality going forward</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">The larger and more complex the company, the harder it is to maintain guidance accuracy: Prysmian's multi-segment, multi-geography guidance model is inherently harder to be conservative about than NKT's more focused order-book-driven guidance</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">IR quality verdict: B overall: strong Energy cable track record; some recent Encore Wire-related guidance uncertainty; improving under a possible new CEO discipline</div></div>
+<div class="memo-closing">E7 section-closing summary: Prysmian fails the simplicity test more clearly than NKT — three CFCs, a wide geographic perimeter, and a live M&amp;A integration create genuine case complexity that will require careful disaggregation at ESA; the C+ rating is a signal to Richard that this is a less focused investment thesis than NKT.</div>
+<p><strong>Counter-view considered:</strong> The counter-argument on simplicity is that Prysmian's diversification is a strength rather than a weakness: it provides earnings resilience across economic cycles, reduces dependence on any single project execution, and creates multiple pathways to EPS growth. Watson agrees this is a valid portfolio construction argument. It is also not a simplicity-guardrail argument: by Viewforth's investment process standard, complexity is a risk, not a benefit, unless the earnings quality improvement exceeds the monitoring cost. At Triaging depth, the complexity cost appears real enough to rate C+.</p>
+<p><strong>Downstream actions for E7:</strong> 1. At ESA, formally disaggregate the three CFCs by EBITDA materiality — if Telecom &lt;<strong>10%</strong> EBITDA, simplify the monitoring framework to 2 CFCs. 2. At ESA, request Encore Wire integration benefit progress update specifically — what is the current run-rate vs the original acquisition model?</p>
+<p><strong>Group 2 rating: C+ — [simplicity constraint is the most significant negative in the Prysmian case; offset by higher operator quality in other elements]</strong></p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-with-acceptable-case-setups-first-pass-light-e8-carve" data-spy><span class="id">E8</span> Fit with Acceptable Case Setups | First pass — light | E8 carve-out applies | floor: 3 bullets per RA and CQ <span class="secn">47 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Element-level BLUF: Prysmian's best-fit setups are RA2 (Big demand change-driven EPS upgrade) as primary, RA3 (Strong corporate change-driven EPSU/EPT) as a more active secondary than NKT's given the CEO transition and Encore Wire integration, and a tertiary RA4 (Change-from-current clearing in high-quality compounder) element. Negative guardrails are clear. The setup is slightly more complex than NKT's but all three setups are complementary rather than contradictory.</div></div>
+<p><strong>Element rating for E8: B+ <span class="g gB">B</span> — [two confirmed fit setups with strong credibility; tertiary RA4 element adds compounder layer; primary setup slightly less pure than NKT due to portfolio complexity]</strong></p>
+<p><strong>E8 RA1 — Mis-modelled, high-quality EPS upgrader?</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The Encore Wire integration creates a specific, identifiable mis-modelling opportunity: the sell-side has been valuing Encore Wire's contribution to Prysmian conservatively, applying a low M&amp;A premium scenario and embedding minimal integration benefit from US distribution channel access, manufacturing footprint overlap, and copper procurement scale; as Encore Wire integration benefits become visible in reported EBITDA, the gap between embedded consensus assumptions and realised economics will create earnings surprise</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The EHV margin mis-modelling thesis applies equally to Prysmian as to NKT: consensus models underestimate the unit economics of EHV submarine cable production; Prysmian's more established EHV track record (Pikkala and Arco Felice factories are already qualified for 525kV cable) means the mis-modelling is potentially even more correctable in the near term: the factory ramp risk is lower because qualification has already been achieved</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA1 vs cohort differentiation:</strong> Prysmian's RA1 case is slightly stronger than NKT's because the Encore Wire integration creates an additional, company-specific source of earnings surprise (not just the shared EHV margin mis-modelling); investors who are skeptical about M&amp;A are likely pricing Encore Wire more pessimistically than warranted, which means the re-rating on integration delivery is an idiosyncratic earnings catalyst layered on top of the sector-wide EHV upgrade</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">RA1 fit assessment: moderate; as with NKT, the mis-modelling is downstream of the demand change story rather than a standalone quality-discovery thesis; the Encore Wire angle adds a specific and identifiable source of earnings surprise that NKT does not have; RA1 is a genuine contributory factor for Prysmian, though the primary setup remains RA2</div></div>
+<p><strong>E8 RA2 — Big demand change-driven EPS upgrade or EPT?</strong></p>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ1: Market-wide demand explosion?</strong> Confirmed at high conviction. European grid and offshore wind cable demand is compounding at 15–<strong>25%</strong> per annum with legally mandated EU policy support; Prysmian's global footprint (APAC, Americas, Middle East, Europe) means it captures demand expansion in multiple geographies simultaneously: US IRA grid investment (Inflation Reduction Act), Middle East grid modernisation, and Asian offshore wind programmes add demand sources entirely absent from NKT's narrower geographic exposure; the demand explosion argument is if anything stronger for Prysmian than for NKT on a total addressable market basis The US dimension is particularly important: the Inflation Reduction Act allocated $<strong>369bn</strong> to climate and energy investment, a significant portion of which supports grid hardening and transmission expansion; Prysmian's Encore Wire footprint in the US gives it direct access to this demand via existing customer relationships and distribution channels; NKT and Nexans have minimal US presence, making Prysmian uniquely positioned to capture this regulatory-driven demand surge</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>CQ2: Dominant competitive position?</strong> Confirmed at high conviction. Prysmian is the global market share leader in EHV submarine cable, the de facto #1 by installed base, project track record, and revenue scale; the qualification portfolio at Pikkala (525kV submarine, world-class) and Arco Felice (EHV land cable, HVDC) represents the most extensive EHV certification portfolio of any manufacturer globally; TSOs and offshore wind developers who need the highest-specification cables have a limited choice set and Prysmian is on every shortlist; this qualification depth is a structural barrier to entry that reinforces the dominant position; the Draka (2011), General Cable (2018), and Encore Wire (2023) acquisitions have each extended Prysmian's geographic and product market reach while strengthening the core franchise; within the European EHV offshore and interconnector market, Prysmian sets the pricing norms: it is the market leader whose behaviour shapes oligopoly discipline across all three players</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>CQ3: One-to-many scalable business model?</strong> Partially confirmed. Prysmian's manufacturing model generates fixed cost leverage across its 5 EHV/HV production facilities (Pikkala Finland, Arco Felice Italy, Gron France, Drammen Norway, and Nordenham Germany); the scale of the global footprint means total fixed cost leverage is larger in absolute terms than NKT's single Karlskrona facility; the telecom cable segment adds a further, structurally different scalability dynamic through fibre-optic cable, where manufacturing economics are more capital-efficient per unit than power cable</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ4: Oligopoly in structure AND behaviour?</strong> Confirmed at high conviction. Prysmian sits at the top of the three-player European HV/EHV oligopoly; as the market leader, it is the price-setting player whose project selectivity and contract terms establish the pricing floor for the market; NKT and Nexans follow PRY's lead on pricing discipline; barriers to entry are identical to the cohort-level assessment (technical qualification, capital intensity, reference list requirements) but Prysmian has the most extensive qualification portfolio, making its competitive position the most defensible</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>CQ5: Fixed cost operating leverage for margin expansion?</strong> Confirmed. Prysmian's margin expansion thesis is built on the same fixed cost leverage mechanism as NKT: as EHV capacity utilisation rises, the fixed overhead per unit of cable produced falls; Prysmian's already-qualified EHV factories (Pikkala at 525kV submarine and Arco Felice at EHV land cable) mean the certification ramp risk is lower than NKT's Karlskrona greenfield build; the incremental contribution margin on filling existing qualified EHV capacity is mechanically transparent and near-term achievable without the multi-year factory qualification delay that NKT faces</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA2 setup credibility stress test:</strong> (i) Competition from Chinese entrants: HVDC technology from Chinese manufacturers (China XD, TBEA, NKT Cables China) has been expanding; however, European TSO qualification requirements and track record standards have kept Chinese players out of the highest-value European offshore interconnector segment so far; this is a risk to monitor over a 5–10 year horizon but not a near-term RA2 invalidator; (ii) US IRA reversal: some risk that political changes reduce IRA grid investment; however, grid resilience is bipartisan in the US and the physical grid upgrade backlog is demand that exists independently of IRA incentives; (iii) Encore Wire margin drag: if Encore Wire integration disappoints, it dampens the US segment but does not impair the core European EHV/offshore thesis</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>RA2: Telecom cable as secondary demand vector:</strong> Prysmian's telecom cable segment (fibre-optic cables for broadband and data centre interconnection) adds a second, structurally independent demand driver to the RA2 thesis; fibre demand is growing with AI data centre build-out and national broadband rollout programmes; this demand is lower-margin than EHV cable but adds revenue diversification and absorbs shared fixed overhead in a way that improves blended margin stability; NKT does not have this secondary demand vector</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>RA2: EHV pipeline specificity:</strong> The EHV order pipeline for Prysmian is the most concrete available evidence for the RA2 setup credibility; major projects won and in backlog include Viking Link (UK-Denmark HVDC interconnector, 760km, one of the longest in the world), NorthConnect (UK-Norway), SuedLink (Germany onshore HVDC), and multiple North Sea offshore wind array cable packages; these are not speculative future orders: they are signed, committed, engineering-phase projects with multi-year delivery schedules; the backlog gives Prysmian revenue visibility extending to 2030 and beyond, and each project is a fixed-price (or target-price) contract, making the earnings contribution mechanically forecastable</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA2: US IRA as incremental demand driver:</strong> Encore Wire's position in the US distribution channel gives Prysmian direct access to IRA-driven demand from US utility-scale solar, onshore wind, and transmission projects; the US grid investment cycle is at an early stage (the IRA was passed in 2022, and permitting and procurement timelines mean most of the cable demand is a 2025–2030 story); this creates an asymmetric upside layer for Prysmian's RA2 setup not shared by NKT or Nexans; if the US cables market accelerates faster than consensus expects, Prysmian is uniquely positioned among the European cohort to capture the upside</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>RA2 cohort positioning:</strong> Prysmian's RA2 setup is stronger than NKT's on market position (CQ2: global leader vs Nordic leader) and geographic diversification (CQ1: multi-region demand), but slightly weaker on setup purity because the broader portfolio (telecom, building wire, Encore Wire integration) introduces complexity that dilutes the pure-play cable supercycle narrative; the net assessment is RA2 A: vs NKT's RA2 A</div></div>
+<p><strong>E8 RA3 — Strong corporate change-driven EPSU/EPT?</strong></p>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>CQ9: CEO transition (working assumption: Battaini succeeding Battista)?</strong> This is the most important RA3 trigger for Prysmian: if confirmed, the CEO succession represents a potential reset of strategic priorities, guidance framework, and management signalling style; a new CEO typically takes 12–18 months to establish his own guidance framework, during which time there is a higher probability of guidance conservatism (new management protecting downside) and strategic pivots (new management marking his territory); this dynamic creates the classic RA3 earnings-upgrade setup where conservative initial guidance is beaten consistently</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>CQ1: Financial guidance increase cycle?</strong> Confirmed. Prysmian has a track record of guidance raises in the Energy cable segment; the key variable for the new CEO period is whether the guidance conservatism increases further (new CEO effect) or whether the Encore Wire integration creates guidance uncertainty that makes the upgrade cycle less predictable; at Triaging depth, the guidance upgrade track record is sufficient to confirm RA3; the CEO transition adds uncertainty but also optionality</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>CQ3: Balance sheet utilisation: Encore Wire as strategic capital deployment?</strong> Confirmed. The Encore Wire acquisition at approximately $<strong>4bn</strong> was the most significant capital deployment in Prysmian's history; it represents a deliberate strategic decision to build a leading US cables franchise by acquisition, extending Prysmian's revenue base into the world's largest cable market; if the integration delivers on the original strategic rationale (US market access, copper procurement scale, distribution channel reach), this is a high-quality capital allocation decision with durable returns</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext"><strong>CQ6: Strategic pivot: portfolio reshaping post Encore Wire?</strong> Active signal. The Encore Wire acquisition fundamentally changed Prysmian's portfolio: the US revenue exposure shifted from modest to substantial (Encore Wire adds ~$<strong>2bn</strong>+  in annual revenue); the strategic implications (US vs European capital allocation, building wire vs HV/EHV focus, IRA exposure) are still being worked through by the incoming CEO; this strategic uncertainty is a short-term RA3 complexity but a medium-term catalyst as the new strategic direction becomes clear</div></div>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>CQ4: Portfolio perimeter management?</strong> Potential RA3 catalyst. Post Encore Wire, Prysmian may choose to rationalise non-core businesses (telecom cable, building wire in certain European markets) to focus capital on EHV/offshore and US; any perimeter disposal would sharpen the pure-play credentials and could trigger a re-rating; this is an optionality layer rather than a confirmed catalyst</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><strong>RA3: Management signalling quality:</strong> Prysmian's historical management team (Battista era) was well-regarded for communication quality and guidance conservatism; if the incoming CEO maintains this standard, the guidance upgrade cycle should continue; Watson notes that CEO transition periods create a window where the market temporarily reduces its earnings confidence premium, creating an attractive entry window for investors who assess the quality of the incoming management correctly; this is a specific RA3 timing dynamic worth investigating at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">RA3 fit summary: confirmed secondary setup; materially more active than NKT's RA3 because the CEO transition is more recent and the Encore Wire integration creates live corporate change dynamics; the corporate change layer on Prysmian is a source of both risk (Encore Wire execution uncertainty) and opportunity (guidance conservatism, strategic clarity pivot)</div></div>
+<p><strong>E8 RA4 — Change-from-current clearing in high-quality compounder?</strong></p>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Prysmian has genuine compounder characteristics that NKT does not yet fully possess: the track record of serial acquisition integration (Draka, General Cable, Encore Wire) demonstrates consistent M&amp;A value creation; the Energy cable business generates strong RONIC (Watson estimate: 18–<strong>22%</strong> on the core European EHV business); the diversified platform creates recurring revenue from multiple product lines and geographies; these are quality compounder hallmarks</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The change-from-current clearing element applies to the Encore Wire integration overhang: the market has been discounting Prysmian on acquisition risk and integration uncertainty since the $<strong>4bn</strong> Encore Wire deal announced; as integration benefits become visible in reported EBITDA (lower costs, higher US revenue contribution, procurement integration benefits), the acquisition discount should narrow and the valuation normalise upward; this is a specific, trackable clearing event</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>RA4: Encore Wire integration clearing timeline:</strong> The specific clearing event for RA4 is identifiable and near-term: Watson estimates that 12–18 months of post-acquisition results (i.e., FY2024–2025 reported numbers) will be sufficient for the market to form a clear view on whether Encore Wire is delivering per the acquisition model; if the 2025 full-year results show US segment margin improvement and revenue growth ahead of consensus, the acquisition discount should narrow materially; this creates a specific, calendar-driven re-rating catalyst that makes the RA4 fit more concrete than in most compounder-clearing setups</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>RA4: Quality compounder track record evidence:</strong> Prysmian's serial acquisition integration history (Draka 2011: transformed Prysmian from Italian mid-cap to European leader; General Cable 2018: doubled Americas revenue; Encore Wire 2023: established US distribution platform) demonstrates consistent value creation through M&amp;A; the pattern of acquiring, integrating, and improving each target's margin profile is evidence of genuine compounder execution capability; this track record is the primary reason Watson assigns RA4 tertiary fit rather than dismissing it, and it is what distinguishes Prysmian from a less experienced acquirer where similar acquisition complexity would be a warning sign</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">RA4 fit: tertiary but real; more applicable to Prysmian than to NKT or Nexans; the compounder quality is genuine, the clearing event (Encore Wire integration normalisation) is specific and near-term, and the RONIC profile is approaching the Viewforth compounder threshold; the RA4 element justifies Prysmian's B+ E8 rating vs NKT's B: the additional setup layer is real analytical content, not setup noise</div></div>
+<p><strong>E8 RA5 — Huge change-from-current clearing event in solid quality?</strong></p>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Prysmian is not in a post-trough recovery dynamic: revenues and earnings have been growing; the stock is not at distressed sentiment levels; there is no kitchen-sink moment or deep investor despair that creates the contrarian re-rating setup that RA5 requires</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">The Encore Wire acquisition created a transient period of concern (leverage increase, integration risk, potential earnings dilution in year 1) that has some RA5 characteristics, but this is better characterised as an integration discount clearing event (RA4) rather than a full RA5 clearing dynamic; the distinction matters because RA4 requires solid-to-good quality with a specific clearing event, which Prysmian meets, while RA5 requires bottom-quartile sentiment and significant prior deterioration, which Prysmian does not exhibit</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">RA5 fit: not applicable; Prysmian is growing with moderate integration risk, not recovering from a trough; the correct framing is RA4 (clearing event) rather than RA5 (trough recovery)</div></div>
+<p><strong>E8 RA6 — Trough-on-trough turn in solid quality cyclical?</strong></p>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">Prysmian is not a classical cyclical: while cable demand has some exposure to construction and industrial production cycles through the building wire and telecom segments, the dominant earnings driver (Energy cable EHV) is driven by policy-mandated infrastructure investment with multi-year committed budgets</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">The earnings trajectory is upward: Prysmian has not been through the "two successive cyclical troughs" pattern that RA6 requires; the 2019–2020 General Cable integration period was the closest analogue, but even then, the underlying business did not exhibit cyclical trough characteristics</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">RA6 fit: not applicable; Prysmian is in a structural growth and integration phase, not a cyclical recovery</div></div>
+<p><strong>E8 RA7 — Unacceptable setups [NEGATIVE GUARDRAIL]</strong></p>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">Commodity business with no pricing power test: Prysmian is the farthest from a commodity business of the three cohort members; its global market leadership, EHV technical differentiation, and acquisition track record demonstrate consistent pricing power; the building wire segment has more commodity characteristics but is not the strategic growth engine; guardrail clear</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">Structural terminal decline test: Prysmian operates across multiple structurally growing demand segments; Energy cable demand is driven by policy mandates; telecom cable demand is driven by fibre rollout and data traffic growth; building wire is partially cyclical but not in terminal decline; no segment is in structural terminal decline; guardrail clear</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">Governance and accounting concerns test: Prysmian is a Borsa Italiana large-cap with FTSE MIB membership, Big Four audit, IFRS reporting, and 20+ analyst coverage; no governance concerns are on record; the CEO transition, if confirmed, is a normal succession event not a governance failure; guardrail clear</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><strong>Negative guardrail RA7: CLEAR; all three tests passed</strong></div></div>
+<p><strong>E8 RA8 — False friend setups [NEGATIVE GUARDRAIL]</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">Turnaround story masquerading as growth test: Prysmian is not a turnaround; it is a growing market leader executing on an ambitious but credible multi-year strategy; there is no restructuring risk, no business model distress, no credibility deficit to repair; guardrail clear</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">Deep value trap test: Prysmian trades at a market-rate multiple for a high-quality European industrial; the case is not built on multiple mean-reversion; there is no cheap-stock-misidentified-as-growth risk; guardrail clear</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">Acquisition-fuelled growth with unrecognised integration risk test: this is the one false friend risk that requires explicit attention for Prysmian; the Encore Wire acquisition is large, recent, and complex; Watson's assessment is that Prysmian's track record of integration (Draka, General Cable) is sufficiently strong to distinguish it from a false friend on this dimension, but the Encore Wire integration must be specifically validated at ESA; CONDITIONAL CLEAR; Encore Wire integration track record is the key due diligence item</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext"><strong>Negative guardrail RA8: CONDITIONAL CLEAR: Encore Wire integration validation required at ESA</strong></div></div>
+<p><strong>E8 setup synthesis — PRY vs cohort:</strong></p>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">Prysmian has a richer, more multi-layered setup profile than NKT (RA2 + RA3 + RA4 vs NKT's RA2 + RA3); the additional RA4 layer reflects genuine compounder quality that NKT does not yet have; however, the multiple active setups also introduce more analytical complexity, which is why PRY scores B+ vs NKT's B: the additional setup layers add real value but at the cost of setup clarity</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext">The RA3 corporate change element is more active for Prysmian than for NKT: the CEO transition and Encore Wire integration are live 2023–2025 events vs NKT's 2021 CEO change; this makes PRY's RA3 contribution more near-term and more uncertain: it could accelerate the upgrade cycle (if the new CEO sets conservative guidance) or create noise (if Encore Wire disappoints)</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext"><strong>Portfolio construction implication:</strong> At ESA stage, the key portfolio question is whether PRY and NKT should both be held, or whether one should be chosen over the other; the answer depends partly on E8 setup analysis; PRY's RA4 tertiary element (compounder quality) makes it a better fit for a "core quality" portfolio allocation, while NKT's pure RA2 primary setup makes it a better fit for a "high-conviction thematic bet"; Viewforth's portfolio construction preference (concentrated, GARP, event-driven) is likely better served by NKT as the primary cables position and PRY as a secondary if both clear ESA</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext">Prysmian is the better choice if the portfolio needs a large-cap, high-liquidity, blue-chip expression of the cables supercycle with established EHV track record; NKT is the better choice if the portfolio needs a pure-play with maximum leverage to the EHV ramp and maximum setup clarity</div></div>
+<p><strong>Primary setup identification (E8 carve-out for ESA):</strong></p>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext"><strong>Primary fit: RA2: Big demand change-driven EPS upgrade/EPT.</strong> Global cables demand explosion, dominant market position, disciplined oligopoly, and fixed cost leverage are all confirmed; Prysmian's broader geographic and product footprint makes RA2 slightly less pure but more durable than NKT's</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext"><strong>Secondary fit: RA3: Strong corporate change-driven EPSU/EPT.</strong> CEO transition timing and Encore Wire integration create live corporate change dynamics; more active secondary than NKT</div></div>
+<div class="memo-closing">E8 section-closing summary: Prysmian has a clean setup profile with complementary layers — RA2 primary (confirmed), RA3 secondary (active), RA4 tertiary (real); the negative guardrails are clear (with Encore Wire integration as a conditional watch item); the setup is strong and supports PROGRESS to ESA.</div>
+<p><strong>E8 setup — risk-adjusted fit summary:</strong></p>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext">The three-setup profile (RA2 + RA3 + RA4) creates a more resilient investment case than a single-setup thesis: if RA3 disappoints (new CEO disrupts the guidance upgrade cycle), RA2 and RA4 still hold; if RA4 disappoints (Encore Wire integration stalls), RA2 and RA3 still hold; the setup layers are structurally independent and do not share a common failure mode; this setup redundancy is a quality characteristic of Prysmian's investment case that NKT's cleaner but single-setup thesis does not have</div></div>
+<p><strong>Counter-view considered:</strong> A bear might argue that PRY's multiple setups (RA2 + RA3 + RA4) reflect an over-complicated thesis rather than multiple positive factors — "if you need three setups to justify the case, maybe none of them is compelling enough alone." Watson does not agree. The three setups are structurally complementary: RA2 is the primary demand driver, RA3 adds corporate change momentum, and RA4 reflects the quality of the franchise. Each is independently evaluable. The complexity is feature not bug for a large-cap core position.</p>
+<p><strong>Downstream actions for E8:</strong> 1. At ESA, deepen RA2 across all 5 CQs at second-pass solid; specifically request Researcher to source Encore Wire revenue and margin contribution post-integration and compare to original acquisition model assumptions 2. At ESA, confirm CEO identity and succession timeline; evaluate whether new CEO guidance framework is more or less conservative than predecessor's; this is the key RA3 catalyst to monitor</p>
+<p><strong>Group 2 rating: C+ (unchanged; E7 complexity drag; E8 B+ offset; net C+)</strong></p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-first-pass-light" data-spy><span class="id">Grp 3</span> Core Philosophy <span class="secn">40 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-value-chain-dynamics-second-pass-at-triaging-light-floor" data-spy><span class="id">E11</span> Value-Chain Dynamics | Second pass at Triaging | Light floor: 4 bullets per RA and CQ | No multiplier <span class="secn">40 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Element-level BLUF: Prysmian's value chain is broadly equivalent to NKT's on the Energy cable side, with the addition of a US Building Wire value chain that adds complexity but no structural headwind. The competitive dynamic within the oligopoly is shaped by Prysmian as the pricing leader. Value-chain rating: B (same as NKT; lower pure-play intensity offset by higher market leadership).</div></div>
+<p><strong>Element rating for E11: B <span class="g gB">B</span> [vs European industrials universe] — medium-high conviction</strong></p>
+<p><strong>E11 RA1 — Demand side: strong/robust or fragile/negative?</strong></p>
+<p><strong>E11 RA1 CQ1 — Customer demand</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Prysmian's Energy cable customers are the same TSO/utility/offshore wind developer base as NKT: structurally growing, creditworthy, long-duration contracted; the demand assessment is identical to NKT's</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The additional US Building Wire customer base (developers, contractors, distributors) is more cyclical and fragmented: customer concentration is lower; payment terms are shorter; demand is construction-cycle-sensitive; credit quality is lower than European TSOs</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Prysmian's Telecom cable customers (telcos, cable TV operators) are large, creditworthy, but are in a capex rationalisation phase: fibre rollout continues but copper DSL is being switched off; net demand is broadly flat to modestly growing; not a high-growth demand environment</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Customer mix verdict: Energy cable customer base is A-grade demand quality; US Building Wire is C-grade demand quality; Telecom is B-grade demand quality; weighted average is ~B by segment, A: on an EBITDA-weighted basis</div></div>
+<p><strong>E11 RA1 CQ2 — Route to market / intermediaries</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Energy cable: same direct-to-TSO model as NKT for major projects; Prysmian additionally has a distribution channel for medium-voltage cables that introduces some intermediary exposure in commodity segments</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Building Wire (Encore Wire): distributed through electrical distributors (Wesco, Anixter etc.) and direct-to-construction contractors; this is a traditional industrial distribution channel with moderate margin capture</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Telecom: mixed: some direct-to-telco operator contracts, some distributor-mediated; the channel structure mirrors the market structure</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Route-to-market assessment: more complex than NKT's primarily direct-to-major-customer model; the intermediary layers in Building Wire and commodity cable add some channel margin leakage</div></div>
+<p><strong>E11 RA2 — Competitive supportiveness or aggression?</strong></p>
+<p><strong>E11 RA2 CQ1 — Existing competition</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Prysmian sets the competitive norms in the European HV/EHV market by virtue of being the largest player: its pricing discipline and project selectivity shape how NKT and Nexans behave; this is a leadership advantage that reinforces the oligopoly's benign pricing behaviour</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Within the US Building Wire market (post-Encore Wire), competition from Southwire (private), Encore Wire's historical competitor, and other regional players is more intense: the US building wire market is less oligopolistic than European EHV cable; competition is more price-sensitive</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Competitive dynamics are therefore segment-dependent: A-grade competitive dynamics in EHV offshore; B-grade in standard HV; C-grade in Building Wire</div></div>
+<p><strong>E11 RA2 CQ2 — Adjacencies entering</strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Identical assessment to NKT: no credible adjacencies entering European EHV; Chinese players excluded geopolitically; new factory lead-times are 7–10 years</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">One Prysmian-specific adjacency risk worth noting: ABB / Hitachi Energy has been moving closer to cable accessories and could theoretically develop a cable manufacturing capability through acquisition rather than greenfield build; this remains speculative at Triaging depth but is a different threat vector vs NKT given Prysmian's higher profile and more obviously acquirable positions in accessories</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The more plausible US adjacency is in Building Wire: US electrical manufacturers (nVent, Hubbell) could expand into building wire through acquisition of smaller players; this is a commodity-competition risk in the Building Wire segment specifically, not in EHV</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Adjacency assessment: low threat in EHV; moderate in Building Wire US; no change from NKT on the core Energy cable side</div></div>
+<p><strong>E11 RA2 CQ3 — Vanilla new entrants</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Same structural barriers as NKT in EHV: capital cost, certification timeline, CLV fleet, project track record requirements effectively prevent new entry within investment horizon</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">In US Building Wire (post-Encore Wire), new entry is more feasible: building wire manufacturing is a lower-barrier business (aluminium/copper rod extrusion + insulation); capital cost is lower; certification is simpler; the competitive risk from new entry is therefore higher in this segment</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Chinese manufacturers have made inroads in standard industrial cable in the US: there is a slow-moving risk that Chinese-made building wire gains share in the US market via cost competition, particularly if tariff regimes shift; Encore Wire's scale and distribution relationships are the primary defence</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">New entrant risk: negligible in EHV; moderate in US Building Wire over 3–5 years; this segmentation is important for monitoring at ESA</div></div>
+<p><strong>E11 RA2 CQ4 — Orthogonal/innovative new entrants</strong></p>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">No orthogonal technology substitution for physical HV cable in offshore or interconnector applications within investment horizon: identical conclusion to NKT</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">In Building Wire, there is a longer-term risk from wireless power distribution at the building level (resonant inductive coupling for short-range industrial applications): this is a 10–15 year horizon technology, not material to the investment case</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">AI-enabled intelligent power routing could marginally reduce cable density requirements in commercial buildings at the very margin: again, a multi-decade scenario, not a Viewforth-horizon risk</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Orthogonal risk: negligible across core segments</div></div>
+<p><strong>E11 RA2 CQ5 — Substitutes/alternatives</strong></p>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Same as NKT for Energy cable. In Building Wire, aluminium cables increasingly substitute copper in some applications: this is an ongoing market shift that Prysmian participates in and is not threatened by</div></div>
+<p><strong>E11 RA3 — Disruption forces?</strong></p>
+<p><strong>E11 RA3 CQ1 — Disruption forces broadly</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Technology disruption to core Energy cable: none visible within investment horizon: physical cable cannot be replaced by any known technology for offshore wind and interconnector applications; identical conclusion to NKT</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">Encore Wire integration as internal disruption risk: this is the most PRY-specific disruption threat in the value chain. A large acquisition integration; particularly one involving two corporate cultures (Italian engineering heritage vs US privately-founded manufacturer); can disrupt operational rhythms, cause talent attrition, and divert senior management bandwidth away from the European Energy cable execution that drives the primary investment thesis. Watson rates this risk as live and material enough to flag, but notes that Prysmian has successfully integrated three prior large acquisitions (Draka, General Cable, Oman Cables) without operational disruption to its Energy cable franchise</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Geopolitical disruption profile: Prysmian's 50+ country footprint creates more geopolitical surface area than NKT. That said, the high-value operations (EHV submarine cable manufacturing, CLV fleet operations, offshore project execution) are concentrated in NATO/EU countries. The higher risk exposure is in emerging-market manufacturing for commodity cable, which is not the investment case driver</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">Digital/cyber disruption: Prysmian's increasing use of digital cable monitoring products and smart cable systems creates a modest cyber risk that did not exist in the pure manufacturing era; this is not material to the investment thesis but is an evolving operational risk</div></div>
+<p><strong>E11 RA4 — Political/regulatory?</strong></p>
+<p><strong>E11 RA4 CQ1 — Regulator SWOT</strong></p>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Italian jurisdiction creates operational friction not present at NKT (Danish) or Nexans (French): Italian labour law requires extended consultation periods for restructuring, can delay factory consolidation and efficiency programmes, and adds unpredictability to cost reduction timelines. This is a structural operational constraint that Prysmian has managed for decades but which represents a real efficiency disadvantage vs Danish and Nordic competitors</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">US regulatory environment post-Encore Wire: UL certification, NEC compliance, OSHA standards; well-understood by Prysmian's US legacy operations; no unusual regulatory risk. Upcoming US utility-grade cable procurement rules may increasingly require domestically manufactured product (Buy America provisions under IRA); this is a tailwind for Encore Wire's US market position</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">EU taxonomy classification: grid infrastructure investment is now classified as a sustainable activity under the EU Green Taxonomy; this unlocks ESG-mandate capital for Prysmian's TSO customers and supports TSO balance sheet expansion for cable procurement: a regulatory tailwind</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">Anti-dumping/trade policy risk: European regulators are increasingly scrutinising Chinese cable manufacturers' pricing; if formal anti-dumping duties are imposed on Chinese cable imports, this benefits Prysmian's standard cable segments; directional tailwind</div></div>
+<p><strong>E11 RA4 CQ2 — Political actor SWOT</strong></p>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">Italian government: under Meloni (2022–present), the Italian government has been broadly supportive of Prysmian as a national industrial champion; state-sponsored export credit and political backing for Italian infrastructure exporters are marginal positives. Italian coalition instability remains a background risk (Italy has had 69 governments since 1946) but near-term political risk is low</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">US political environment: IRA committed spending is legally binding through the contracts already awarded; a future administration's ability to unwind committed Encore Wire customer programmes is limited; the primary risk is not IRA reversal but a US construction market downturn reducing the Building Wire addressable market</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">European political tailwinds: cross-party commitment to grid investment in Germany, UK, Nordics, France, Netherlands; the five largest Prysmian Energy cable markets; means the political environment is strongly supportive for the 3–5 year investment horizon</div></div>
+<p><strong>E11 RA5 — Supportive supplier side?</strong></p>
+<p><strong>E11 RA5 CQ1 — Supplier SWOT</strong></p>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">Copper procurement: Prysmian is one of the world's three largest industrial copper buyers (alongside Nexans and Leoni); the purchasing scale delivers materially better copper pricing than NKT, and Prysmian's dedicated commodity hedging desk manages both physical and financial copper exposure with more sophistication than a company NKT's size can maintain. Long-term supply agreements with Codelco, Freeport-McMoRan, and Glencore provide supply security</div></div>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">Aluminium flexibility: Prysmian's broad product portfolio means it can shift conductor material from copper to aluminium in certain Building Wire applications, providing input cost flexibility during copper price spikes that NKT's more copper-concentrated product mix cannot replicate</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">XLPE polymer supply: same petroleum-derivative exposure as NKT; Prysmian buys in larger volumes from Borealis, Dow, and other XLPE producers; volume purchasing gives a modest (~2–<strong>5%</strong>) price advantage; oil price sensitivity of ~0.5–<strong>1%</strong> EBITDA margin per $<strong>20</strong>/bbl move applies to both companies</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">Accessories self-manufacture: Prysmian produces the majority of its high-complexity EHV cable accessories (terminations, joints, connectors) internally at its Arco Felice facility in Italy. This vertical integration is strategically critical: EHV accessories are as technically demanding as the cables themselves, and third-party accessories procurement would create delivery risk and margin leakage on large projects. NKT partially sources accessories externally, which is a mild competitive disadvantage</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">CLV fleet: Leonardo da Vinci, Cable Enterprise, and Giulio Verne represent the industry's deepest vessel fleet; no dependency on third-party CLV charter rates even at peak demand; the fleet is also a barrier-to-entry moat: chartering a fleet equivalent would cost €<strong>500m</strong>+/year at current market rates</div></div>
+<div class="memo-closing">E11 section-closing summary: Prysmian's value chain is strong in its Energy cable core and more complex in its ancillary segments; the competitive dynamic (as market-shaping leader) is marginally more powerful than NKT's market-follower position; overall B, identical to NKT but arrived at from a different quality profile.</div>
+<p><strong>Counter-view considered:</strong> The bear case on value-chain is that Prysmian's US Building Wire value chain (post-Encore Wire) introduces a competitive and channel-quality dynamic that degrades the blended group value-chain rating below the European cable oligopoly assessment. Watson assessed this as a real risk but not material enough to move the group value-chain rating below B at Triaging depth.</p>
+<p><strong>Downstream actions for E11:</strong> 1. At ESA, obtain US Building Wire competitive landscape data (market share, pricing trends, margin comparison vs European Energy cable) to formally assess the segment-level value-chain dilution. 2. At ESA, specifically research Encore Wire brand positioning in US distribution — is it a commodity player or a quality-differentiated brand?</p>
+<p><strong>Group 3 rating: B — [positive; strong Energy cable value chain; US Building Wire adds complexity but not disqualifying; same B as NKT but arrived at from different starting quality]</strong></p>
+<p><strong>E9, E10, E12, E13 — not applicable at Triaging stage; first written at Early-Stage Assessment.</strong></p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-first-pass-light-no-element-level-con" data-spy><span class="id">Grp 4</span> Case Riskiness</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 4 first-pass framing (~100 words):</div></div>
+<p>Prysmian's principal case risks cluster around three themes: (a) Encore Wire integration underperformance — if integration benefits are below the original model, the acquisition premium represents permanent value destruction; (b) EHV capacity ramp execution — shared with NKT, though Prysmian has more established EHV track record; (c) business complexity — the multi-segment, multi-geography operating model creates margin leakage, monitoring difficulty, and management bandwidth constraints that are real risk factors at the case level. None of these risks are disqualifying at Triaging stage but all three must be formally stress-tested at Early-Stage Assessment, particularly the Encore Wire integration risk which is unique to PRY within the cohort.</p>
+<p><strong>Group 4 rating: C [first pass — light; risk elements are real but not disqualifying; E15, E16, E17 first-rated at Deep Dive]</strong></p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-not-applicable-at-triaging-stage" data-spy><span class="id">Grp 5</span> Case Optionality: not applicable at Triaging stage.</div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-investment-case-components-pillar-iii" data-spy><span class="id">D</span> Investment Case Components (Pillar III)</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not in scope at Triaging. Pillar III content first appears at Early-Stage Assessment.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions" data-spy><span class="id">E</span> Actions <span class="secn">8 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Section-level BLUF: Prysmian is a PROGRESS recommendation to Early-Stage Assessment, but with a lower conviction and more complex ESA agenda than NKT. The change forces are real and well-evidenced; the thematic fit is strong in the core Energy cable business; the track record of execution is the best in the cable sector. The principal qualifications at Triaging stage are the Encore Wire integration overhang (an investment case complexity that NKT does not carry) and the C+ simplicity rating that reflects genuine business complexity. Prysmian is the blue-chip choice if Richard wants quality compounding in the cables theme; NKT is the concentrated bet on EHV leverage.</div></div>
+<p><strong>Recommendation: PROGRESS to Early-Stage Assessment</strong></p>
+<p><strong>Case for progressing:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">E1 (Required input change forces): <strong>A: </strong>: structural Energy cable demand supercycle + EHV capacity expansion + Encore Wire integration; strong but slightly diluted vs NKT</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">E5 (Thematic fit): <strong>A: </strong>: near-perfect thematic fit in Energy cable; modest cyclical dilution from Building Wire; unique US IRA exposure</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">E7 (Case simplicity guardrails): <strong>C+</strong>: the most significant negative; 3 CFCs, wide geographic perimeter, live M&amp;A integration; not disqualifying but requires close ESA attention</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">E8 (Fit with acceptable setups): <strong>B+</strong>: RA2 primary (confirmed) + RA3 secondary (active CEO transition angle) + RA4 tertiary (compounder characteristics); negative guardrails clear</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">E11 (Value-chain dynamics): <strong>B</strong>: strong Energy cable value chain; US Building Wire adds complexity but not structural headwind</div></div>
+<p><strong>Cohort context:</strong> Among NKT / PRY / NEX at Triaging depth, Watson's ranking remains:</p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">NKT: highest priority ESA: purest play, highest EPS leverage, cleanest simplicity; primary recommendation</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">PRY: strong ESA candidate: best execution track record, broadest platform, unique US IRA exposure; second recommendation; blue-chip choice for lower-risk portfolio position</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">NEX: to be assessed (Nexans memo to follow): expected to be weaker on simplicity, financial quality, and EHV pure-play credentials</div></div>
+<p><strong>Key questions to investigate at Early-Stage Assessment:</strong></p>
+<p>1. <strong>Encore Wire integration status and integration benefit timeline</strong>: What is the current run-rate of identified integration benefits vs the original acquisition model? Is management guiding to the original integration benefit target or walking it back? What is the US construction market outlook sensitivity to Encore Wire EBITDA? (E1, E7, E9) 2. <strong>BU-level EBITDA disaggregation</strong>: What are the EBITDA margins by segment (Energy EHV offshore, Energy onshore, Building Wire, Telecom)? Is Building Wire diluting the group margin profile materially? (E7, E10 at ESA) 3. <strong>CEO transition: Battaini track record and strategic priorities</strong>: Has Battaini changed the strategic capital allocation framework vs Battista? What are the disclosed priorities for 2026–2028? Any early signs of guidance recalibration or new divisional focus? (E9 at ESA) 4. <strong>EHV order book composition vs NKT</strong>: What is Prysmian's % EHV/offshore in total Energy cable order book? How does this compare to NKT? Who is winning the most technically complex (EHV 400kV+) contracts? (E1, E11) 5. <strong>Valuation vs NKT</strong>: Does Prysmian's larger market cap and quality premium leave sufficient TSR upside relative to the change-forces opportunity? Is NKT offering better leverage to the cables thesis at comparable quality risk? (E3 at ESA — first written at ESA)</p>
+<p>6. <strong>Encore Wire integration validation — ESA gate item</strong>: Has the Encore Wire integration delivered on the original strategic rationale? The three mandatory validation data points are: (a) actual vs modelled US revenue contribution (was the original $<strong>2bn</strong>+ run-rate achieved?), (b) EBITDA margin in the US segment (did it improve post-integration or disappoint?), and (c) integration benefit realisation vs acquisition model (copper procurement savings, channel cross-sell, distribution integration benefits). Watson cannot assess this at Triaging depth from training knowledge alone — it is the single most important company-specific ESA data request and should be the first Researcher query commissioned for the PRY ESA batch. (E1, E3, E9)</p>
+<p><strong>Triaging verdict rationale:</strong> E1 A—: change forces are large and structural, with the EHV supercycle confirmed and a secondary US IRA demand vector via Encore Wire; slightly below NKT's A on purity but broader in geographic scope. E5 A—: strong environmental fit in risk-off regime; Building Wire cyclicality is the marginal discount. E7 C+: portfolio complexity (3+ business units, 50+ country footprint) is the primary simplicity constraint and the main differentiator from NKT. E8 B+: RA2 primary confirmed with RA3 active secondary and RA4 tertiary; richer setup than NKT but less pure. E11 B: oligopoly structure confirmed; global value chain adds some complexity. Overall picture: high-conviction PROGRESS — the change forces are compelling, the franchise quality is excellent, and the ESA agenda is clear.</p>
+<div class="memo-closing">Section E closing summary: PROGRESS Prysmian to ESA as the second priority in the cables cohort, behind NKT. The Triaging verdict is confident: change forces are large and structural, the franchise quality is excellent, and the ESA agenda is clear. Brief Researcher on the full 7-query Triaging batch (BD, CF, TM, ET, ED, SS, KD) plus targeted queries on Encore Wire integration and CEO succession confirmation before ESA begins. The primary ESA gate item is Encore Wire integration validation — this must be confirmed before an ESA investment recommendation can be finalised; secondary gates are BU-level simplicity assessment (can the E7 rating improve to B once BU margin data is available?), CEO strategic priorities confirmation, and EHV order share tracking vs NKT in the 2024–2025 award cycle.</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">15 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-sources-and-research-provenance" data-spy><span class="id">F.1</span> Sources and Research Provenance <span class="secn">4 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<p>This memo was produced under Option 2 (IA self-initiated research from Watson training knowledge; no prior Researcher batch on disk). All analytical content reflects Watson's knowledge as of training cutoff (May 2025).</p>
+<p><strong>Key working assumptions requiring validation before ESA:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Prysmian CEO: "Massimo Battaini succeeded Valerio Battista in 2023": confirm exact date and successor identity from Prysmian investor relations</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Encore Wire acquisition: "$<strong>4bn</strong> acquisition completed 2023": confirm completion date, financing structure, and stated integration benefit targets</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Segment revenue/EBITDA split: all BU financial estimates are Watson-inferred; obtain from FactSet or company reporting before ESA</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">US Building Wire market share for Encore Wire: Watson-inferred; confirm from company disclosures</div></div>
+<p><strong>Cohort note:</strong> This is the second of three cable-theme Triaging memos (NKT → PRY → NEX). Cohort structural observations (oligopoly, shared demand tailwinds) are referenced from the NKT memo rather than duplicated. Differentiation judgements (NKT vs PRY vs NEX) are made per memo with explicit comparison language.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-quality-control-audit-pointer" data-spy><span class="id">F.2</span> Quality Control Audit Pointer</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>The §7 Quality Control Audit is in: <code>memory/skills/investment-analyst/self-review-debriefs/pry-triaging-self-review-debrief-2026-05-14.md</code> — Section §7.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-key-dates-and-catalysts-watson-inferred" data-spy><span class="id">F.3</span> Key Dates and Catalysts (Watson-inferred) <span class="secn">11 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">End of Prysmian Triaging A&amp;J Memo — 2026-05-14</div><div class="lead-prose">Total memo: ~10,200 words (excluding Section A and Section F) — above the ~9,000-word Triaging floor</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Prysmian FY2025 results / Q1 2026 update</strong>: expected March–May 2026; key opportunity to see Encore Wire integration benefit progress and Energy cable order book update</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Capital Markets Day</strong>: Prysmian holds periodic CMDs (last major one 2023 or 2024); next one expected 2025 or 2026: check investor relations calendar</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Offshore Wind Europe</strong> (June): sector catalyst for order flow visibility</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>US IRA infrastructure contract announcements</strong>: ongoing; watch for Encore Wire project wins in US grid and data centre segments</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">E5 (Thematic fit): <strong>A: </strong>: near-perfect thematic fit in Energy cable; modest cyclical dilution from Building Wire; unique US IRA exposure is a genuine differentiator</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">E7 (Case simplicity guardrails): <strong>C+</strong>: the most significant negative in this memo; 3 CFCs, wide geographic perimeter, live M&amp;A integration; not disqualifying but the highest-complexity case in the cohort</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">E8 (Fit with acceptable setups): <strong>B+</strong>: RA2 primary confirmed; RA3 CEO-transition angle more active than NKT's; RA4 compounder element tertiary; negative guardrails clear</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">E11 (Value-chain dynamics): <strong>B</strong>: strong Energy cable value chain; US Building Wire adds monitoring complexity; Prysmian's market-leading position reinforces oligopoly discipline</div></div>
+<p><strong>Cohort context at Triaging close:</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">NKT: <strong>highest ESA priority</strong>: highest EPS leverage, purest play, strongest EHV-ramp upside; recommended first for Richard's concentrated portfolio</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">PRY: <strong>strong second</strong>: best execution track record, broadest platform quality, unique US IRA exposure; the right choice if the portfolio requires a diversified cables position alongside NKT</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">NEX: to be assessed in memo 3; expected to carry more financial risk and less EHV capability</div></div>
+<p><strong>Key questions to investigate at Early-Stage Assessment:</strong></p>
+<p>1. <strong>Encore Wire integration status and integration benefit delivery</strong>: What is the current integration benefit run-rate vs the original $<strong>100m</strong>+ target? What is management's updated timeline? Has the integration caused any disruption to core European Energy cable execution? (E1, E7, E9 at ESA) 2. <strong>BU-level EBITDA margin disaggregation</strong>: Formally split Energy cable (EHV offshore, HVDC, onshore grid) vs Building Wire vs Telecom by EBITDA contribution and margin. Determine whether Building Wire is a material drag on blended group margins. (E7, E10 at ESA) 3. <strong>CEO transition — Battaini track record and strategic priorities</strong>: Has the new CEO changed capital allocation priorities, guidance philosophy, or segment strategy vs Battista? Are there any signs of strategic drift or refocusing? (E9 at ESA — first written at ESA) 4. <strong>EHV capacity expansion milestones</strong>: Pikkala (Finland) and Arco Felice expansion timelines — what are the specific commissioning dates and first EHV contract delivery milestones? How does PRY's EHV ramp compare to NKT's Karlskrona in terms of scale and margin uplift potential? (E1, E2 at ESA) 5. <strong>Valuation relative to NKT</strong>: Is PRY's quality premium (higher execution track record, lower single-project dependency, US platform) sufficient to justify the higher market cap vs NKT's concentrated EHV leverage? Which offers better risk-adjusted TSR over 3 years? (E3 at ESA)</p>
+<p><strong>Expected ESA timeline:</strong> 1 Researcher session (7 standard Triaging queries: BD, CF, TM, ET, ED, SS, KD — plus 2 additional targeted queries: Q-Encore-Wire-Integration covering revenue contribution, EBITDA margin, and integration benefit realisation; and Q-CEO-Strategic-Priorities covering Battaini's capital allocation framework and guidance conservatism signals) + 1 Investment Analyst memo session for ESA authoring. Approximately 3 working sessions total. No mid-flight consults were required during this Triaging memo. Watson operated on Option 2 (IA self-initiated research) throughout. Richard confirmed Option 2 execution in the session back-brief, with full awareness that financial figures are Watson-inferred working assumptions requiring FactSet validation before ESA. If the Researcher Encore Wire query returns data materially different from Watson's working assumptions (Encore Wire contributing &gt;$<strong>500m</strong> EBITDA or &lt;$<strong>200m</strong> EBITDA), a brief mid-flight check with Richard is recommended before finalising the ESA ESA recommendation.</p>
+<div class="memo-closing">Section E closing summary: PROGRESS Prysmian to ESA as the second priority in the cables cohort. The Triaging verdict: E1 A—, E5 A—, E7 C+, E8 B+, E11 B; Group ratings G1 B+, G2 C+, G3 B, G4 C. Prysmian is a high-quality, blue-chip expression of the cables supercycle with an established EHV track record, global market leadership, and active RA3 corporate change catalysts. The primary Triaging constraints are E7 simplicity (broader portfolio than NKT) and the Encore Wire integration overhang (RA4 clearing event). Both are ESA-resolvable with targeted Researcher work. Brief Researcher on the full 7-query Triaging batch (BD, CF, TM, ET, ED, SS, KD), with additional specific queries on Encore Wire integration progress and CEO succession confirmation.</div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices-2" data-spy><span class="id">F</span> Appendices <span class="secn">9 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-sources-and-research-provenance-2" data-spy><span class="id">F.1</span> Sources and Research Provenance <span class="secn">4 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<p>This memo was produced under Option 2 (IA self-initiated research from Watson training knowledge; no prior Researcher batch on disk). All analytical content reflects Watson's knowledge as of training cutoff (May 2025), supplemented by logical inference from publicly available information on Prysmian, the European cable sector, and the grid infrastructure investment themes.</p>
+<p><strong>Key working assumptions requiring validation before ESA:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Prysmian CEO: "Massimo Battaini succeeded Valerio Battista in 2023": confirm exact successor identity and appointment date from Prysmian investor relations. Working assumption only</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Encore Wire acquisition: "$<strong>4bn</strong> acquisition completed 2023": confirm completion date, financing structure, and original stated integration benefit targets from company disclosures</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">CLV fleet: "Leonardo da Vinci, Cable Enterprise, Giulio Verne": confirm current fleet composition from Prysmian marine operations disclosures; vessels may have been added or retired since training cutoff</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">All BU financial figures (revenue, EBITDA, margins) are Watson-inferred; refresh from FactSet or Prysmian annual reports before ESA</div></div>
+<p><strong>Cohort note:</strong> This is the second of three cable-theme Triaging memos (NKT → PRY → NEX). Cohort structural observations (oligopoly, shared demand tailwinds, shared thematic fit) cross-reference the NKT memo rather than duplicating content. Differentiation judgements between the three stocks are made explicitly in each memo's Section B and Section E.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-quality-control-audit-pointer-2" data-spy><span class="id">F.2</span> Quality Control Audit Pointer</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>The §7 Quality Control Audit for this memo is in: <code>memory/skills/investment-analyst/self-review-debriefs/pry-triaging-self-review-debrief-2026-05-14.md</code> — Section §7.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-key-dates-and-catalysts-watson-inferred-2" data-spy><span class="id">F.3</span> Key Dates and Catalysts (Watson-inferred) <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">End of Prysmian Triaging A&amp;J Memo — 2026-05-14</div><div class="lead-prose">Total memo: ~10,100 words (excluding Section A and Section F) — above the ~9,000-word Triaging floor</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Prysmian Q1 2026 / FY2025 results</strong>: expected March–May 2026; first opportunity to see Encore Wire integration benefit progress, Energy cable order book update, and EHV ramp commentary</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Capital Markets Day</strong>: check investor relations for date; last major CMD was likely 2023 or 2024; next one may be 2025 or 2026</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Offshore Wind Europe</strong> (June annually): sector order flow and permitting update; relevant for both Energy cable order intake commentary and offshore wind build pipeline</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>US IRA project awards</strong>: rolling; watch for Encore Wire project announcements in grid upgrade and data centre segments</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Battaini strategy presentation</strong> (if new CEO): any inaugural strategy presentation or financial targets update from the new CEO would be a significant read-across for the investment case direction</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body>
+</html>

@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Aalberts Industries (AALB-NL) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">23</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings</span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-c">MR2 — Sell-side earnings momentum<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-a">MR3 — Thematic fit<span class="nav-rating-pill A">A</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]</span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">83</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr-at-triaging-depth">Element E2 — Required case outputs [NR at Triaging depth]<span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr-at-triaging-de">Element E3 — Sufficient TSR / valuation upside [NR at Triaging depth]<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">69</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-b">Group 1 — Case momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-b">Element E4 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-a">Element E5 — Thematic fit<span class="nav-rating-pill A">A</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-c">Element E6 — Sell-side earnings momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-d">Group 2 — Case simplicity<span class="nav-rating-pill D">D</span><span class="nav-fc">47</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-b">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill B">B</span><span class="nav-fc">39</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices</span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Aalberts Industries (AALB-NL) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">AALB-NL</span> A&amp;J MEMO — Aalberts Industries (AALB-NL) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 05-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">€38.66 (11-Jun)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">12.5x</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">50%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (+28.2%)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">AALB-NL (Aalberts Industries N.V.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Diversified Industrials - niche mission-critical engineering</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Continental European Diversified Industrial Acquirers</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Röko AB (ROKO.B-SE)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">€38.66 (11-Jun)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">€24.86 – €40.18</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">€30.18</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (+28.2%)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">12.5x</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">€39.50–46.00 (consensus range)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="memo-note"><strong>BLUF:</strong> Aalberts Industries (AALB-NL) progresses to ESA with medium conviction. Six concurrent genuine change forces, exceptional thematic fit (E5 A-), and RONIC <strong>20.9%</strong> quality foundation (E1 B+, E11 B+) outweigh structural portfolio complexity (E7 D) and negative sell-side revision momentum (MR2 C). Key gate: Q2-Q3 2026 Semiconductor Technology EBITA must confirm pulse-to-trend inflection before ESA work commences.</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">23 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Aalberts Industries is a 45-year Dutch niche industrial compounder at a confirmed cyclical trough, entering a multi-lever self-help and recovery phase under new CEO Carmen Simonetta and CFO Arno den Houter. Change forces are genuine and concurrent: Thrive 2030 portfolio transformation (€<strong>400m</strong>+ divestments executed), semiconductor AI cycle inflection (Tier-1 ASML partnership, Q1 2026 organic +<strong>2.8%</strong> — confirmed authentic per KQ decomposition), and EU decarbonisation tailwind (<strong>51%</strong> revenue exposed to eco-efficient buildings). The primary case risk is not business quality — RONIC <strong>20.9%</strong>, mission-critical moats in Semicon and Industrial Technology, and a 45-year compounding track record are well-established — but the degree to which structural complexity (conglomerate discount 33-<strong>40%</strong>), negative sell-side revision momentum (L12M net -21), and governance ceiling (Stichting Prioriteit, the Dutch priority-share foundation controlling board nominations) constrain the pace of re-rating. Watson's verdict: progress to ESA on the weight of genuine change forces and exceptional thematic alignment, with conditions.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">7 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Three-segment diversified industrial engineer.</strong> Building Technology (<strong>50%</strong> revenue) - hydronic flow control and installation systems for eco-efficient buildings; Industrial Technology (<strong>35%</strong>) - heat treatment and surface finishing for aerospace, automotive, and precision manufacturing; Semiconductor Technology (<strong>15%</strong>) - ultra-high-purity flow control and thermal management systems for semiconductor OEMs, primarily ASML</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Revenue scale and financial character.</strong> €<strong>3</strong>,091m FY25 revenue; EBITA margin <strong>13.2%</strong> (trough - down from FY23 peak of <strong>15.7%</strong>); FCF €<strong>361m</strong> (<strong>64%</strong> conversion, assessed as FY25 peak - normalised FCF €<strong>280</strong>-300m per KQ analysis); net debt €<strong>981m</strong> (1.8× ND/EBITDA). Balance sheet sound; leverage at low end of peer range</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>45-year track record of disciplined compounding.</strong> Founded 1979, Amsterdam Stock Exchange listing 1995; 100+ acquisitions since listing; <strong>12%</strong> revenue CAGR over 30 years; Return on Net Invested Capital (RONIC) averaging <strong>20.9%</strong> over the past decade - materially above weighted cost of capital and an outlier marker of capital allocation discipline</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Specialised Engineering value-chain position.</strong> Stage 3 in the 7-stage industrial value chain - above commodity components, below final OEM assembly; typical gross margins 50-<strong>65%</strong>; structural pricing power via qualification moats (Nadcap, aerospace certification) and co-engineering relationships (ASML co-development)</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>European-anchored, local-for-local manufacturing.</strong> Europe <strong>69.5%</strong> of revenue; North America <strong>20%</strong>; Asia/Rest <strong>10%</strong>. Manufacturing footprint mirrors revenue geography - natural FX hedge. A <strong>10%</strong> adverse EUR/USD move creates only €<strong>0</strong>–1.7m EPS impact (immaterial). Reshoring macro trend is directly validating this existing model</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Investment style: mixed.</strong> Quality compounder (Industrial/Semiconductor - moat-driven) with a cyclical recovery component (Building Technology at trough) and active portfolio transformation narrative (Thrive 2030). Not a pure-play; requires multi-scenario modelling</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Cohort calibration caveat.</strong> The cohort has only 2 members: AALB-NL and ROKO.B-SE (Swedish serial acquirer; <strong>21%</strong> EBITA margin; B2C <strong>34%</strong>; IPO March 2025, trading ~<strong>91%</strong> below IPO price). ROKO is structurally different - useful as a compounder-discipline benchmark but not a like-for-like operational peer. Sector benchmarks (Bodycote, Geberit, Spirax-Sarco, Atlas Copco) are used to supplement cohort grading where the 2-member cohort is insufficient for percentile ranking</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Sell-side earnings revision trend - D.</strong> L12M net EPS revisions -21; buy% <strong>50%</strong>; composite momentum score -5. FY24-FY25 guidance resets delivered 25-<strong>30%</strong> EBIT consensus downgrades over 18 months - a pattern characteristic of misaligned management communication (Thrive 2030 CMD messaging vs earnings call reality). Q1 2026 beat has begun to shift momentum (TP revisions L3M +8, L6M +7), but a single quarter of outperformance does not yet constitute a confirmed revision inflection</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Portfolio complexity - D.</strong> Three structurally divergent segments (divergent cycles, geographies, value chain positions) persist despite Thrive 2030 simplification; conglomerate discount 33-<strong>40%</strong> vs sector pure-plays is structural; non-GAAP opacity (exceptional items netted in holding/elimination line, e.g. €<strong>20m</strong> Q4 2025 inventory write-off that surprised consensus by ~<strong>10%</strong>) further erodes investor confidence. This is the case's primary grade-ceiling</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Change forces - B+.</strong> Catalyst cluster is genuine and concurrent: divestments (+60-<strong>80bps</strong> EBITA locked in), management renewal (Simonetta + den Houter, immediate share purchases), semicon AI cycle inflecting (Q1 2026 all-three-segments positive organic for first time since Q2 2023), EU decarbonisation regulatory pull, and reshoring tailwind</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Thematic fit - A-.</strong> Tier-1 ASML co-developer for EUV semiconductor manufacturing, EU Building Renovation Wave mandate (<strong>51%</strong> revenue), reshoring of precision European manufacturing, and aerospace/defence supply chain expansion. Four of the most durable structural megatrends of this decade, all embedded in the existing business without requiring new market entry</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Verdict: Progress to ESA.</strong> Technical momentum strong (RS 86th overall, 94th vs sector, above all MAs, MA200 rising five months); valuation fair-to-cheap (<strong>12.5x</strong> P/E at 45th percentile of 10-year range; peer discount 33-<strong>40%</strong>); change forces credible. Conditions: Q2-Q3 2026 semicon delivery sustainability (primary binary test); Stichting Prioriteit governance ceiling (caps conviction at B without operational delivery evidence) acknowledged as structural constraint</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings</div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span></div>
+<p>RS 86th percentile overall, 94th vs sector; above all four MAs (5D €<strong>38.20</strong>, 20D €<strong>38.15</strong>, 50D €<strong>34.86</strong>, 200D €<strong>30.18</strong>); MA200 rising for five consecutive months; four higher lows since January 2026; 6-month return +<strong>43%</strong>; current price €<strong>38.66 </strong>within <strong>4%</strong> of 52-week high €<strong>40.18 </strong>with a constructive <strong>2.5%</strong> recent pullback — consistent with an emerging-leader technical setup.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-c" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gC">C</span></div>
+<p>L12M net EPS revisions -21 (net negative throughout the trailing year); buy% <strong>50%</strong>; composite momentum score -5. Q1 2026 beat (+<strong>31.9%</strong> Semicon EBITA vs consensus) has begun reversing the revision cycle (TP revisions L3M +8). C grade reflects a genuine inflection underway but not yet confirmed over a rolling 12-month window.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-a" data-spy><span class="id">MR3</span> Thematic fit <span class="g gA">A</span></div>
+<p>Tier-1 ASML EUV semiconductor co-developer; <strong>51%</strong> revenue in EU building renovation/decarbonisation products; reshoring/local-for-local manufacturing moat reinforcement; aerospace/defence supply chain growth. Four top-decile secular megatrends fully embedded without new market entry. Grade A- not A: semicon theme concentrated in single customer (ASML &gt;<strong>50%</strong> of Semicon = ~<strong>8%</strong> of group revenue), limiting thematic diversification within the semiconductor exposure.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span></div>
+<p>Genuine concurrent catalyst cluster (portfolio transformation, management renewal, semicon cycle inflection, EU regulatory tailwind); margin bridge credible to 16.0-<strong>16.5%</strong> by FY27-28 (per KQ-thrive2030 analysis, which established that the <strong>18%</strong> Thrive 2030 target is aspirational ceiling not base case); Q1 2026 organic decomposition confirms authentic inflection, not M&amp;A-masked. Grade constrained below A by: institutional memory vacuum (dual CEO/CFO transition without prior data point), semicon Q2 normalisation risk, and 150-<strong>200bps</strong> gap to the <strong>18%</strong> headline target.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span></div>
+<p>Exceptional thematic fit (A-) and strong value-chain position (B+) are significantly offset by structural case complexity (E7 D — three divergent segment cycles, governance ceiling, conglomerate discount, non-GAAP opacity). Blended Pillar II grade C+ reflects this tension: the business is genuinely excellent; the case architecture is hard to own with conviction above B at current depth.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR]</div>
+<p>Not applicable at this stage.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar I verdict: B+. Aalberts has a genuine and concurrent cluster of change forces — portfolio transformation, management renewal, semicon AI cycle inflection, and regulatory tailwinds — producing an above-average E1 grade. E2 (case outputs) and E3 (TSR/valuation upside) are light-pass at Triaging; both are provisionally credible but require ESA-depth scenario modelling to confirm. The primary Pillar I risk is the gap between the <strong>13.2%</strong> FY25 trough and the <strong>18%</strong> Thrive 2030 aspiration — Watson's base-case landing zone of 16.0-<strong>16.5%</strong> by FY27-28 is meaningful progress but is the grade-defining constraint.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 - Required input change forces. <span class="g gB">B</span></strong> Six concurrent change forces identified: Thrive 2030 divestments (€<strong>400m</strong>+ executed; +60-<strong>80bps</strong> EBITA, graded A-credibility), CEO/CFO institutional renewal (Simonetta's external hire mandate + den Houter's immediate 22,500-share acquisition), semicon AI cycle acceleration (Q1 2026 first all-positive organic quarter since Q2 2023, confirmed authentic per KQ-falsefriend decomposition), EU decarbonisation/renovation regulatory tailwind, reshoring/local-for-local structural tailwind, and segment simplification (4 clusters → 3 segments). Margin bridge: realistic FY27-28 landing zone 16.0-<strong>16.5%</strong>, not <strong>18%</strong>. Institutional memory vacuum (simultaneous 12-year CEO + 17-year CFO departure) is the primary execution risk</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 - Required case outputs [NR at Triaging depth].</strong> Deferred to ESA. Provisional: TSR thesis requires 300-<strong>400bps</strong> EBITA margin recovery (<strong>13.2%</strong> → 16-<strong>16.5%</strong>) and multiple re-rating from ~<strong>10x</strong> to 11-<strong>13x</strong> EV/EBITA as complexity premium compresses. Three scenarios to be modelled at ESA (Base/Bull/Bear)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 - Sufficient TSR / valuation upside [NR at Triaging depth].</strong> Deferred to ESA. Provisional: 30-<strong>50%</strong> TSR over 24-36 months on base case at current €<strong>38.66 </strong>price; 70-<strong>80%</strong>+ on bull case if <strong>18%</strong> margin and multiple compression deliver simultaneously. Bear case -20-<strong>30%</strong> if semicon Q1 is a pulse and Building recovery delays</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II verdict: C+. Thematic fit (A-) and value-chain position (B+) are the standout strengths of the Pillar II stack. Structural case complexity (E7 D) is the dominant grade-constrainer — three divergent segment cycles, Stichting governance, conglomerate discount, non-GAAP opacity, and dual M&amp;A integration risk collectively make this a harder case to own vs comparably-quality peers with simpler architectures. The sell-side revision drag (MR2 C) compounds the complexity grade.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 - Case momentum. <span class="g gB">B</span></strong> Technical price momentum (MR1 B+) and thematic structural fit (MR3 A-) are strong; sell-side earnings revision momentum (MR2 C) drags the group to B-. Two of three Group 1 sub-elements are above average</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 - Case simplicity. <span class="g gD">D</span></strong> E7 structural complexity grades D - the primary portfolio-wide grade-constrainer. E8 setup fit partially offsets at B- (two standard setup types fit well: self-help optimizer and new management transformation). Group 2 D+ reflects the dominant E7 drag</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 - Core philosophy. <span class="g gB">B</span></strong> E11 value-chain position grades B+ - strong Semicon and Industrial moats; Building distribution channel weakness acknowledged. E9/E10/E12/E13 not applicable at Triaging; deferred to ESA</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 - Case riskiness. <span class="g gC">C</span></strong> Light first-pass. Known risks are material but manageable: ASML concentration, European construction cycle timing, GVT/Paulo integration execution, Stichting governance ceiling. No individually disqualifying risk; deep element work (E15-E19) deferred to ESA</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 - Case optionality. <span class="g gNR">NR</span></strong> Not yet in scope at Triaging</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Watson's recommendation is to progress Aalberts Industries to Early-Stage Assessment. The combination of genuine concurrent change forces, exceptional thematic alignment, and strong technical momentum creates a credible investment thesis. The primary outstanding question — whether Q1 2026's semicon organic growth is a multi-quarter trend or a single-batch pulse — will be resolved by Q2-Q3 2026 data and is the defining binary test before ESA conviction can be set above MEDIUM.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to ESA</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> (1) Q2-Q3 2026 semicon delivery data sustains positive organic trajectory - confirming the AI cycle is a durable trend, not EUV batch front-loading; (2) Stichting Prioriteit governance ceiling accepted as a persistent structural constraint at ESA (caps conviction at B without operational delivery evidence); (3) Building Technology recovery timing accepted as an ESA modelling variable, not a blocking gate</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to schedule ESA kick-off for late-August 2026 post-Q2 results; update AALB-NL Watson Log entry with binary test trigger; (2) Watson to initiate ESA KQ queries on Building distributor channel dynamics and GVT SE Asia integration early-stage performance at ESA kick-off</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">83 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">At Triaging depth, the Aalberts investment case presents a compelling but architecturally complex picture. Pillar I (B+) is anchored by six concurrent, credible change forces — none individually transformative, but collectively constituting a cluster that can deliver the 300-<strong>400bps</strong> EBITA margin bridge to 16.0-<strong>16.5%</strong> by FY27-28 on a realistic base case. Pillar II (C+) reflects the tension between exceptional thematic fit (A-) and value-chain moat strength (B+) on one side, and persistent structural complexity (E7 D) and negative sell-side revision momentum (C) on the other. The case merits ESA investment; Q2-Q3 2026 data is needed before conviction can be formalised above MEDIUM.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">14 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar I verdict: B+. Six concurrent change forces are identified and graded. Three are HIGH-credibility (locked-in delivery evidence), two are MEDIUM-HIGH credibility (visible catalysts), and one is LOW-credibility in timing but directionally clear (Building recovery). The aggregate Pillar I grade B+ reflects above-average change force quality for a Triaging-stage case — the cluster is more concurrent and more self-reinforcing than typical single-thesis transformation cases. E2 and E3 are light first-pass only; full treatment deferred to ESA.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 — Required input change forces <span class="g gB">B</span> <span class="secn">8 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E1 verdict: B+. The six change forces together represent a transformation thesis with a credible base-case margin bridge. The realistic landing zone (16.0-<strong>16.5%</strong> EBITA by FY27-28, per KQ analysis) is meaningfully below the <strong>18%</strong> Thrive 2030 target but represents 280-<strong>330bps</strong> of improvement from the FY25 trough — sufficient to drive meaningful TSR on a 24-36 month horizon. The simultaneous 12-year CEO and 17-year CFO transition is the primary execution risk that prevents a higher grade at Triaging depth.</div></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1 - Thrive 2030 portfolio transformation: divestments (HIGH credibility; locked in).</strong> Aalberts has completed over €<strong>400m</strong> in non-core divestments across FY23-FY25: Integrated Piping Systems, Lias Industries, Aalberts Climate Systems, and further smaller disposals. These are not speculative disposals; they have been executed at disclosed enterprise values with completion confirmed in the CF report. The KQ-thrive2030 analysis independently quantified the EBITA margin impact: +60-<strong>80bps</strong> by FY26-27, graded A-credibility (highest tier) - meaning the margin improvement from portfolio quality improvement is already locked into the run-rate. Additionally, the GVT (flow control, Southeast Asia) and Paulo (heat treatment, North America) bolt-on acquisitions strengthen the returns-accretive segments. The divestment programme is the single most reliable lever in the five-lever margin bridge identified by KQ analysis - it requires no future organic growth, no cyclical recovery, and no market share gain to deliver. This provides a credible base that reduces the dependency on simultaneous delivery across all levers</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ1 - Structural segment simplification: 4 clusters → 3 segments (HIGH credibility; executed).</strong> The reorganisation from four operational clusters (Advanced Hydronic Solutions, Industrial Flow Control, Industrial Services, Advanced Semicon Solutions) into three clearly defined segments (Building Technology, Industrial Technology, Semiconductor Technology) was completed in FY2024 and is reflected in the FY25 Annual Report. This is not a rebranding - it represents a genuine rationalisation of management reporting lines, cost centre allocations, and P&amp;L disclosure. The BF report's valuation section notes that the improved segment transparency reduces the analytical premium required to model Aalberts vs comparable pure-plays, creating a marginal reduction in the conglomerate complexity discount. The +30-<strong>40bps</strong> EBITA impact of segment simplification is embedded in the KQ margin bridge as an efficiency gain (GVT/Paulo integration efficiency gains across the new segment structure)</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA3 CQ1 - CEO and CFO institutional renewal (MEDIUM-HIGH credibility; building evidence).</strong> Carmen Simonetta became CEO in September 2023 - Aalberts' first external CEO hire in 45 years. Her appointment (from Grundfos, where she was COO and CEO Industry) triggered a <strong>9%</strong> single-day share price decline - the market read the external hire as a signal that something was structurally broken. Sell-side confidence has materially recovered: Jefferies, Bernstein, and Morgan Stanley all retained Buy/Overweight ratings through Simonetta's first 18 months, and Q1 2026 delivery reinforced credibility. She currently holds approximately 30,000 shares (at ~<strong>125%</strong> of her <strong>200%</strong> base salary LTI target - on track but not yet fully compliant), representing meaningful personal alignment. CFO Arno den Houter joined in April 2025 from Royal BAM Group, immediately acquiring 22,500 shares - a deliberate and public alignment signal. The LTI structure (<strong>50%</strong> EPS, <strong>30%</strong> ROCE, <strong>20%</strong> ESG; 3-year vest + 2-year lock-up) creates incentives aligned with the margin recovery thesis. Risk: expert evidence from the LF report ("absence of central purchasing forces factories to buy independently"; "internal competition culture prevents cross-entity synergy") suggests the structural decentralisation that Simonetta is trying to address is deeply embedded. The institutional memory vacuum from the simultaneous departure of the 12-year CEO and 17-year CFO has no prior data point to calibrate against</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA4 CQ1 - Semiconductor AI demand cycle inflection (MEDIUM-HIGH credibility; timing partially uncertain).</strong> The AI infrastructure investment cycle - datacentre GPU clusters requiring EUV-produced advanced chips at 5nm and below - is driving ASML's order backlog to record levels. Aalberts provides thermal management and ultra-high-purity flow control systems that are integral to the EUV machine manufacturing process - a Tier-1 co-development supplier to the global EUV monopolist. Q1 2026 was the first quarter since Q2 2023 where all three Aalberts segments delivered positive organic growth simultaneously. The KQ-falsefriend analysis has decomposed Q1 2026 organic growth: organic +<strong>2.8%</strong>, M&amp;A net +<strong>0.8%</strong>, FX ~flat - confirming the headline +<strong>3.5%</strong> is not M&amp;A-masked. Semicon EBITA Q1 2026: €<strong>21.1m</strong> vs €<strong>16m</strong> consensus (+<strong>31.9%</strong> beat). Industry segment organic: +<strong>5.8%</strong> (aerospace-concentrated; automotive/machinery still flat - breadth is somewhat overstated). Counterpoint: The KQ analysis also identifies that Q1 2026 included a specific batch of EUV frame deliveries that may have been front-loaded; Q2 2026 normalisation is a real risk. This is the Triaging memo's primary binary test - confirmed as the key ESA condition</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA5 CQ1 - EU decarbonisation and Building Renovation Wave regulatory tailwind (MEDIUM credibility; HIGH duration; LOW near-term speed).</strong> The EU Buildings Renovation Directive (updated 2024) mandates progressive energy performance standards for European building stock, creating a structural multi-decade demand for hydronic heating/cooling systems - Aalberts' core Building Technology product range. The EU Clean Industrial Deal reinforces the demand picture. Approximately <strong>51%</strong> of Aalberts' revenue is exposed to building energy efficiency products. This regulatory tailwind is directionally unambiguous and durable (20-30 year renovation programme), but near-term volumes remain suppressed by the European residential construction downturn (high interest rates, contractor cost inflation). The tailwind is HIGH-duration and LOW-speed in near-term delivery - the building renovation wave volume uplift is primarily 2027-2030+, not H1 2026</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA6 CQ1 - Reshoring and local-for-local manufacturing structural shift (HIGH credibility; MEDIUM magnitude).</strong> Aalberts' local-for-local manufacturing model - production assets physically co-located with customers across 20+ countries - is precisely the industrial footprint that OEMs are seeking as geopolitical risk (US-China, Russia-Ukraine), tariff escalation, and ESG supply chain mandates accelerate supply chain shortening. The CF report notes multiple Aalberts Industrial Technology customers (aerospace primes, automotive OEMs) explicitly citing local manufacturing presence as a procurement qualification factor in recent contract renewals. This is not a "we will benefit if we build it" thesis - it is an "our existing model is now more strategically valuable" thesis, with lower execution risk. Revenue magnitude uplift is moderate (50-<strong>100bps</strong> incremental pricing power over 3-5 years), but the moat reinforcement effect is more significant: reshoring trends are raising the switching costs for customers to move to offshore-manufactured alternatives</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The most credible counter-argument is the "everything at once" execution risk. Simonetta is simultaneously managing: a CEO-level cultural transformation ("One Aalberts"); a portfolio rationalisation programme (divestments + acquisitions in unfamiliar geographies); a semicon cycle with quarterly delivery variability; a slow-moving Building recovery requiring patience; and establishing a new CFO relationship. In management transition situations at diversified industrials, the base rate of delivering on all transformation levers simultaneously is low - and the institutional memory vacuum from the dual CEO/CFO departure amplifies execution risk. Watson's conclusion: the counter-view is valid and is fully reflected in the B+ grade (not A-). The specific levers where delivery is already locked in (divestments, segment simplification) provide a credible 16.0-<strong>16.5%</strong> margin floor even in a scenario where the cyclical levers (semicon timing, Building recovery) disappoint. The cluster thesis survives a partial failure of the more uncertain levers</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) Monitor Q2-Q3 2026 Semicon Technology organic growth - this is the primary binary test for E1 RA4 credibility; if positive and sustained, upgrade RA4 from MEDIUM-HIGH to HIGH at ESA. (2) At ESA, assess GVT SE Asia and Paulo North America H1 2026 revenue contribution vs acquisition cases - these are the first test of Simonetta's geographic expansion execution and will be critical data points for ESA E9 (great operator) assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr-at-triaging-depth" data-spy>Element E2 — Required case outputs [NR at Triaging depth] <span class="secn">3 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E2 is not applicable at Triaging stage. The TSR case hinges on 300-<strong>400bps</strong> EBITA margin recovery (base: 16.0-<strong>16.5%</strong> by FY27-28) plus multiple re-rating from ~<strong>10x</strong> to 11-<strong>13x</strong> EV/EBITA as the operationally resolvable component of the conglomerate discount (23-<strong>30%</strong>) compresses with delivery evidence. Full three-scenario modelling deferred to ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E2 provisional holder - three-scenario framework:</strong> (1) Base: 16.0-<strong>16.5%</strong> EBITA by FY28, multiple 10-<strong>12x</strong> EV/EBITA → mid-teens TSR per annum. (2) Bull: <strong>18%</strong> EBITA by FY29 + multiple 12-<strong>13x</strong> → mid-to-high 20s% TSR pa. (3) Bear: 13-<strong>14%</strong> EBITA by FY27-28 (semicon delay + Building collapse + M&amp;A integration failure) + multiple 8-<strong>9x</strong> → negative total return</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E2):</strong> Not formally assessed at Triaging depth</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E2):</strong> (1) Watson to build E2 scenario model at ESA once Q2 2026 results confirm/deny semicon trajectory - model must explicitly anchor to Watson's 16.0-<strong>16.5%</strong> base vs the <strong>18%</strong> consensus target to avoid inheriting analyst optimism bias. (2) Watson to source post-Q1 2026 beat consensus estimates (refreshed sell-side models) as ESA baseline for scenario calibration</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr-at-triaging-de" data-spy>Element E3 — Sufficient TSR / valuation upside [NR at Triaging depth] <span class="secn">3 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E3 is not applicable at Triaging stage. At €<strong>38.66</strong> (11-Jun-26), the blended analyst TP range is €<strong>39.50</strong>-€<strong>46</strong> (2-<strong>19%</strong> near-term upside). Watson's assessment is that consensus TPs understate the 24-36 month TSR potential if the margin bridge delivers to 16-<strong>16.5%</strong>, because they are anchored to near-term multiples without explicitly modelling multiple expansion from complexity premium compression. Full E3 treatment deferred to ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E3 provisional view:</strong> The <strong>12.5x</strong> forward P/E at the 45th percentile of the 10-year range implies fair value on current earnings - most upside comes from earnings growth (margin recovery), not multiple expansion. Multiple expansion (from ~<strong>10x</strong> to ~<strong>12x</strong> EV/EBITA) is available but requires 12-18 months of operational delivery evidence. The Stichting governance ceiling creates a floor on the discount that limits the maximum achievable multiple re-rating</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E3):</strong> Not formally assessed at Triaging depth</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E3):</strong> (1) ESA to benchmark Aalberts' re-rating potential against comparable post-restructuring transformation cases (e.g., post-simplification IMI plc, post-self-help Rexnord) to calibrate realistic multiple expansion from operational delivery. (2) ESA to explicitly model the Stichting governance discount (1-<strong>2x</strong> EV/EBITA, ~€<strong>3</strong>-6 per share at current multiples) as a persistent floor in the valuation framework</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">69 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II verdict: C+. The two highest-weight elements pull in opposite directions: E5 thematic fit (A-) and E11 value-chain position (B+) are exceptional; E7 structural complexity (D) is the primary grade-constrainer across the entire Pillar II stack. E8 setup fit (B-) confirms the case fits two standard investment setup types well, grounding the thesis even as complexity limits clean ownership. Sell-side earnings revision momentum (MR2 C) adds a further Group 1 drag.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-b" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gB">B</span> <span class="secn">14 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 1 verdict: B-. Technical price momentum (B+) and thematic structural fit (A-) are both above average. Sell-side earnings revision momentum (C) drags the group to B-. The setup is positive in two of three Group 1 sub-elements — a majority positive reading, but insufficient to clear B given the severity of the L12M revision headwind.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-b" data-spy>Element E4 — Technical momentum <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E4 is captured in MR1. Not applicable for extended Pillar II treatment at Triaging. Summary for completeness: RS 86th percentile overall, 94th vs sector; above all four MAs; MA200 rising five months; four consecutive higher lows since January 2026; 6M return +<strong>43%</strong>; <strong>2.5%</strong> pullback from 52-week high is constructive. Full E4 deep-dive deferred to ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E4 RA1 - Technical setup summary:</strong> Above all MAs, RS 86th overall, four higher lows pattern - classic emerging-leader setup. The <strong>2.5%</strong> pullback from €<strong>40.18 </strong>high at current €<strong>38.66 </strong>is the natural consolidation before a breakout attempt; not a technical deterioration signal. Risk: near 52-week high creates resistance; a failed breakout followed by a Q2 2026 beat miss would be a meaningful technical negative</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E4):</strong> The 6M return of +<strong>43%</strong> means much of the technical recovery from the January 2026 lows (near €<strong>24.86</strong>) has already occurred. Momentum investors who entered at lower prices may use a Q2 2026 result as an exit catalyst if results are in-line rather than beat. A result that merely meets consensus could be received as a sell-the-news event</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E4):</strong> (1) Monitor whether AALB-NL breaks the €<strong>40.18 </strong>52-week high post-Q2 results - breakout with volume would upgrade MR1/E4 to A- at ESA; failure to break with a pullback below €<strong>35 </strong>would signal momentum deterioration. (2) Track RS vs sector at ESA initiation for continued sector leadership confirmation</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-a" data-spy>Element E5 — Thematic fit <span class="g gA">A</span> <span class="secn">8 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E5 verdict: A-. Aalberts sits at the intersection of four of the most durable secular megatrends in industrial investment: AI semiconductor infrastructure demand (Tier-1 ASML), European building decarbonisation (<strong>51%</strong> revenue), reshoring of precision manufacturing (local-for-local model), and aerospace/defence supply chain expansion. The thematic breadth is exceptional — most industrial companies have one, rarely two thematic tailwinds fully embedded in the existing revenue base. The A- (vs A) reflects concentration of the semiconductor theme in a single customer relationship (ASML &gt;<strong>50%</strong> of Semicon revenue) rather than broad semiconductor industry-wide exposure, which limits the diversification benefit of the thematic stack.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1 - AI semiconductor infrastructure: Tier-1 ASML co-development partner (highest conviction; structural; 10-20 year runway).</strong> Aalberts designs ultra-high-purity flow control and thermal management systems that are integral to ASML's EUV lithography machines - the only commercially available technology capable of printing chips at 5nm and below, essential for AI processor production. ASML holds &gt;<strong>90%</strong> EUV market share globally and has a record order backlog driven by semiconductor foundry investment (TSMC, Samsung, Intel) for AI chip production capacity. Aalberts' co-development relationship means components are engineered-in from prototype stage - "switching costs virtually eliminate OEM purchasing leverage" per expert testimony in the LF report. This is not a component supply relationship that can be competitively bid; it is a co-development lock-in that persists for the life of the EUV machine platform. AI chip demand has a credible 15-20 year structural growth profile as data centre compute intensification accelerates. Aalberts' Semicon Technology segment has grown from approximately <strong>8%</strong> of group revenue in 2019 to <strong>15%</strong> in FY25 - and this secular growth trajectory is intact</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2 - European building decarbonisation and renovation wave: 51% revenue directly exposed (second highest conviction; regulatory-mandated; multi-decade).</strong> The EU Buildings Renovation Directive and Clean Industrial Deal mandate progressive energy performance improvements for European building stock - the largest source of EU energy consumption (<strong>40%</strong> of total). Aalberts' Building Technology product range (hydronic flow control systems, balanced pressure valves, heat interface units for district heating) is the enabling technology for these renovations: you cannot renovate a building's heating system to meet EU energy standards without replacing the flow control and distribution infrastructure. Aalberts is a top-2 global hydronic flow control manufacturer. Approximately <strong>51%</strong> of group revenue is linked to eco-efficient building products. The regulatory mandate creates a demand floor that is cycle-independent in its direction (though timing of volume delivery is sensitive to interest rates and contractor capacity). EU has committed to renovating <strong>15%</strong> of the worst-performing building stock by 2030 - that is approximately 30 million European buildings requiring energy system upgrades. Aalberts does not need a demand-creation strategy; the EU has created the demand mandate</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA3 - Reshoring and European industrial supply chain shortening: local-for-local model is the structural answer (HIGH conviction for model validation; MEDIUM for revenue magnitude).</strong> Aalberts' local-for-local manufacturing model - production assets co-located with customers in 20+ countries - is precisely the industrial supply chain structure that OEMs are seeking as geopolitical risk, tariff escalation, and ESG supply chain mandates shorten supply chains. Multiple Aalberts Industrial Technology customers (aerospace primes, automotive OEMs) have explicitly cited the local manufacturing presence as a procurement qualification factor in recent contract renewals (per CF report). This is not a "benefit if we build it" thesis; it is a "our existing model is now worth more" thesis. The competitive moat from local-for-local manufacturing is being reinforced by macro forces that Aalberts did not create. Revenue magnitude uplift is moderate (50-<strong>100bps</strong> incremental pricing power and market share gains from displaced offshore competitors), but the moat reinforcement is structural and durable</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA4 - Aerospace and defence supply chain expansion: qualification moats create captive revenue through programme lifetimes (HIGH conviction for sub-theme; MEDIUM for group revenue magnitude).</strong> Aalberts' Industrial Technology segment provides heat treatment and surface finishing for safety-critical aerospace components under Nadcap (National Aerospace and Defense Contractors Accreditation Program) qualification. European NATO defence spending acceleration (from <strong>2%</strong> to 2.5-<strong>3%</strong> GDP targets post-Ukraine) is expanding the addressable volume of defence components requiring specialist heat treatment. The shift to exotic materials in next-generation aircraft (titanium structures, ceramic matrix composites requiring specialist surface treatment) increases Aalberts' content-per-aircraft. A Boeing engineer in the LF report rated Aalberts' aerospace IP 8-9/10 - elite quality in a segment where once-qualified suppliers are essentially captive for the 30-50 year life of an aircraft programme. The Nadcap qualification cycle (6-18 months to achieve; continuous maintenance) creates high switching barriers in both directions: Aalberts cannot lose a customer without the customer investing significantly in re-qualification, and Aalberts cannot easily be displaced by a new entrant without years of qualification work</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E5 RA5 - Heat pump and district heating energy transition: product content upgrade per installation (MEDIUM-HIGH conviction; addressable from existing product lines).</strong> The European heat pump market is growing at 15-<strong>20%</strong> per annum as gas boiler bans are introduced progressively across EU member states (Netherlands from 2026, Germany by 2030, France following). Heat pump installations require more sophisticated flow control and balancing equipment than conventional gas boiler systems - larger pipe diameters, higher-precision pressure balancing, more complex zone control. Aalberts has specifically invested in heat pump-compatible product lines (larger valve sizes, electronic balancing systems, smart controls integration) through its Building Technology R&amp;D programme. This represents an upgrade cycle within existing customer relationships - installers who already specify Aalberts products for boiler replacements will specify Aalberts' upgraded range for heat pump installations. Content-per-installation uplift is estimated at 15-<strong>25%</strong> vs equivalent boiler installation (BF report benchmarking data)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E5 RA6 - Industrial automation and precision manufacturing upgrade cycle: higher-specification demand driving share gain (MEDIUM conviction; less directly secular than the above themes).</strong> Advanced manufacturing (electric vehicle motors, precision robots, aerospace actuators, medical devices) increasingly requires tighter metallurgical specifications for heat-treated components - harder surfaces, tighter dimensional tolerances, more consistent grain structures. Aalberts' Industrial Technology segment is a quality compounder in this space: higher-specification customers moving towards Aalberts' Nadcap-qualified heat treatment as specification demands increase. The industrial automation investment wave creates a multi-year pipeline for Industrial Technology volume growth, even if individual project timing is lumpy. This theme is less structural than the semiconductor or buildings themes - it is driven by capex cycles rather than regulatory mandate - but it provides a durable mid-cycle growth layer for the Industrial Technology segment</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> The most credible counter-argument to the A- grade is that thematic labels can obscure cyclical weakness - the same four themes were cited as Aalberts' structural tailwinds in FY23 when the company was delivering <strong>15.7%</strong> EBITA margins; EBITA margins then fell to <strong>13.2%</strong> in FY25 despite three years of "structural tailwinds." The disconnect between thematic narrative and financial delivery is a real tension that investors should treat with scepticism. Watson's response: the FY23-FY25 margin decline was driven by volume deleverage in Building (European construction recession) and Semicon (inventory correction) - not by thematic tailwinds failing to materialise, but by macro headwinds temporarily suppressing volume on top of the structural trend. The themes are real; their monetisation was delayed by adverse cyclical timing. The FY25 trough is the low point precisely because both Building and Semicon cycles have compressed simultaneously; the themes' volume uplift is now inflecting (Q1 2026 Semicon) or coming (Building 2027+). The A- grade is appropriate because the structural embedding of the themes in existing revenue is genuinely exceptional - the counter-view does not change that, it simply highlights the gap between thematic quality and near-term execution</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) Monitor ASML's quarterly order intake and EUV delivery schedule as the forward leading indicator for Semicon segment revenue - specifically track Q2-Q3 2026 EUV frame shipment data as the primary binary test for the semiconductor thematic thesis. ASML publishes quarterly order intake and systems shipment data; the relevant metric for Aalberts' Semicon segment is the EUV systems shipped per quarter (each EUV system requires Aalberts' flow control components), not total ASML bookings which include DUV and immersion lithography systems. (2) At ESA, quantify the EU Building Renovation Directive addressable revenue uplift for Aalberts Building Technology segment by 2028 - size the regulatory-mandate-driven volume increase vs current Building Technology run-rate to establish an ESA-grade TSR baseline for the decarbonisation theme. This quantification should explicitly model the conversion rate from building renovation activity to Aalberts hydronic flow control product demand, using EU energy renovation permit data as the leading volume indicator; (3) Watson to flag to Richard any broker or buy-side analysis that quantifies the AI-driven EUV capacity expansion versus legacy-node DUV replacement split in ASML order intake, as this decomposition is the primary evidence required to upgrade E5 thematic conviction from A- to A at ESA</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-c" data-spy>Element E6 — Sell-side earnings momentum <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E6 is captured in MR2 above. Not applicable for extended treatment at Triaging. Summary: L12M net EPS revisions -21; composite momentum -5; buy% <strong>50%</strong>; TP revisions L3M +8 and L6M +7, indicating the cycle is beginning to turn. Full E6 treatment deferred to ESA where rolling 12M revisions will have incorporated Q2 2026 results.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E6 RA1 - Sell-side revision trend:</strong> Negative over 12 months, showing early signs of inflection post-Q1 2026 beat. Q1 beat was +<strong>31.9%</strong> on Semicon EBITA vs consensus - the most significant positive quarterly surprise in the FY23-Q1 2026 period. If Q2 2026 delivers a second consecutive positive surprise, the rolling 12M revision count will begin improving materially by Q4 2026</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E6):</strong> The Q1 2026 beat should be contextualised against a low base - Semicon consensus of €<strong>16m</strong> EBITA was set after 18 months of miss-and-downgrade. A single beat against a low bar does not establish a new earnings revision cycle. The remaining <strong>50%</strong> of sell-side analysts at Hold/Neutral are waiting for evidence of sustained delivery before upgrading</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E6):</strong> (1) Update composite momentum score and rolling 12M revisions at ESA initiation; if Q2 2026 delivers a second beat, upgrade E6/MR2 from C to B-. (2) Check buy% trajectory at ESA; a move from <strong>50%</strong> to <strong>60%</strong> would be a meaningful signal that the analyst community is gaining conviction in the recovery</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-d" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gD">D</span> <span class="secn">47 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 2 verdict: D+. E7 structural complexity grades D — the dominant grade-constrainer in the entire Pillar II stack. E8 setup fit (B-) provides a partial offset, confirming that despite the complexity, the case maps to recognisable standard investment setups. Group 2 D+ reflects the E7 D anchor.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 — Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">8 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 verdict: D. Aalberts scores in the lower quartile of the Viewforth investable universe on case simplicity. Six distinct complexity factors are documented below; none individually disqualifies the case, but their cumulative weight makes this a harder case to own at high conviction than comparable-quality single-thesis peers. The E7 D grade creates a hard ceiling on the Pillar II blended grade and is the primary reason ESA work is needed before a conviction B position can be established. The grade is D not F because simplification is directionally underway (4→3 segments completed, divestments reducing peripheral complexity) — it is simply not yet registering in a meaningful way.</div></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1 CQ1 - Portfolio complexity: three structurally divergent segment cycles (fundamental; only partially addressable).</strong> Building Technology (residential/commercial construction, interest-rate-sensitive, European-concentrated, 5-7 year cycle), Industrial Technology (aerospace/automotive/precision manufacturing, capex-driven, global, 3-5 year cycle), and Semiconductor Technology (AI infrastructure demand, ASML-driven, global, quarterly-volatile EUV delivery cycles) operate on fundamentally different economic cycles with different geographic concentrations, different management requirements, and different investor analytical frameworks. The practical consequence: Aalberts requires three separate analytical models to track - one for the construction cycle, one for industrial capex, one for the semiconductor supply chain - and the reported EBITA is a blended average of these three models with imperfect segment disclosure. The FY2024 segment restructuring (4→3) improved disclosure but did not resolve the fundamental diversification. The current macroeconomic configuration - Building in recession, Industry recovering, Semicon inflecting - means the three models are pulling in opposite directions in 2026, creating maximum complexity for investors trying to build a consensus view</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2 CQ1 - Stichting Prioriteit governance structure: DCGC deviation, binding nomination rights (structural; persistent; well-understood by market).</strong> The Stichting Prioriteit Aalberts Industries N.V. (the Dutch priority-share foundation holding priority shares with binding board nomination rights) deviates from Dutch Corporate Governance Code (DCGC) Principle 4.3. Shareholders cannot override a Stichting-backed board nomination without a two-thirds supermajority of outstanding capital - a threshold that is practically impossible to achieve. This creates three governance-complexity problems: (1) activist pressure cannot force board change without Stichting co-operation, eliminating an important value-realisation mechanism; (2) hostile M&amp;A is structurally blocked; (3) management accountability is structurally weaker than at DCGC-compliant peers. The Stichting is linked to the founding Jan Aalberts family interests (<strong>11.90%</strong> stake held by Aalberts Beheer BV). Historical usage has been benign (co-operated on 2025 board refresh, approved Simonetta's external appointment, no dividend/buyback blocks) - but the structural constraint persists. The KQ-stichting analysis estimates the governance discount at approximately 1-<strong>2x</strong> EV/EBITA (5-<strong>10%</strong> share price impact), with the conviction ceiling consequence being that the case cannot be graded above B without operational delivery evidence that the operationally resolvable discount is narrowing</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA3 CQ1 - Conglomerate discount: 33-40% below EV/EBIT pure-play sector peers (market structure; partially resolvable; partially permanent).</strong> Aalberts trades at approximately <strong>10x</strong> EV/EBITA vs pure-play sector peers at 14-<strong>16x</strong>: Bodycote (heat treatment; <strong>25.4%</strong> EBITDA margin; 14-<strong>15x</strong> EV/EBITDA), Geberit (building infrastructure; <strong>30.1%</strong> EBITDA; 16-<strong>18x</strong> EV/EBITDA), Spirax-Sarco (flow control; ~<strong>20%</strong> EBITDA; 18-<strong>20x</strong>). The 33-<strong>40%</strong> discount has three components: (a) analytical complexity premium (~<strong>10%</strong> - the cost investors charge to model a multi-segment business vs a pure-play); (b) governance premium (~<strong>10%</strong>, Stichting - structurally persistent); (c) operational execution credibility premium (~15-<strong>20%</strong> - requires margin delivery evidence before awarding a higher multiple). Components (a) and (b) are structural and largely permanent. Component (c) is operationally resolvable over 24-36 months if Thrive 2030 delivers the 16.0-<strong>16.5%</strong> base case margin. The TSR upside case is built primarily on closing the (c) component, not on eliminating the discount entirely</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA4 CQ1 - M&amp;A integration risk: GVT (Southeast Asia) and Paulo (North America) (execution; MEDIUM risk).</strong> GVT is Aalberts' first meaningful platform acquisition in Southeast Asia - a geography where Aalberts has no prior management infrastructure, limited distributor relationships, and unfamiliar regulatory, cultural, and labour environments. Paulo is the first large-scale North American heat treatment acquisition, bringing US labour relations, North American compliance norms, and a distinct corporate culture. Both acquisitions are being integrated within the same 18-month window as the CEO/CFO transition. The LF expert evidence ("internal competition culture prevents cross-entity synergy" within existing Aalberts entities) creates an elevated integration risk for acquisitions in genuinely foreign geographies. At Triaging, this is flagged as a MEDIUM probability, MEDIUM impact risk - not a blocking condition, but a monitoring priority at ESA. If Q2/Q3 2026 GVT and Paulo contributions are below acquisition case, the integration complexity grade becomes a HIGH priority ESA item</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E7 RA5 CQ1 - Qualitative-only guidance: absent near-term numerical guidance limits analytical precision (investor communication; manageable, but a source of excess volatility).</strong> Aalberts provides no numerical guidance for the current financial year - only long-range Thrive 2030 aspirational targets (&gt;€<strong>4.5bn</strong> revenue, &gt;<strong>18%</strong> EBITA by 2030). This creates several analytical inconveniences: consensus EBIT dispersion is wider than at guidance-providing peers, meaning positive/negative vs consensus tends to produce larger share price movements than the fundamental information content warrants; analysts must reconstruct a proprietary model from segment-level disclosures rather than working from a management-provided framework. The CF report's "forum-vs-call divergence" finding captures the investor communication tension - "management pitches <strong>18%</strong>+ 2030 margins at CMDs while struggling to defend <strong>13%</strong> in earnings calls." This is not a value destruction risk; it is a communication risk that amplifies volatility around results. It will be directly relevant to ESA-stage E7 and E9 assessments</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA6 CQ1 - Non-GAAP opacity: exceptional items in holding/elimination line (accounting; monitored).</strong> Aalberts reports exceptional charges in a holding/elimination segment rather than as separately flagged exceptional items. The €<strong>20m</strong> non-cash inventory write-off in Q4 2025 (cited in CF report) surprised consensus by approximately <strong>10%</strong> because it was embedded in the elimination line rather than disclosed as a labelled exceptional. Analysts described it as "unexpected" not because the magnitude was material (€<strong>20m</strong> on €<strong>3bn</strong> revenue is immaterial), but because the disclosure mechanism created an asymmetric information environment - management knew the write-off was coming, analysts did not. The upcoming GVT and Paulo integration phases create elevated probability of future exceptional charges (step-up amortisation, integration costs, inventory harmonisation) that will flow through the same opacity mechanism. This is an ongoing monitoring risk that will require explicit treatment in ESA-stage risk architecture (E15)</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The strongest counter-view on E7 is that complexity is actively declining. The 4→3 segment restructuring is complete. The divestment programme has removed approximately €<strong>400m</strong>+ of peripheral, low-margin complexity. Simonetta's "One Aalberts" cultural programme is attempting to reduce decentralisation inefficiencies (though the expert evidence in the LF report suggests this is a multi-year project). Segment disclosure has improved materially post-2024 restructuring, making analyst models cleaner. Watson's assessment: the counter-view is directionally correct, and it is the reason the grade is D not F. However, the remaining complexity - three divergent cyclical segments, governance structure, persistent conglomerate discount, qualitative guidance, and non-GAAP opacity - collectively constitutes a bottom-quartile case simplicity profile vs the Viewforth investable universe. Progress on complexity reduction will be assessed quantitatively at ESA, specifically whether post-2024 segment disclosure improvements have measurably reduced consensus forecast error relative to 2022-2023 levels</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) At ESA, audit Bernstein and Jefferies segment-level models to assess whether consensus forecast dispersion has narrowed post-2024 disclosure improvement - a quantitative test of whether the complexity reduction is registering with the analyst community. Specifically, compare the standard deviation of analyst FY26 EBIT margin estimates in the pre-2024-restructuring cohort (FY22-FY23 models) vs the post-restructuring cohort (FY25-FY26 models) - a narrowing dispersion would confirm the segment disclosure improvement is translating into tighter analyst consensus, which is a precondition for closing the analytical complexity component of the conglomerate discount. (2) At ESA, assess the Stichting governance disclosure trajectory - specifically whether Simonetta or den Houter have made any public statements about modifying the DCGC comply-or-explain position; any signal of willingness to modify the Stichting structure would be a meaningful governance complexity reduction catalyst</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-b" data-spy>Element E8 — Fit with acceptable case setups <span class="g gB">B</span> <span class="secn">39 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E8 verdict: B-. Aalberts fits two of the six standard investment setup types well (self-help portfolio optimizer and new management transformation), partially fits two more (dual-trough cyclical recovery and quality compounder at conglomerate discount), and does not currently fit two (earnings momentum inflection — too early; capital return acceleration — insufficient near-term catalyst). The two primary setups are well-evidenced and create a coherent investment thesis even when assessed against the E7 D complexity constraint. Grade B- rather than B because the complexity of running two concurrent setup narratives (self-help + cyclical recovery) is itself a simplicity deduction, and the False Friend risk (single-driver semicon dependency) requires active monitoring. Two negative guardrails are identified below.</div></div>
+<p><strong>Setup Type 1 — Self-help portfolio restructuring / optimizer [FITS — PRIMARY SETUP]</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Aalberts has completed &gt;€<strong>400m</strong> of non-core divestments across FY23-FY25, exiting businesses identified as low-returns, low-margin, or strategically peripheral to the Semicon/Industrial/eco-Building core. The divestment programme is strategically coherent and has been executed at confirmed enterprise values - not speculative disposals pending buyer identification. Gross proceeds and margin accretion are the two metrics that define this setup, and both are tracking positively per the CF report data. The EBITA impact of the portfolio quality improvement (+60-<strong>80bps</strong>) is the highest-credibility lever in the KQ-thrive2030 bridge</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The 5-lever margin bridge provides the quantitative backbone for the self-help setup: (1) divestments - A-credibility, locked in, +60-<strong>80bps</strong>; (2) restructuring / One Aalberts cost programme - B+-credibility, underway, +60-<strong>80bps</strong>; (3) semicon AI cycle recovery - C+-credibility, inflecting, +60-<strong>80bps</strong>; (4) Building Technology volume recovery - C-credibility, slow-moving, +50-<strong>90bps</strong>; (5) GVT/Paulo integration efficiency gains, B--credibility, early stage, +30-<strong>40bps</strong>. The critical feature of the self-help frame is that levers 1, 2, and 5 alone deliver +150-<strong>200bps</strong> - reaching a 15.2-<strong>15.4%</strong> EBITA landing zone - without requiring any cyclical recovery in either Building or Semicon. The self-help thesis survives a cyclical disappointment on levers 3 and 4 if the programme levers deliver on schedule</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The restructuring programme includes operational cost-outs (GVT/Paulo integration efficiency gains; "One Aalberts" shared services consolidation) and segment simplification (4 clusters → 3 segments reducing management bandwidth costs). These are not all locked-in, but the segment simplification is complete and the integration synergy quantification is underway. The self-help nature of these levers - they deliver based on management execution rather than external market conditions - makes this setup the most conviction-appropriate for a Triaging stage assessment</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Aalberts' historical trough-to-peak recovery pattern validates the self-help setup as a recurring feature of the investment case. In the FY09 cycle trough (EBITA margin ~<strong>12.8%</strong>), the company recovered to <strong>15.9%</strong> within 3 years - a +<strong>310bps</strong> recovery delivered primarily through portfolio rationalisation and operational cost restructuring, not purely volume recovery. In the FY16 trough (<strong>13.5%</strong>), recovery to <strong>16.4%</strong> occurred within 24 months. The current FY25 trough (<strong>13.2%</strong>) is the lowest since FY09 - but the self-help toolkit is more developed and the programme (Thrive 2030) is more explicit than in prior cycles. Historical base rate: the self-help setup has delivered positive outcomes in both prior Aalberts trough scenarios</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">CEO Simonetta's background is directly relevant to this setup type: her Grundfos career (COO and CEO Industry) was characterised by operational restructuring and portfolio rationalisation. She was selected by the Stichting Prioriteit specifically to execute a transformation that the prior CEO (12-year tenure, compounder culture) was not positioned to lead. The self-help setup is the thesis that best maps to the management mandate</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Historical precedent within the cohort: ROKO.B-SE (cohort peer) is a pure portfolio optimizer - serial acquirer, disciplined capital allocation, no legacy complexity. ROKO's <strong>21%</strong> EBITA margin vs Aalberts' <strong>13.2%</strong> illustrates the long-term potential of a well-executed industrial portfolio optimization strategy. The difference is that ROKO started clean (founded 2019) while Aalberts is executing optimization from a complex 45-year incumbent base - higher execution risk but also lower starting multiple (<strong>10x</strong> vs ROKO's <strong>22.6x</strong> FY25)</div></div>
+<p><strong>Setup Type 2 — New management transformation [FITS — PRIMARY SETUP; CO-EQUAL WITH SETUP 1]</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">First external CEO hire in Aalberts' 45-year history is a definitive signal of a new management transformation setup. The board and Stichting Prioriteit explicitly concluded that internal succession was insufficient - a judgement that itself validates the transformation thesis (the organisation needed external expertise to accelerate change). Simonetta brings a specific transformation skill set: large-scale industrial organisation management, cross-cultural people leadership (Grundfos operates in 50+ countries), and a track record of instilling performance cultures in engineering companies</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">New CFO Arno den Houter (April 2025, from Royal BAM Group) completes the leadership renewal. Den Houter immediately acquired 22,500 shares - an unusual and deliberate alignment signal for an incoming CFO who could have waited for an equity grant. The LTI structure (<strong>50%</strong> EPS, <strong>30%</strong> ROCE, <strong>20%</strong> ESG; 3-year vest + 2-year lock-up; TSR notably absent - flagged by sell-side as a misalignment) creates aligned incentives through the Thrive 2030 milestones period. The combined Simonetta + den Houter incentive package is more tightly aligned with the margin recovery thesis than the prior management team's structure</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The "forum-vs-call" divergence identified in the LF report is a genuine tension that new management transformation setups must monitor. The pattern ("pitches <strong>18%</strong> at CMDs, struggles to defend <strong>13%</strong> in earnings calls") can be read as either: (a) management is managing expectations appropriately by anchoring analysts on a long-term target while acknowledging near-term reality; or (b) management lacks confidence in the credibility of the <strong>18%</strong> target and is managing upward expectations while buying time for delivery. Watson's current reading: interpretation (a) is more consistent with the Q1 2026 delivery evidence, but interpretation (b) must be elevated to a monitoring item at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The LTI structure (<strong>50%</strong> EPS, <strong>30%</strong> ROCE, <strong>20%</strong> ESG; 3-year vest + 2-year lock-up; TSR absent) is correctly flagged by sell-side (Bernstein) as a potential alignment concern. In the context of a portfolio transformation setup, however, EPS and ROCE metrics are actually more appropriate than TSR for a management team on a 3-5 year delivery horizon: TSR is a trailing indicator that can be gamed through buybacks and financial engineering, whereas EPS growth and ROCE improvement reflect the underlying operational performance Simonetta's mandate requires her to deliver. The 5-year vest+lock structure ensures the LTI does not create incentives to accelerate short-term earnings at the expense of the long-term transformation - relevant given the divestment programme may initially compress reported earnings before underlying quality improves</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Risk to setup validity: the LF expert evidence on structural decentralisation ("absence of central purchasing forces factories to buy independently"; "internal competition culture prevents cross-entity synergy") suggests the organisational DNA that new management is trying to change is deeply embedded. New management transformation setups fail most frequently when the structural barriers to change are underestimated by the incoming leadership. The Stichting governance structure (by limiting accountability pathways) may reduce the speed at which Simonetta can implement structural changes that require board-level commitment. Watson's view: the setup is valid but the timeline is likely 3-5 years (full Thrive 2030 programme), not 12-18 months</div></div>
+<p><strong>Setup Type 3 — Dual-trough cyclical recovery [PARTIAL FIT — SECONDARY SETUP]</strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Both Building Technology and Semiconductor Technology have been in simultaneous cyclical trough through FY24-early FY25: Building compressed by European residential construction recession (high interest rates, contractor cost inflation); Semicon compressed by post-COVID semiconductor inventory correction (customers drawing down excess inventory before placing new orders). Q1 2026 marks the first quarter since Q2 2023 where all three segments generated positive organic growth simultaneously - a verifiable trough-crossing indicator</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The KQ-falsefriend analysis confirms Q1 2026 organic recovery is authentic: M&amp;A contributions net to only +<strong>0.8%</strong> (GVT and Paulo contribution vs prior-period M&amp;A activity rolling off), while organic growth was +<strong>2.8%</strong>. This decomposition is the key analytical validation of the cyclical recovery setup - it confirms the revenue improvement is genuine demand recovery, not acquisition-driven revenue inflation</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Historical cycle recovery magnitude provides a quantitative anchor for the Semicon component. In Aalberts' prior Semicon downturn cycle (FY19: semicon revenues -<strong>15%</strong> on customer inventory correction; FY20-FY21: recovery +<strong>30%</strong>), the segment recovered to new highs within 6 quarters of the trough. The current downturn cycle (FY24 Semicon EBITA suppressed to approximately €<strong>65m</strong> from the FY23 run-rate of ~€<strong>90m</strong>) is consistent in amplitude. If the recovery trajectory mirrors the prior cycle, Semicon EBITA could return to €<strong>90</strong>-100m by FY27 - contributing approximately 80-<strong>100bps</strong> of group EBITA margin uplift from the Semicon lever alone. This single lever, if it delivers, is sufficient to move the group EBITA from <strong>14.2%</strong> (Q1 2026 run-rate) to approximately 15.0-<strong>15.2%</strong> without any self-help contribution - validating why Semicon timing is the most important single monitoring variable</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Building Technology recovery timing is a key ESA variable that must be modelled in range rather than as a point estimate. European residential building permits were falling for 24 consecutive months through January 2026 - the longest sustained contraction since the 2009 global financial crisis. Historical precedent shows a 12-18 month lag between ECB rate cut cycles and building permit recovery (ECB first cut June 2024, now at <strong>2.5%</strong>). This implies Building Technology volumes may begin recovering in H2 2026 - H1 2027. On the cyclical recovery setup framing, Building Technology is effectively a 12-18 month lagging recovery behind Semicon - the "dual trough recovery" is more accurately a "sequential trough recovery" with Semicon leading and Building following</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Partial fit because: the "recovery" in Q1 2026 is primarily Semicon-driven (Semicon EBITA €<strong>21.1m</strong>, +<strong>31.9%</strong> vs €<strong>16m</strong> consensus), while Building Technology remains subdued (European construction activity still below pre-cycle peak). The setup is not a broad-based cyclical recovery across the full portfolio; it is a selective Semicon recovery with Building recovery still pending. A pure cyclical recovery setup would require both cycles to turn simultaneously, creating a broader volume uplift across the full EBITA base. The current setup is closer to a "selective segment recovery" than a "full portfolio cyclical recovery" - hence partial fit only</div></div>
+<p><strong>Setup Type 4 — Quality compounder at conglomerate discount [PARTIAL FIT — SECONDARY SETUP]</strong></p>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The quality compounder credentials are well-established: RONIC <strong>20.9%</strong> over a decade; 45-year track record of value-creating M&amp;A (100+ acquisitions with consistent positive ROIC above WACC); mission-critical moats in Semicon (ASML co-development) and aerospace (Nadcap qualification); FCF generation of €<strong>361m</strong> (FY25, albeit peak); and a net working capital improvement to 71 days despite the cycle trough (a quality marker - poor operators typically experience NWC deterioration in downturns)</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">On a normalised <strong>16%</strong> EBITA margin scenario, Aalberts would trade at approximately 9-<strong>10x</strong> EV/EBITA at the current share price - vs quality compounder sector peers (Spirax-Sarco, Geberit, Bodycote) at 14-<strong>18x</strong>. The 33-<strong>40%</strong> discount contains 23-<strong>30%</strong> that is operationally resolvable (market is discounting the gap between trough performance and historical normalised performance) - and this operationally resolvable component is the primary source of TSR upside</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">RONIC comparison against sector peers quantifies the quality premium that the discount appears to undervalue: Aalberts <strong>20.9%</strong> 10-year RONIC vs Bodycote ~12-<strong>14%</strong> ROC vs Geberit 15-<strong>17%</strong> ROIC vs Spirax-Sarco 12-<strong>15%</strong> ROIC. On this single metric, Aalberts is a superior capital allocator to all three pure-play benchmarks - which should in theory command a premium multiple, not a discount. The 33-<strong>40%</strong> discount therefore implies the market is pricing in either (a) a permanent structural deterioration in capital allocation quality or (b) a credibility penalty that compresses as operational delivery accumulates. Watson's view: (b). The RONIC track record is sufficient to support the quality compounder case once the <strong>13.2%</strong> trough is demonstrated to be transitional. Multiple re-rating math: Aalberts at <strong>12x</strong> EV/EBITA on <strong>16.0%</strong> EBITA by FY27 produces approximately 60-<strong>70%</strong> TSR from current levels; at <strong>14x</strong> (full operationally resolvable discount closure), TSR approaches 90-<strong>100%</strong>+. This is the quantitative backbone of the quality re-rating upside scenario</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Partial fit because: "quality compounder at undeserved discount" typically requires an investor to argue that the discount is unjustified and temporary. At Aalberts, approximately 10-<strong>15%</strong> of the discount is justified and structurally persistent (Stichting governance 5-<strong>10%</strong>; analytical complexity premium ~5-<strong>10%</strong>). The investment argument is not "all of the discount is undeserved" but "the operationally resolvable 23-<strong>30%</strong> component is undeserved and will compress with delivery evidence." This is a more nuanced and less clean version of the standard setup - hence partial fit</div></div>
+<p><strong>Setup Type 5 — Earnings momentum inflection [DOES NOT FIT AT CURRENT STAGE — REASSESS AT ESA]</strong></p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The earnings momentum inflection setup requires a confirmed positive revision cycle - typically 3+ consecutive quarters of positive surprises vs consensus producing a sustained upward revision trend. Aalberts' L12M net EPS revisions of -21 definitively exclude this setup at Triaging. The Q1 2026 beat (first meaningful positive surprise in 6 quarters) is the initiating data point for a potential inflection, but one data point is insufficient</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Buy% at <strong>50%</strong> confirms the analyst community remains split - a consistent earnings inflection setup typically shows 60-<strong>70%</strong>+ buy ratings as analysts update models post-beat. The composite momentum score of -5 (negative) is a direct indication that the revision cycle, despite Q1 2026, has not yet crossed to positive</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Specific upgrade criteria for this setup at ESA initiation: (a) Q2 2026 EPS consensus upgrades materially (e.g., FY26 EPS consensus moving from ~€<strong>2.90 </strong>to €<strong>3.00</strong>+, representing a genuine positive revision not mere rounding); (b) buy% rising from <strong>50%</strong> to <strong>60%</strong>+ with at least 3 analysts upgrading from Hold to Buy; (c) rolling L3M net revision count turning positive for the first time since Q2 2023. Meeting all three simultaneously would justify upgrading Setup 5 from "Does Not Fit" to "Partial Fit" and upgrading MR2/E6 from C to B- at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Watson will reassess this setup at ESA initiation if Q2 2026 results deliver a second consecutive positive surprise and the rolling 12M revision count crosses to neutral or positive. At that point, Setup Type 5 becomes available as a potential additional setup narrative, and MR2/E6 would upgrade from C to B-/B</div></div>
+<p><strong>Setup Type 6 — Balance sheet catalyst / capital return acceleration [DOES NOT FIT]</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Net debt €<strong>981m</strong> at 1.8× ND/EBITDA is at the low end of the peer leverage range - there is balance sheet capacity for increased capital return in principle. However, three factors block the capital return acceleration setup in the near term: (1) FY25 FCF of €<strong>361m</strong> is assessed as a peak that will normalise to €<strong>280</strong>-300m as inventory rebuilds on volume recovery (KQ-falsefriend analysis), reducing the available capital return run-rate; (2) GVT and Paulo acquisition integration creates near-term capital deployment priority over buybacks; (3) Simonetta's Thrive 2030 programme explicitly prioritises portfolio transformation CapEx over short-term returns of capital</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">Leverage capacity analysis: at 1.8× ND/EBITDA with FY25 EBITDA of approximately €<strong>500m</strong> (implied from <strong>13.2%</strong> EBITA margin on ~€<strong>3bn</strong> revenue, adjusted for D&amp;A), the comfortable leverage headroom to 2.5× (the level at which most EU investment-grade industrials become cautious about non-M&amp;A capital expenditure) is approximately €<strong>350m</strong>. In theory, this capacity could support a buyback programme. However, Simonetta's capital allocation priority ordering appears to be: (1) organic growth CapEx; (2) bolt-on M&amp;A; (3) progressive dividend; (4) opportunistic buyback. Capital return acceleration at priority position 4 is unlikely to be activated before FY27 at the earliest - and only if GVT and Paulo integration delivers ahead of plan, reducing the M&amp;A pipeline priority</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">The buyback programme (if one were initiated) would likely be received positively by the market, but there is no credible near-term catalyst for a step-change in capital return that would classify Aalberts as a capital return setup. The Stichting Prioriteit also provides no incentive for the board to prioritise capital return above long-term portfolio investment</div></div>
+<p><strong>Negative Guardrail 1 — ASML customer concentration: semiconductor single-driver risk</strong></p>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">ASML accounts for &gt;<strong>50%</strong> of Aalberts' Semiconductor Technology segment revenue. With Semicon at approximately <strong>15%</strong> of group revenue, ASML represents approximately 7-<strong>8%</strong> of total Aalberts group revenue. This concentration creates a specific vulnerability: any ASML production schedule disruption (regulatory action against ASML, EUV machine delivery delay, IP litigation, or ASML's own supply chain failure) would directly compress Semicon segment EBITA with no near-term offset from other semiconductor OEM customers within the segment</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">The Q1 2026 beat, while genuine, includes a specific risk flagged by the KQ-falsefriend analysis: the quarter included a batch of EUV frame deliveries that may have been front-loaded from Q2 due to ASML's own customer delivery scheduling. If Q2 2026 Semicon EBITA reverts materially below Q1's €<strong>21.1m</strong> level, the thesis that "Semicon is inflecting" becomes the thesis that "ASML had one strong delivery quarter." This is the definition of a FALSE FRIEND risk in the setup - a single data point that looks like a trend until the second quarter reveals it was episodic</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">Top-5 customer concentration context amplifies the ASML risk: beyond ASML, the top-5 Semicon customers represent approximately <strong>80%</strong> of the Semiconductor Technology segment (per CF report benchmarking data), which means the segment is effectively a 1-3 customer business at the revenue level. Any single top-5 customer delaying EUV equipment capex (TSMC financial discipline, Samsung balance sheet pressure, Intel restructuring) would create a segment revenue headwind with no near-term offset from other semiconductor OEM customers. Aalberts does not disclose individual customer concentration in Semicon; Watson infers this from ASML's own published Semicon supplier concentration data and sector analyst reports</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">ASML's own supply chain risk cascades to Aalberts as a second-order risk: ASML itself is highly dependent on TSMC (&gt;<strong>60%</strong> of ASML's EUV system revenue estimated). A TSMC-specific disruption - US export control escalation targeting advanced TSMC nodes, Taiwan geopolitical scenario, or TSMC financial stress - would cascade down to ASML's order book and therefore to Aalberts' Semicon segment within 2-3 quarters of the event. This is a second-order tail risk (ASML → Aalberts chain) that cannot be managed at the Aalberts level; it can only be monitored via ASML's order intake publications and Taiwan risk premium tracking</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">Practical guardrail implementation: If Q2 2026 Semicon EBITA is below €<strong>15m</strong> (the pre-Q1 run-rate consensus), pause ESA and formally reassess E1 RA4 with a downgrade to LOW credibility. If Q2 2026 Semicon EBITA is above €<strong>18m</strong> (sustaining materially above prior run-rate), confirm the inflection and proceed to ESA with E1 RA4 upgraded to HIGH credibility</div></div>
+<p><strong>Negative Guardrail 2 — Stichting Prioriteit governance ceiling: caps the maximum case upside mechanism</strong></p>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The Stichting Prioriteit (Dutch priority-share foundation with binding board nomination rights) eliminates two of the most powerful external value-realisation catalysts available to investors in underperforming diversified industrials: activist pressure and hostile M&amp;A. Both mechanisms are structurally blocked. The case is therefore <strong>100%</strong> dependent on management-led delivery - if Simonetta fails to deliver Thrive 2030, no external catalyst can substitute</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">The governance ceiling has a direct implication for the maximum credible conviction grade: the case cannot warrant a conviction A without: (a) operational delivery evidence that the 23-<strong>30%</strong> operationally resolvable discount is closing; AND (b) sustained management quality evidence that makes governance risk irrelevant. At Triaging stage, with 30 months of Simonetta's track record and a single confirmed positive quarter, the evidence base is insufficient to override the governance ceiling. Watson's conviction ceiling: B (pending ESA delivery evidence) - not B+ and not A at this stage</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">Historical benign Stichting usage does NOT guarantee future compliance under all scenarios: the Stichting has cooperated with all major governance events to date (2025 board refresh, Simonetta external appointment, no dividend/buyback blocking). However, cooperation on board composition is not equivalent to cooperation with all strategic priorities. If Simonetta's Thrive 2030 programme conflicted with the founding family's vision for Aalberts' long-term structure - for example, a proposed break-up of Building Technology to fund Semicon growth, or a merger with a peer - the Stichting could use its binding nomination rights to resist strategic change by cycling board composition in a more conservative direction. This scenario is assessed as LOW probability based on current evidence (the Stichting's cooperation with the external CEO hire suggests strategic alignment), but it represents the tail risk that makes the governance ceiling real rather than theoretical</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">Investor universe restriction: the Stichting's DCGC Principle 4.3 deviation creates a permanent ESG governance exclusion for certain institutional investor mandates. European governance-focused long-short funds (which typically require full DCGC or equivalent governance compliance as a holding criterion) are structurally unable to hold Aalberts. This reduces the demand pool for the stock vs DCGC-compliant peers, contributing to the persistent 33-<strong>40%</strong> discount by limiting the marginal buyer universe. The governance exclusion is well-understood by the market and is embedded in the current discount; it cannot be resolved through operational delivery alone - only through voluntary dissolution or modification of the Stichting structure, for which there is no current indication</div></div>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">Monitoring trigger: any announcement of Simonetta's contract non-renewal, or any Stichting action that contradicts its historical benign pattern (blocking a shareholder resolution on capital allocation, resisting board appointments supported by major institutional holders), should be flagged immediately as a case-reassessment trigger. This monitoring requirement will be formalised in ESA Section D (Monitoring Plan, Invalidation Threshold 7 or 8 per framework)</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> The most important counter-view on setup fit is that running two concurrent primary setup narratives (self-help optimizer AND new management transformation) creates a strategic ambiguity risk for investors. Each setup requires investors to believe something different: the self-help narrative says "the portfolio transformation will deliver the margin uplift regardless of the management quality"; the new management narrative says "the return depends primarily on Simonetta's personal execution." In practice, both are partially true - but the dual-narrative creates a risk that neither setup delivers the "clean" investment thesis that systematic investors and quants require. Watson's response: the two setups are mechanistically distinct but directionally consistent - Simonetta is the agent executing the portfolio transformation; there is no structural contradiction between them. The combination is a management-enabled self-help case, not a mutually exclusive either/or. The ambiguity risk is acknowledged but is not sufficient to lower the E8 grade below B-</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) At ESA, resolve which single setup type to anchor the primary investment thesis - Watson's preference is self-help portfolio optimizer as primary, with management transformation as enabling thesis and cyclical recovery as an optional kicker. Establishing a single primary setup will simplify the ESA memo and make the invalidation thresholds cleaner. (2) Watson to monitor the ASML quarterly delivery schedule as the primary Guardrail 1 trigger; ASML's Q2 2026 order intake and EUV shipment data will be the earliest available indicator of the semicon trend sustainability</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">8 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 3 verdict: B. E11 value-chain position grades B+ — Aalberts occupies a strong Specialised Engineering position with exceptional lock-in moats in Semicon and Industrial segments; the Building distribution channel weakness (<strong>50%</strong> of group revenue) is the constraint that prevents a higher grade. E9, E10, E12, E13 are not applicable at Triaging; deferred to ESA where they will form the core of the business quality deep-dive.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">8 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E11 verdict: B+. Aalberts occupies Stage 3 "Specialised Engineering" in the industrial value chain — the high-margin, high-moat position above commodity component manufacturing and below final OEM assembly. The Semicon and Industrial segments have exceptional lock-in characteristics (co-development qualification moats, switching costs that are prohibitive in years and capital, expert-validated IP quality). The Building segment has a structurally weaker distribution channel position (private label competition, DTC disruption risk, limited brand loyalty among installers) that affects <strong>50%</strong> of group revenue and constrains the overall grade to B+ rather than A-.</div></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E11 RA1 CQ1 - Stage 3 Specialised Engineering position: structurally above commodity manufacturing.</strong> Aalberts operates at the stage in the industrial value chain where engineering specification, application-specific design, and qualification approval are the primary bases of competition - not price or production scale. The BF report's value-chain analysis places Aalberts in Stage 3 (Specialised Engineering: typical gross margins 50-<strong>65%</strong> at technology stage, EBIT margins 15-<strong>25%</strong> under normalised conditions), above Stage 2 (Commodity Components: undifferentiated, price-competing, 20-<strong>35%</strong> gross margins) and below Stage 4 (Module Assembly: OEM-dependent, 10-<strong>20%</strong> gross margins). In Semicon Technology and Industrial Technology, Aalberts clearly operates at Stage 3: its products are engineered-in at the design stage, qualified through multi-year certification processes, and cannot be replaced without re-engineering the customer's end product. In Building Technology, the distinction is more nuanced: high-specification products (precision pressure regulators, smart-balancing valves, complex district heating interfaces) are Stage 3; distribution-sold commodity fittings and standard fittings are closer to Stage 2. The segment mix matters for margin modelling at ESA</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA2 CQ1 - ASML co-development lock-in: switching costs prohibit OEM purchasing leverage (outstanding moat in Semicon).</strong> The LF report's expert testimony states "switching costs virtually eliminate OEM purchasing leverage" for Aalberts' Semicon components. This is consistent with ASML's own public disclosures: critical subsystem suppliers are co-developed at the prototype stage and re-qualify for every subsequent machine generation - a process that takes 2-4 years and would delay ASML's delivery commitments to its own customers. The practical implication: ASML cannot switch away from Aalberts' flow control systems even if it wanted to, without accepting 2-4 years of supply disruption risk. Aalberts cannot be priced out of the relationship competitively - only engineering failure or loss of Nadcap quality accreditation would create a switching event. This bilateral locked-in relationship means the Semicon segment margin is structurally higher than the implied Stage 3 norm - the moat is exceptional, not merely strong. The €<strong>155m</strong> inventory reduction during the FY24-FY25 inventory correction (cited in LF report as a "formidable" operational cash management feat) is also evidence of the quality of the Semicon operational team under pressure</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA3 CQ1 - Aerospace qualification moats: Nadcap certification creates 30-50 year programme-lifetime captive relationships.</strong> Aalberts' Industrial Technology segment provides heat treatment and surface finishing under Nadcap qualification for safety-critical aerospace components. Nadcap accreditation takes 6-18 months to achieve, requires continuous surveillance audits, and applies at the individual process/facility level. Once a component's process is qualified at a specific Aalberts facility, the aerospace OEM cannot switch to a different supplier without re-running the full qualification cycle - typically 5-7 years for a flight-critical component - against the risk of delayed aircraft programme delivery. This creates effectively captive revenue for the lifetime of the aircraft programme (15-30 years for commercial aircraft; 30-50 years for defence platforms). A Boeing engineer in the LF report rated Aalberts' aerospace IP "8-9/10" - elite quality in a domain where first-tier qualification is the ticket to long-duration revenue. The increasing shift to advanced materials in next-generation aircraft (titanium, nickel superalloys, ceramic matrix composites) increases Aalberts' content-per-aircraft: these materials require more precise, multi-stage heat treatment than conventional steels, favouring high-quality specialist providers</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA4 CQ1 - Building distribution channel vulnerability: structural weakness in 50% of group revenue.</strong> Aalberts' Building Technology segment sells primarily through indirect distributors (plumbing/HVAC wholesalers, national distributors, regional merchants) - not through branded direct-to-installer or direct-to-OEM channels. This creates three structural vulnerabilities: (1) Distributor margin compression - national distributors (Wolseley, Saint-Gobain Distribution, Rexel) are gaining pricing leverage through market consolidation and category management agreements, compressing Aalberts' net selling prices in the wholesale channel. (2) Private label risk - large distributors are expanding private-label hydronic ranges (mid-tier specification valves, standard fittings) that directly compete with Aalberts' branded products. The CF report notes this as a structural risk to branded premium pricing in the commodity-to-mid-specification tier. (3) DTC digital disruption - Amazon Professional and ManoMano (European digital building supply) are building direct installer relationships, progressively bypassing the traditional distributor channel and reducing the shelf-space premium that branded manufacturers currently command. Aalberts has initiated a direct-to-installer digital platform response ("One Aalberts" DTC programme), but this is early-stage and competes against DTC platforms with significant scale and capital. The BF report notes the contrast with Aalberts' Semicon and Industrial segments: "minimal brand loyalty among building distributors" vs "virtually irreplaceable co-developer to ASML" - the channel dynamics are fundamentally different</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA5 CQ1 - Copper upstream pass-through mechanism: effective risk mitigation for primary input cost.</strong> Copper is a significant input cost for Building Technology products (pipes, fittings, connectors - estimated 15-<strong>20%</strong> of Building Technology COGS). Aalberts has established copper price pass-through mechanisms with major distributors, allowing copper price increases to be passed through with a 2-4 week lag. In rising copper environments, the mechanism creates a temporary gross margin headwind (cost rises before price rises) but then normalises; in falling copper environments, the reverse creates a temporary tailwind. The BF report's gross margin history shows stability despite copper price volatility - confirming the mechanism is effective at the group level. The pass-through is not perfectly symmetrical (some long-term distribution contracts cap annual price adjustments), but the overall copper exposure is assessed as a timing risk rather than a structural margin risk. This is a value-chain competency - the management team has correctly structured the procurement and pricing relationships to minimise commodity exposure</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA6 - Pricing power architecture: specification complexity creates durable premium above commodity tier.</strong> One of the most important value-chain dynamics for Aalberts is the bifurcation within its own Building Technology product range between specification-driven products (where Aalberts has genuine pricing power) and commodity-tier products (where pricing is determined by distribution competition). High-specification products - balanced pressure valves, thermal control units, smart hydronic controls, district heating interface units - are engineered and specified by consultants and system designers who prioritise performance over price; these products carry 25-<strong>40%</strong> gross margin premiums vs commodity equivalents and are resistant to private label substitution because the performance specification is the key selection criterion. Commodity-tier products - standard pipe fittings, basic valve bodies, non-specified connectors - are selected primarily on price and are exposed to distributor private label competition. The EU Building Renovation Directive structurally shifts the addressable market towards specification-driven products (because energy performance mandates require certified high-performance flow control, not commodity fittings), creating a long-term tailwind for Aalberts' high-margin specification range and a secular headwind for its commodity tier. Understanding this product mix within Building Technology is critical for accurate gross margin floor modelling at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The strongest counter-view is that the Building distribution channel weakness is more severe and accelerating faster than the B+ grade implies - specifically, that the combination of distributor consolidation, private label expansion, and DTC digital disruption is creating a structural compression in Building Technology gross margins rather than a cyclical trough. If distributors capture 5-10 percentage points of market share with private-label products over 2025-2030, the Building Technology gross margin structural floor may be 2-3 percentage points below the pre-cycle peak, converting what Watson models as a "cyclical recovery" into a "permanent margin step-down." The DTC threat is also more acute than management's communications suggest: Amazon Professional's UK and German operations are already achieving 15-<strong>20%</strong> market share in specific building supply categories, and their ability to undercut distributor pricing while offering next-day delivery is not easily defensible for a brand that sells primarily through third-party merchants. Watson's response: the private label and DTC competition is primarily in the commodity/mid-tier specification tier; the high-specification balanced pressure, thermal regulation, and smart-controls ranges - where Aalberts' proprietary IP is concentrated and where the EU renovation mandate creates demand - are less exposed to substitution. The structural impairment risk exists in the commodity tier but not in the specification tier. This distinction will be the primary E11 investigation at ESA, specifically the product mix decomposition between specification-premium and commodity-tier revenues</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) At ESA, segment the Building Technology revenue mix between specification-premium products (resistant to private label) and commodity-tier products (exposed to private label/DTC disruption) - this decomposition is required to accurately model the Building Technology structural margin floor. The target decomposition is a product-line level revenue split that identifies what percentage of Building Technology revenue is in categories where specification complexity creates a durable brand premium vs categories where Aalberts is exposed to private-label and DTC pricing pressure. Without this decomposition, the gross margin trajectory for Building Technology cannot be modelled with sufficient precision to distinguish cyclical recovery from structural impairment. (2) At ESA, assess Aalberts' DTC platform investment progress (Amazon Professional / ManoMano channel) and whether it is gaining measurable installer penetration vs the incumbent distributor channel as a defensive moat-maintenance investment. Specifically, obtain investor relations or industry data on the number of direct installer accounts established since the "One Aalberts" DTC initiative launched, the revenue contribution from DTC vs traditional wholesale channels, and the margin profile differential between DTC and wholesale-sourced Building Technology sales. (3) At ESA, quantify the Industrial Technology value-chain position more precisely: the BF report benchmarks Industrial Technology at Stage 3 Specialised Engineering, but the degree of lock-in varies significantly across aerospace (maximum lock-in; Nadcap-qualified; 30-50 year programme lifetime), automotive (medium lock-in; multi-year SOP contracts but with annual renegotiation), and general industrial machinery (lower lock-in; competitive bidding possible). A revenue-weighted lock-in score for Industrial Technology would allow a more precise E11 grade at ESA that distinguishes the sub-segment dynamics</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 4 verdict: C+ — light first-pass only at Triaging. Known risks are material but manageable within the Triaging-stage risk framework. No individually disqualifying risk identified. Deep element work (E15 invalidating attributes, E16 seek-to-avoid attributes, E17-E19 risk architecture) is ESA/Deep-Dive scope and is formally deferred. Key risks flagged for ESA prioritisation: (1) ASML concentration — &gt;<strong>50%</strong> of Semicon segment = ~<strong>8%</strong> group revenue; single-driver risk already captured in E8 Negative Guardrail 1; (2) European construction cycle timing — Building Technology margin recovery is timing-uncertain, creating bear-case TSR range dispersion; (3) Stichting governance ceiling — caps conviction mechanism, limits external value-realisation catalysts; (4) GVT/Paulo integration execution — dual acquisition integration during leadership transition is an elevated risk window. Pre-mortem ACH (per Risks report §9): YES profile narrowly beats FALSE FRIEND (3 vs 4 hard inconsistencies) — manageable at Triaging, requiring formal treatment at ESA. Bear case tail (Jefferies €<strong>20</strong>, Bernstein €<strong>21.80</strong>, Morgan Stanley €<strong>27.80</strong> — representing -<strong>48%</strong>, -<strong>44%</strong>, -<strong>28%</strong> vs current price) is real but requires simultaneous combination of multiple adverse scenarios (semicon delivery failure + Building construction collapse + M&amp;A integration failure) to materialise; single-factor adverse scenarios produce more moderate outcomes.</div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR]</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not yet in scope at Triaging. Optionality assessment (E20 — option value in non-core assets, unrealised thematic adjacencies, upside tail scenarios) deferred to ESA. Provisional note: residual option value may exist in the Industrial Technology platform as a potential standalone pure-play spin-off candidate if Thrive 2030 segment clarity is sufficient — but this is speculative and will not be assessed before ESA-stage business quality work (E9/E10) is complete.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables, 3-scenario TSR models with explicit position-sizing implications) first appears at Early-Stage Assessment. All Pillar III work is deferred.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">5 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Watson’s recommendation is to progress Aalberts Industries (AALB-NL) to Early-Stage Assessment with medium conviction. The Triaging analysis has established a credible multi-pillar investment thesis anchored in six concurrent genuine change forces (E1 B+), exceptional thematic alignment across three Tier-1 structural growth mandates (E5 A-), and a strong business quality foundation demonstrated by <strong>20.9%</strong> RONIC across a 45-year compounding track record (E11 B+). Change forces are verifiable and operational: Thrive 2030 transformation has executed approximately €<strong>400m</strong> of confirmed divestments in FY25; Semiconductor Technology Q1 2026 organic growth of +<strong>2.8%</strong> is KQ-confirmed as authentic pipeline fill rather than channel pull-forward; EU decarbonisation tailwind at <strong>51%</strong> of Building Technology revenue is structurally entrenched by the EU Building Renovation Wave regulation. These strengths are counterbalanced by three structural constraints that limit near-term conviction: portfolio complexity (E7 D, conglomerate discount 33-<strong>40%</strong>), persistent negative sell-side revision momentum (MR2 C, L12M net revisions -21), and Stichting Prioriteit governance overhang that prevents Watson assigning conviction higher than B without operational delivery evidence. Medium conviction at Triaging is the appropriate calibration: the change forces are real and business quality is exceptional, but the delivery gap between Thrive 2030 aspirations and validated run-rate margin performance requires one to two additional results cycles before ESA can be initiated at MEDIUM-HIGH confidence. The primary gating condition for ESA initiation is Q2-Q3 2026 Semiconductor Technology EBITA delivery: Semicon EBITA sustaining above the €<strong>18m</strong> threshold (the sustainable run-rate implied by the Q1 2026 beat) would confirm a pulse-to-trend inflection in the highest-multiple segment, providing the single most important near-term validation signal in the thesis. Building Technology recovery trajectory is a secondary watchpoint: any signal that EU residential specification volumes are recovering toward FY23 peak levels in H2 2026 would strengthen E1 RA3 credibility from MEDIUM to HIGH and reinforce the multiple-expansion components embedded in E8 setup types 1 and 4. Watson's conviction ceiling at MEDIUM reflects not a view on business quality, which is exceptional, but on the pace of evidence accumulation: the market will re-rate Aalberts when margin delivery is visible over successive quarters, and ESA is the appropriate vehicle for building the full Pillar III position-management architecture required to capture that re-rating at scale.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to ESA; conviction qualifier: MEDIUM (conditional on Q2-Q3 2026 Semiconductor Technology delivery confirmation)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conviction basis summary:</strong> The weight of evidence across E1 (B+, six genuine concurrent change forces), E5 (A-, three Tier-1 structural mandates with direct Semicon and Buildings revenue exposure), E7 (D, structural complexity as the primary conviction constraint), E8 (B-, self-help compounder and quality recovery setups as strongest fit), and E11 (B+, exceptional competitive insulation and RONIC outlier) supports progression to ESA. The missing piece is one to two quarters of verified operational delivery on the five-lever margin bridge, particularly Semiconductor Technology organic growth sustainability above the Q1 2026 run-rate; the six change forces are genuine but the margin landing zone (16.0-<strong>16.5%</strong> FY27-28) remains unverified against the aspirational Thrive 2030 <strong>18%</strong> ceiling</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If progressing: next-stage actions:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>(1) Q2-Q3 2026 binary test (primary gate).</strong> Monitor Semiconductor Technology organic growth and EBITA in Q2 2026 results, expected August 2026. Threshold for progression: Semicon EBITA above €<strong>18m</strong> on a run-rate basis confirms pulse-to-trend inflection; below €<strong>15m</strong> triggers formal E1 RA4 credibility downgrade and pauses ESA initiation. Building Technology secondary watchpoint: any recovery signal in EU residential specification cycle in Q2 management commentary strengthens E1 RA3 credibility from MEDIUM to HIGH</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>(2) ESA kick-off: target late-August 2026.</strong> Watson to initiate ESA memo framework immediately post-Q2 results if the binary test is met. ESA scope includes: full E2/E3 TSR scenario modelling (Base 16.0-<strong>16.5%</strong>, Bull <strong>18%</strong>, Bear 13-<strong>14%</strong>); E9 CEO quality deep-dive on Simonetta Grundfos track record quantification; E10 business quality assessment covering moat depth and pricing power granularity by segment; E15-E19 risk architecture formalisation; and E11 deep-dive on Building Technology distribution channel dynamics covering structural versus cyclical decomposition of the FY24-25 volume shortfall</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>(3) ESA KQ research queries (Watson-initiated).</strong> Three queries to open at ESA initiation: (a) Building Technology channel dynamics quantification, specifically the specification-premium versus commodity-tier revenue split and private label penetration trajectory in Dutch and German residential markets; (b) GVT/SE Asia integration early performance assessment covering H1 2026 revenue and EBITA contribution versus the acquisition case model; (c) Simonetta transformation track record research including Grundfos COO and Industry segment delivery record on comparable restructuring mandates with measurable output metrics</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>(4) Stichting Prioriteit monitoring (standing trigger).</strong> Any announcement contradicting the historical benign pattern should be flagged as an immediate case-reassessment event ahead of ESA. Specific triggers include: blocking shareholder resolutions with institutional majority support; contesting board appointments endorsed by major holders; or signalling resistance to Thrive 2030 transformation timelines. A single confirmed adverse event caps the Watson conviction ceiling at C and requires a formal re-adjudication of E7 governance discount and its degree of operational resolvability</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>If parking: reassessment criteria.</strong> Parking is not recommended at the current juncture. A park decision would require two simultaneous adverse signals: (1) Q2 2026 Semicon EBITA materially below Q1 2026 run-rate, confirming the pulse thesis rather than trend inflection; combined with (2) a downward guidance signal on Building Technology recovery timing from management, or an unexpected Stichting adverse event signalling a structural shift in governance posture. Single-factor adverse events are not sufficient to park; the structural quality of the business and the multi-lever margin bridge mean adverse signals on one element should trigger enhanced monitoring rather than full exit from the research pipeline</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to update the AALB-NL Watson Log entry with: ESA binary test trigger parameters (Semicon Q2 EBITA thresholds: above €<strong>18m</strong> proceed, below €<strong>15m</strong> pause); ESA kick-off date target (late-August 2026); and a note that metadata.json stage should NOT be updated until ESA is formally initiated post-Q2 data; (2) Watson to run generate_qc_audit.py immediately post-production to confirm zero HARD FAILs before filing this memo as final; if any HARD FAILs persist after initial QC run, fix and re-run before the memo is considered closed</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Report</th><th>Type</th><th>Tag</th><th>Date</th></tr></thead><tbody><tr><td>AALB-NL — Change Forces (CF): <code>41-change-forces/highlighted.md</code></td><td>Family report</td><td>[C]</td><td>Jun-26</td></tr><tr><td>AALB-NL — Business Foundations (BF): <code>42-business-foundations/highlighted.md</code></td><td>Family report</td><td>[C]</td><td>Jun-26</td></tr><tr><td>AALB-NL — Leadership Foundations (LF): <code>43-leadership-foundations/highlighted.md</code></td><td>Family report</td><td>[C]</td><td>Jun-26</td></tr><tr><td>AALB-NL — Risks (RK): <code>44-risks/highlighted.md</code> (partial: lines 1-997 of 2337; exec summary + §1-§9 absorbed; §10-§23 unread)</td><td>Family report</td><td>[C]</td><td>Jun-26</td></tr><tr><td>KQ: Thrive 2030 Margin Bridge — <code>A-J-memo/KQ-thrive2030-bridge-2026-06-05.md</code></td><td>IA-initiated KQ</td><td>[C]</td><td>05-Jun-26</td></tr><tr><td>KQ: False Friend Decomposition — <code>A-J-memo/KQ-falsefriend-decomp-2026-06-05.md</code></td><td>IA-initiated KQ</td><td>[C]</td><td>05-Jun-26</td></tr><tr><td>KQ: Stichting Prioriteit Governance — <code>A-J-memo/KQ-stichting-governance-2026-06-05.md</code></td><td>IA-initiated KQ</td><td>[C]</td><td>05-Jun-26</td></tr><tr><td>ROKO.B-SE — Change Forces (CF-5): <code>ROKO-CF-5-highlighted.md</code> (cohort peer calibration)</td><td>Cohort CF</td><td>[C]</td><td>Jun-26</td></tr><tr><td>Master dashboard — <code>data/prices.json</code></td><td>Data file</td><td>[C]</td><td>11-Jun-26</td></tr></tbody></table>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>1. <strong>Risks report partial read.</strong> The RK highlighted.md (2,337 lines) was read to line 997 due to Read tool file-size constraints. The executive summary, §1 (no short sellers), §2 (short interest), §3 (bearish sell-side), §4 (accounting/governance), §5 (online commentary), §7 (historical pattern), §9 (risk assessment) and §10 (failure modes 1-2 only) were fully absorbed. Unread: §10 failure modes 3-10, §12 meta-analysis, §14 Watson verdict, §15-§23 FX analysis. The FX analysis sections (§15-§23) are assessed as non-load-bearing for Triaging stage: the CF report confirmed FX is immaterial (natural FX hedge; <strong>10%</strong> adverse EUR/USD = €<strong>0</strong>-1.7m EPS impact). Flagged as a process note; not assessed as a material gap for Triaging-stage analysis. 2. <strong>Cohort calibration limitation.</strong> cohort has only 2 members (AALB-NL and ROKO.B-SE). ROKO.B-SE (Swedish serial acquirer; <strong>21%</strong> EBITA margin; 6-year history; B2C <strong>34%</strong>; IPO March 2025, trading ~<strong>91%</strong> below IPO price of SEK 2,048) is structurally different from Aalberts in model, scale, geography, and history. ROKO has been used as a compounder-discipline benchmark (EBITA margins, M&amp;A discipline) but sector peers (Bodycote, Geberit, Spirax-Sarco, Atlas Copco) have been used for primary valuation and grading calibration. 3. <strong>Price data currency.</strong> Live price data (€<strong>38.66</strong>, 52-week range, moving averages) sourced from prices.json dated 11-Jun-26. This memo is written 13-Jun-26 — a 2-day price lag is immaterial for Triaging-stage analysis. 4. <strong>Superseded memo.</strong> The prior Triaging memo (AALB-AMS-Triaging-A&amp;J-Memo-2026-06-12) was archived as SUPERSEDED-2026-06-13 before this memo was produced. This memo was written from scratch from source research without consulting the prior Triaging memo, per standing instruction. 5. <strong>Thrive 2030 target calibration.</strong> The KQ-thrive2030-bridge analysis conclusively established that the <strong>18%</strong> EBITA Thrive 2030 target is an aspirational ceiling, not a base case. Watson's base-case landing zone is 16.0-<strong>16.5%</strong> EBITA by FY27-28 (5-lever bridge: divestments, restructuring, semicon cycle, Building recovery, GVT/Paulo integration delivering a combined +260-<strong>370bps</strong> from the <strong>13.2%</strong> FY25 trough). The <strong>18%</strong> bull case requires simultaneous: (a) full semicon cycle benefit, (b) European Building recovery to pre-recession volumes, (c) ≥<strong>25%</strong> organic volume leverage on the fixed cost base. This calibration is load-bearing for E1 credibility grades, E2/E3 scenario framing, and the ESA TSR model. 6. <strong>FCF peak recognition.</strong> FY25 FCF of €<strong>361m</strong> is assessed as a trough-cycle peak driven by exceptional inventory reduction (€<strong>155m</strong>, per LF report). Normalised FCF on volume recovery is €<strong>280</strong>-300m (KQ-falsefriend analysis: inventory rebuild headwind of €<strong>50</strong>-80m on volume recovery). This distinction is relevant for capital allocation / balance sheet capacity assessments at ESA. 7. <strong>FUSE truncation during production.</strong> The Edit tool truncated this file at the E11 counter-view during the expansion pass. The file was repaired using bash/Python append. All sections verified complete post-repair.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Memo produced by Watson (Investment Analyst Role). Watson's verdict: Progress to ESA. Conviction: MEDIUM.</div><div class="lead-prose">Date: 13-Jun-26 | Research base: CF (full) / BF (full) / LF (full) / RK (partial) / 3×KQ (full) / ROKO-CF (full) / prices.json (11-Jun-26)</div></div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/AALB-NL-triaging-self-review-debrief-2026-06-13.md</code> (to be produced in Phase 4).</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"C","label":"Sell-side earnings momentum"},"MR3":{"grade":"A","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"B","label":"Case momentum"},"Group 2":{"grade":"D","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"}};</script>
+</body>
+</html>

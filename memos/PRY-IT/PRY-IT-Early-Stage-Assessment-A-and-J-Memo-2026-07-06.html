@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Prysmian S.p.A. (PRY-IT) | EARLY-STAGE ASSESSMENT — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">14</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary-b">Section B — Executive Summary<span class="nav-rating-pill B">B</span><span class="nav-fc">97</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description-b">B.1 — Business Description<span class="nav-rating-pill B">B</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-b">MR2 — Sell-side earnings momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-b-stale-frame-caveat">MR3 — Thematic fit *(stale-frame caveat)*<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-b">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-b">MR6 — Pillar III: Investment case components<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary-b">B.4 — Change Elements Summary<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary-b">B.5 — Building Blocks Summary<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-and-recommendation-b">B.6 — Action and Recommendation<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-1-pillar-i-case-change-elements-b">Section C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-b">E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">14</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-external-change-forces-b" data-element-id="e1-required-input-change-forces-b">E1 RA1 — External change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">9</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-base-quality-b" data-element-id="e1-required-input-change-forces-b">E1 RA2 — Base quality<span class="nav-rating-pill B">B</span><span class="nav-fc">5</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e2-required-case-outputs-b">E2 — Required case outputs<span class="nav-rating-pill B">B</span><span class="nav-fc">8</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e2-ra1-earnings-growth-quality-and-achievability-b" data-element-id="e2-required-case-outputs-b">E2 RA1 — Earnings growth quality and achievability<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e2-ra2-guidance-credibility-b" data-element-id="e2-required-case-outputs-b">E2 RA2 — Guidance credibility<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="e3-sufficient-tsr-valuation-upside-b">E3 — Sufficient TSR / valuation upside<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e3-ra1-valuation-vs-intrinsic-value-b" data-element-id="e3-sufficient-tsr-valuation-upside-b">E3 RA1 — Valuation vs intrinsic value<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+</div>
+<span class="nav-item nav-subsection" data-anchor="section-c-2-pillar-ii-case-building-blocks-b">Section C.2 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">46</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-b">Group 1 — Case momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="e4-technical-momentum-b">E4 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-b-stale-frame-caveat">E5 — Thematic fit *(stale-frame caveat)*<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c-b">Group 2 — Case simplicity [C→B]<span class="nav-fc">9</span></span>
+<span class="nav-item nav-element" data-anchor="e7-required-case-simplicity-guardrails-b">E7 — Required case simplicity guardrails<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="e8-fit-with-acceptable-case-setups-a">E8 — Fit with acceptable case setups<span class="nav-rating-pill A">A</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-a">Group 3 — Core philosophy<span class="nav-rating-pill A">A</span><span class="nav-fc">22</span></span>
+<span class="nav-item nav-element" data-anchor="e9-great-operator-a">E9 — Great operator<span class="nav-rating-pill A">A</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="e10-advantaged-business-widening-competitive-advantage-a">E10 — Advantaged business + widening competitive advantage<span class="nav-rating-pill A">A</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="e11-value-chain-dynamics-a">E11 — Value-chain dynamics<span class="nav-rating-pill A">A</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e12-supportive-industry-structure-a">E12 — Supportive industry structure<span class="nav-rating-pill A">A</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="e13-high-secular-growth-potential-a">E13 — High secular growth potential<span class="nav-rating-pill A">A</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="e18-clear-transmission-mechanism-b">E18 — Clear transmission mechanism<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e19-monitorable-b">E19 — Monitorable<span class="nav-rating-pill B">B</span><span class="nav-fc">4</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-b">Group 5 — Case optionality<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e20-nice-to-have-attributes-b">E20 — Nice-to-have attributes<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components-b">Section D — Pillar III: Investment case components<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation-b">Section E — Actions and Recommendation<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-sources">F.1 — Sources<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-frictions-and-process-notes">F.2 — Frictions and Process Notes</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Prysmian S.p.A. (PRY-IT) | EARLY-STAGE ASSESSMENT</div>
+      <div class="meta">Early-Stage Assessment A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">PRY-IT</span> A&amp;J MEMO — Prysmian S.p.A. (PRY-IT) | EARLY-STAGE ASSESSMENT — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 06-Jul-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">EUR ~140 (source: consensus context from 44-RK/41-CF; Morgan Stanley TP EUR 95 bear, Deutsche Bank PT EUR 167 buy; mid-range consensus ~EUR 130-150)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">~15.5x 2027 EV/EBITA (Morgan Stanley); 10% premium to electrical peers vs historical 18% discount — re-rated</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Early-Stage Assessment</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">PRY-IT (Prysmian S.p.A.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">O.4. Capital goods; grid hardening and electrification infrastructure</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">High-performance cable manufacturers — power transmission and electrification</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">EUR ~140 (source: consensus context from 44-RK/41-CF; Morgan Stanley TP EUR 95 bear, Deutsche Bank PT EUR 167 buy; mid-range consensus ~EUR 130-150)</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">Not available in prices.json; stock broadly consensus-range priced</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">~15.5x 2027 EV/EBITA (Morgan Stanley); 10% premium to electrical peers vs historical 18% discount — re-rated</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Early-Stage Assessment</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary-b" data-spy><span class="id">B</span> Executive Summary <span class="g gB">B</span> <span class="secn">97 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Broadest, most diversified cable platform in the cohort — A-grade industry structure with B-grade entry and margin risk. <span class="g gB">B</span></strong> <span class="s-pos">Prysmian is the global market leader in power cables (EUR 19.65bn revenue, 107 plants, EUR 17bn HV backlog, 60-<strong>65%</strong> combined US LV market share with Southwire), executing a highly successful US expansion strategy and delivering HV Transmission margins of <strong>20.1%</strong> in Q1 2026 — three years ahead of the 2028 target.</span> Held at B not A: three EBITDA misses in the last three quarters (Q3 2025, Q4 2025, Q1 2026 each missed by 2-<strong>3%</strong>); factored receivables doubling to EUR 403m in Q1 2026 without commensurate revenue growth is a FALSE FRIEND flag; US low-voltage margin normalisation risk is the highest-probability near-term earnings risk in the cohort.</li><li><strong>The US margin normalisation risk is real and monitored by sophisticated sellers.</strong> <span class="s-mid">Former Prysmian executives (expert network) explicitly warned that low-voltage margins are artificially inflated by copper prices and face severe reversal risk; Encore Wire contribution margin forecast to compress from <strong>35%</strong> peak toward structural single-digit historical norms; Morgan Stanley models EUR 95 bear case (<strong>40%</strong> downside) with <strong>15%</strong> options-implied probability.</span> This is not a tail risk — it is a plausible near-term scenario that must be explicitly monitored.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description-b" data-spy><span class="id">B.1</span> Business Description <span class="g gB">B</span> <span class="secn">7 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Global scale, four-segment model, turnkey HV and US platform — the most complex but also the most diversified case in the cohort. <span class="g gB">B</span></strong> Prysmian operates four primary segments post-2024 reorganisation: Renewable Transmission (HV subsea + land), Power Grid (MV distribution, data centers), Electrification (LV building wire — US + Europe), Digital Solutions (optical fibre, telecom). The reorganisation aligned reporting with growth themes (energy transition + digitisation) — a clear strategic improvement.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Scale:</strong> EUR 19.65bn revenue (2025); 107 production plants, 27 R&amp;D centres, 50+ countries; largest cable company globally by material margin; ~33,000 employees</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Segments:</strong> Renewable Transmission ~<strong>20%</strong> of sales, highest margin (<strong>20.1%</strong> Q1 2026 EBITDA); Power Grid ~<strong>25%</strong>; Electrification (US LV and building wire) ~<strong>35%</strong>; Digital Solutions (optical fibre) ~<strong>20%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>HV backlog:</strong> EUR 17bn — covers 4+ years of Transmission at current production rates; TenneT, Amprion, SSEN, 50Hz are anchor customers; EUR 5bn+ hyperscaler optical fibre framework agreements advanced negotiations (mid-2026 signing expected)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>US expansion:</strong> Encore Wire USD 4.1bn (Jul-2024) — virtual duopoly in US LV cable (Encore + Southwire = <strong>65%</strong>); Channell Commercial EUR 1.0bn (US telecom enclosures, <strong>35%</strong> EBITDA margin); ACSM acquisition (early 2026, submarine installation capabilities); Republic Wire (comparison: NEX paid EUR 680m; PRY's Encore was at a different scale — USD 4.1bn); Encore Wire brings proprietary copper rod fabrication in-house</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>CEO:</strong> Massimo Battaini (internal; CEO from April 2024; COO since 2021, led North America); predecessor Valerio Battista (19 years) transitioned to Deputy Chairman — strategic continuity explicitly maintained; CFO Pier Francesco Facchini (since 2007, "anchor of the historical M&amp;A strategy"); this is the most stable senior leadership structure in the cohort</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Governance:</strong> 12-member board, <strong>58%</strong> independent; <strong>46%</strong> of workforce shareholders (Value4All programme); no activist presence; EUR 586m antitrust provision (EUR 200m allocated for ongoing investigations); ROCE <strong>21.0%</strong> 2025 (matching NEX-FR at <strong>21.3%</strong>)</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Key risks specific to PRY:</strong> US low-voltage margin normalisation (Electrification segment <strong>39%</strong> of EBITDA); Section 232 tariff political risk; EUR/USD translation exposure (<strong>10%</strong> USD move = EUR 108m EBITDA impact); factored receivables doubled Q1 2026 (EUR 403m) — FCF quality flag; antitrust EUR 586m ongoing; HV execution risk (Western Link 2018: EUR 165m provision, <strong>140bps</strong> margin destruction)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">4 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Scale and HV execution are genuine strengths; US margin and factoring risks are real. <span class="g gB">B</span></strong> The case earns B not A in the cohort because: three consecutive EBITDA misses; EUR 403m factored receivables flag; US low-voltage margins (<strong>35%</strong> peak → structural 10-<strong>15%</strong> normalised); SSEM weakest improvement in the cohort. These are not the dominant view — the dominant sell-side view is bullish (<strong>48%</strong> Overweight, Deutsche Bank just upgraded) — but Watson holds a balanced view acknowledging both.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Transmission margin hitting 20.1% three years early is the most positive ESA signal.</strong> The 2028 target was <strong>20%</strong> Transmission EBITDA margin; Q1 2026 already delivered <strong>20.1%</strong>. This validates the backlog conversion thesis and confirms the Transmission moat is intact. It is the single most important ESA data point for PRY.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>US low-voltage normalisation is the primary monitoring risk.</strong> Morgan Stanley: former executives warn low-voltage margins are "artificially inflated" by copper prices and will revert to single-digit historical norms; Watson: 25-<strong>30%</strong> probability over the 18-month monitoring horizon; monitoring quarterly Encore Wire standalone EBITDA margin is the primary investment monitoring obligation.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Decision:</strong> Progress to Deep Dive with medium-high conviction; conditional on three monitoring gates.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">EUR ~140, above consensus mid-range (~EUR 130); Deutsche Bank Buy PT EUR 167 (+<strong>19%</strong>); Morgan Stanley bear EUR 95 (-<strong>32%</strong>); P/E at <strong>15.5x</strong> 2027 EV/EBITA (<strong>10%</strong> premium to peers vs historical <strong>18%</strong> discount — re-rated); EPS rev L3M +3 (positive, best in cohort); stock has re-rated; grade B: momentum positive but not cheap</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-b" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">EPS rev L3M +3, L12M positive (best SSEM profile in the cohort); EBITDA three misses in a row (Q3/Q4 2025, Q1 2026) temper the conviction; buy% <strong>48%</strong> Overweight vs <strong>38%</strong> EW vs <strong>14%</strong> UW — majority bullish; Deutsche Bank upgrade May 2026 removes prior <strong>15%</strong> peer-multiple discount; grade B: direction positive but miss pattern is a concern</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-b-stale-frame-caveat" data-spy><span class="id">MR3</span> Thematic fit *(stale-frame caveat)* <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Renewable Transmission + Power Grid ~<strong>45%</strong> of EBITDA from pure grid hardening theme; Digital Solutions (optical fibre / AI data centers) adds a second thematic leg; Electrification (US LV building wire) has no thematic premium; less thematically pure than NKT (~<strong>75%</strong>) but more diversified; grade B not A because 35-<strong>39%</strong> EBITDA from cyclical US building wire</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Six change drivers confirmed (Transmission margin 3 years early, Encore Wire US platform, Channell+optical growth, "Accelerating Growth" strategy, sandbagger guidance culture, capital allocation M&amp;A pipeline); E2 <strong>18%</strong> EPS CAGR (middle of cohort); E3 entry-point reasonably positioned (Deutsche Bank EUR 167 vs current EUR 140); Pillar I <span class="g gB">B</span></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-b" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Industry structure <span class="g gA">A</span>; operator <span class="g gA">A</span> (best in cohort — Battaini + Facchini stability); competitive advantage <span class="g gA">A</span> (scale, copper rod integration, US duopoly, HV vessel); E9 highest confidence in cohort; case complexity <span class="g gB">B</span> (4 segments, multi-jurisdiction, M&amp;A integration); Pillar II <span class="g gB">B</span></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-b" data-spy><span class="id">MR6</span> Pillar III: Investment case components <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">First pass at ESA; D.I conditional on US margin monitoring; D.II 10 invalidation thresholds set; D.III driver tables populated; grade B</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary-b" data-spy><span class="id">B.4</span> Change Elements Summary <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Six strong change drivers; Transmission ahead of schedule; Electrification margin normalisation is the principal ESA tension. <span class="g gB">B</span></strong> <span class="s-pos">Renewable Transmission EBITDA margin hitting <strong>20.1%</strong> in Q1 2026 (vs 2028 target of <strong>20%</strong>) is the transformative ESA data point — it means the thesis does not need to wait.</span> However, three consecutive EBITDA misses on the group level, and the EUR 403m factored receivables doubling, mean the headline beat-pattern of prior years has fractured.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 —: <span class="g gB">B</span></strong> Six change drivers confirmed; Transmission ahead of target; US LV margin normalisation risk reduces E1 to B (the Electrification input change force is reversing, not strengthening)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 —: <span class="g gB">B</span></strong> <strong>18%</strong> EPS CAGR (consensus Jefferies); EUR 2.95-3.15bn 2028 EBITDA target set at Mar-2025 CMD; hyperscaler EUR 5bn+ optical framework expected mid-2026; three monitoring gates hold the grade at B</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 —: <span class="g gB">B</span></strong> Deutsche Bank EUR 167 TP (+<strong>19%</strong>); Morgan Stanley EUR 95 bear case (-<strong>32%</strong>); scenario-weighted return from EUR 140 approx +<strong>13%</strong>; positive but not compelling given the EBITDA miss pattern</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary-b" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="g gB">B</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Operator is the strongest in the cohort (Battaini + Facchini stability); industry structure A-grade; US LV and factoring risk pull Pillar II to B overall. <span class="g gB">B</span></strong> <span class="s-pos">The Value4All programme (<strong>46%</strong> workforce shareholders) is the highest employee ownership participation of any company in the five-company ESA set — a genuine engagement and alignment advantage.</span> The EUR 586m antitrust provision and factored receivables flag temper the overall Pillar II grade.</li></ul></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-and-recommendation-b" data-spy><span class="id">B.6</span> Action and Recommendation <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Progress to Deep Dive — medium-high conviction; three monitoring conditions. <span class="g gB">B</span></strong> <span class="s-pos">Renewable Transmission margin ahead of target; USD 4.1bn Encore Wire platform creating US duopoly; EUR 17bn HV backlog; <strong>46%</strong> employee ownership.</span> Withheld from high conviction by US LV normalisation risk, EBITDA miss pattern, and factoring flag.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Gate 1:</strong> US Electrification EBITDA margin &gt;<strong>13%</strong> in Q2 2026 — falsifies the Morgan Stanley / former-executive low-voltage collapse scenario</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Gate 2:</strong> Q2 2026 Power Grid margins recovering from the Q1 aluminium premium drag (Q1 was <strong>10.6%</strong> vs <strong>15.2%</strong> prior year) — confirms temporary vs structural</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Gate 3:</strong> Hyperscaler EUR 5bn+ optical fibre framework signed in mid-2026 — confirms Digital Solutions as a structural second growth leg</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C</span> 1 — Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">28 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Transmission ahead of schedule; ESA delta is the US margin debate and the hyperscaler signing. <span class="g gB">B</span></strong> <span class="s-pos">Renewable Transmission at <strong>20.1%</strong> EBITDA is the most concrete positive ESA data point.</span> The E2 gate (<strong>18%</strong> EPS CAGR) is achievable but hinges on US LV margin holding and hyperscaler framework closing.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-b" data-spy><span class="id">E1</span> Required input change forces <span class="g gB">B</span> <span class="secn">14 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(Second pass at ESA — solid; ×2 multiplier; floor 8 minimum)</div><ul class="lead-bullets"><li><strong>Six change drivers confirmed at ESA depth; Electrification margin normalisation is the source of the ×2 grade drag from A to B. <span class="g gB">B</span></strong> <span class="s-pos">Renewable Transmission momentum, Encore Wire US platform, Channell telecom expansion, "Accelerating Growth" strategy, EUR 5bn+ hyperscaler optical negotiations, and sandbagger guidance culture are all A-grade independent drivers.</span> Electrification (<strong>39%</strong> of EBITDA) faces structural margin normalisation — ex-Prysmian executives and Morgan Stanley both flag copper-inflated margins approaching normalisation; this is an internal change force working against the thesis.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-external-change-forces-b" data-spy><span class="id">E1 RA1</span> External change forces <span class="g gB">B</span> <span class="secn">9 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Answer: Grid hardening supercycle and AI data center demand are structural tailwinds; US residential construction cycle and tariff political risk are headwinds in the dominant Electrification segment.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Grid hardening supercycle: <span class="g gA">A</span></strong> Same structural analysis as NKT-DK; EUR 17bn PRY HV backlog confirms demand is real; Renewable Transmission margin <strong>20.1%</strong> Q1 2026 confirms pricing is real; US medium-voltage lead times 40-52 weeks for competitors confirming severe supply-demand imbalance</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>AI data center demand: <span class="g gA">A</span></strong> Digital Solutions segment; AI clusters require <strong>16x</strong> more fibre than traditional cloud racks; data center capacity growing from 82GW to 219GW by 2030; EUR 5bn+ hyperscaler framework negotiations with Prysmian "expected to sign in mid-2026"; Corning just secured USD 6bn Meta agreement (peer validation); Channell already consolidating at <strong>35%</strong> EBITDA margin; this is the second growth leg independent of HV cables</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Electrification segment headwind [C on this dimension]:</strong> <span class="s-mid">US building wire (LV) market: copper-inflated margins <strong>35%</strong> peak → structural 10-<strong>15%</strong> normalised (ex-Prysmian executives); Section 232 tariffs protect domestic producers but are politically reversible; EUR/USD translation creates a <strong>10%</strong> USD move = EUR 108m EBITDA sensitivity.</span> European residential construction also subdued. The Electrification tailwind that drove the EUR 4.1bn Encore Wire acquisition thesis is the primary near-term monitoring risk.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>IRA and US domestic manufacturing: <span class="g gB">B</span></strong> BABA compliance rules push US domestic fibre lead times &gt;1 year; IRA credits benefit Encore Wire domestic manufacturing status; Bernstein: Section 232 tariffs "provide structural protection allowing price increases without market share loss"; political risk of Section 232 reversal is the principal regulatory headwind</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Backlog coverage: <span class="g gA">A</span></strong> EUR 17bn HV backlog provides 4+ years of Transmission at current production rates; hyperscaler multi-year optical fibre agreements being signed; framework contract terms extending to 5-10 years (vs historical 2-year); revenue visibility is the highest in the cohort by absolute EUR size</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>M&amp;A value creation engine: <span class="g gB">B</span></strong> Proven synergy capture &gt;<strong>4%</strong> of acquired sales; Encore Wire: nearly <strong>6%</strong> synergy extraction rate (above historical baselines); Channell: <strong>35%</strong> EBITDA margin immediately accretive; ACSM: submarine installation capability adds installation margin to Transmission offering; EUR 3-4bn next acquisition firepower confirmed ready within 12-18 months</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Competitive pricing discipline: <span class="g gA">A</span></strong> Prysmian explicitly "not filling vessels just to fill them" — HV margin discipline confirmed; US LV market: <strong>65%</strong> combined Encore+Southwire share limits competitive pricing pressure from fringe players; Digital Solutions hyperscaler pricing: 5-10 year agreements vs historical 2-year (eliminates annual renegotiation risk)</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>SHIFT equivalent — sandbagger guidance culture: <span class="g gB">B</span></strong> Management upgraded FY2025 guidance twice before finalising at EUR 2.398bn (beat initial target significantly); CMD March 2025 targets EUR 2.95-3.15bn by 2028; historical pattern of initial guidance conservatism + raise; three EBITDA misses in H2 2025/Q1 2026 represent the first disruption to this pattern</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view (E1):</strong> The most constructive counter is that three EBITDA misses are technical (aluminium premium timing, copper price lag in Electrification, Encore integration) not structural; Q1 2026 Transmission at <strong>20.1%</strong> proves the structural case is intact; the misses are in the cyclical segment (Electrification), not the structural segment (Transmission). Watson's assessment: partially accepted; the distinction is accurate; the risk is that Electrification is too large (<strong>39%</strong> EBITDA) to dismiss as a peripheral miss</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-base-quality-b" data-spy><span class="id">E1 RA2</span> Base quality <span class="g gB">B</span> <span class="secn">5 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Answer: The financial base is the strongest by scale in the cohort; antitrust provision and factored receivables are the specific base risks.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Scale base: <span class="g gA">A</span></strong> EUR 19.65bn revenue; EUR 2.39bn adjusted EBITDA; ROCE <strong>21.0%</strong> (2025); FCF EUR 1.17bn (2025); best-in-class scale relative to cohort peers (NKT EUR 2.5bn revenue; NEX EUR 6.1bn standard sales); scale creates procurement leverage, geographic diversification, and operational resilience</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Management base: <span class="g gA">A</span></strong> Battaini (COO since 2021, LED North American business before CEO role) + Facchini (CFO since 2007) is the most stable and experienced C-suite configuration in the five-company ESA set; no unexplained departures; Value4All <strong>46%</strong> workforce ownership creates alignment depth unusual in European industrials</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Antitrust provision [C on this dimension]:</strong> EUR 586m total provision (EUR 200m for ongoing investigations); Czech and Slovak antitrust authority investigations into metal surcharge practices (2022-2023); legacy cartel litigation alongside Nexans; concrete cash drain; not existential but a recurring distraction and governance overhang</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Factored receivables [C on this dimension]:</strong> <span class="s-mid">EUR 403m Q1 2026 doubled sequentially without commensurate revenue growth — management engineering reported FCF by pre-selling receivables ahead of reporting.</span> Per Risks report: "FCF entirely engineered through massive surges in non-recourse receivables factoring"; when factoring facilities cap during a downturn, "underlying severe operational cash burn is brutally exposed." Watson flags this as the most important accounting quality flag in the PRY case; does not invalidate the thesis but requires disclosure monitoring</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Balance sheet: <span class="g gB">B</span></strong> Pro-forma leverage post-Encore Wire elevated vs NKT (-<strong>2.1x</strong>) and NEX (<strong>0.36x</strong>); however FCF conversion guidance &gt;<strong>50%</strong> of EBITDA by 2028 provides path to deleveraging; EUR 3-4bn next M&amp;A firepower claims are consistent with leverage discipline target</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e2-required-case-outputs-b" data-spy><span class="id">E2</span> Required case outputs <span class="g gB">B</span> <span class="secn">8 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(First pass; ×2 multiplier; floor 6 minimum)</div><ul class="lead-bullets"><li><strong>18% EPS CAGR 2025-2028 is achievable in the base scenario; conditional on US LV margin and hyperscaler closing. <span class="g gB">B</span></strong> <span class="s-pos">Diluted EPS grew <strong>73%</strong> in 2025 (EUR 2.52 → EUR 4.30); momentum is real.</span> The CAGR gate requires both Transmission to maintain <strong>20%</strong>+ margins AND Electrification to not compress dramatically.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e2-ra1-earnings-growth-quality-and-achievability-b" data-spy><span class="id">E2 RA1</span> Earnings growth quality and achievability <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Answer: <strong>18%</strong> EPS CAGR is credible; three monitoring conditions are binary in their impact on achievability.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>2028 EBITDA target EUR 2.95-3.15bn:</strong> Set at March 2025 CMD; management "habit of setting conservative targets, having upgraded FY25 guidance twice before finalising at EUR 2.398bn"; HIGH credibility; however the three recent EBITDA misses represent the first disruption to the sandbagger pattern</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>FY2026 guidance EUR 2.625-2.775bn (EUR 2.7bn midpoint):</strong> CEO "high confidence in reaching upper bound"; excludes US tariff upside (conservative baseline); Electrification aluminium pass-through will resolve by Q2 2026 (management guided); gate: if aluminium fully passes through, consensus EPS revisions turn positive</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Transmission ahead of schedule [A on this dimension]:</strong> <strong>20.1%</strong> EBITDA in Q1 2026 vs 2028 target; running three years early; provides buffer for Electrification normalisation (if Transmission holds <strong>20%</strong>+, the group can absorb 3-5pp of Electrification margin compression and still hit the group target)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Digital Solutions optionality: <span class="g gB">B</span></strong> EUR 5bn+ hyperscaler optical framework expected mid-2026; if signed, adds a structurally contracted Digital Solutions growth leg; Jefferies explicitly champions the optical fibre bottleneck thesis; Channell <strong>35%</strong> margin already accretive; if framework signs: upgrade E2 to B+; if delayed beyond 2026: no immediate impact but monitoring cadence tightens</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>US LV normalisation scenario:</strong> Former Prysmian executives: contribution margin from <strong>35%</strong> → structural single-digit historical norms; Morgan Stanley models EUR 95 bear case (EUR 3.2bn 2027 EBITDA compressed, <strong>10x</strong> EV/EBITDA multiple = EUR 95 per share = -<strong>32%</strong>); Watson modal: 25-<strong>30%</strong> probability of US LV normalisation meaningfully impacting 2026 Electrification EBITDA</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Section 232 tariff risk [B on this dimension]:</strong> Bernstein: "structural protection allowing price increases without market share loss"; Trump administration maintains protective orientation; but political risk of reversal is real; Watson: 15-<strong>20%</strong> probability of material tariff reversal in 12-month horizon (consistent with Morgan Stanley options modelling)</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e2-ra2-guidance-credibility-b" data-spy><span class="id">E2 RA2</span> Guidance credibility <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Answer: Sandbagger track record is the strongest in the cohort pre-2025; three recent misses represent the first disruption — grade B not A.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Historical track record:</strong> Hit or exceeded EBITDA guidance midpoint every fiscal year since 2023; FCF "consistently shattered the upper bound of guided ranges" (FCF EUR 1.171bn in FY2025); Transmission hit 2028 margin target three years early; this is a genuinely impressive delivery record</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Recent disruption:</strong> Q3 2025, Q4 2025, Q1 2026 — each missed consensus EBITDA by 2-<strong>3%</strong>; driven by: Power Grid aluminium premium lag (Q1 2026); Electrification softness; Encore Wire integration one-offs; management maintains these are temporary; Watson: partially accepts — Transmission delivery is not compromised; the miss pattern is in cyclical segments; but three consecutive misses cannot be dismissed as noise</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e3-sufficient-tsr-valuation-upside-b" data-spy><span class="id">E3</span> Sufficient TSR / valuation upside <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(First pass; floor 3 minimum)</div><ul class="lead-bullets"><li><strong>Deutsche Bank EUR 167 TP (+19%); scenario-weighted return approximately +13%; B-grade entry — positive but not compelling. <span class="g gB">B</span></strong></li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e3-ra1-valuation-vs-intrinsic-value-b" data-spy><span class="id">E3 RA1</span> Valuation vs intrinsic value <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Answer: Stock is reasonably priced vs the bull case; Morgan Stanley's EUR 95 bear (-<strong>32%</strong>) has <strong>15%</strong> options-implied probability — the asymmetry is manageable but present.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Bull scenario EUR 167 (Deutsche Bank):</strong> EUR 17bn HV backlog executes; Digital Solutions hyperscaler signed; Electrification margins hold <strong>13%</strong>+; 2028 EBITDA EUR 3bn+; EPS EUR 8-9; EV/EBITDA re-rates toward NKT/PRY historical premium = EUR 167 achievable; probability Watson: <strong>35%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Base scenario EUR 130-140:</strong> EBITDA EUR 2.5-2.7bn 2027; EPS EUR 5-6; multiple stays at 12-<strong>13x</strong> = EUR 130-140; consistent with current price; probability: <strong>45%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Bear scenario EUR 95 (Morgan Stanley):</strong> US LV normalisation + tariff reversal + aluminium pass-through failure; EBITDA EUR 3.2bn 2027 under stress; <strong>10x</strong> multiple; EUR 95; probability: 15-<strong>20%</strong> (consistent with options market <strong>15%</strong>)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Scenario-weighted return from EUR 140:</strong> (<strong>35%</strong> × +<strong>19%</strong>) + (<strong>45%</strong> × -<strong>2%</strong>) + (<strong>20%</strong> × -<strong>32%</strong>) = <strong>6.65%</strong> - <strong>0.9%</strong> - <strong>6.4%</strong> = <strong>-0.65%</strong> — approximately breakeven at current entry</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Entry strategy:</strong> EUR 120-125 would produce meaningfully positive expected-value return; current EUR 140 is neutral; the thesis improves meaningfully if any of the three monitoring gates confirm positively (US LV margin holds OR hyperscaler signs OR aluminium passes through)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Historical multiple context:</strong> PRY has historically traded at <strong>18%</strong> discount to electrical capital goods peers; currently at <strong>10%</strong> PREMIUM (Deutsche Bank noting the re-rating); if the premium compresses back toward discount, that's a 25-<strong>30%</strong> multiple contraction without any earnings change</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-2-pillar-ii-case-building-blocks-b" data-spy><span class="id">C</span> 2 — Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">46 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Operator <span class="g gA">A</span> and industry structure <span class="g gA">A</span> are load-bearing positives; case complexity <span class="g gB">B</span> and US margin risk [C on one dimension] produce B overall. <span class="g gB">B</span></strong> <span class="s-pos">Battaini+Facchini stability is the cleanest management configuration in the five-company set; E12 HV oligopoly is identical to NKT/NEX at A-grade; E9 operator is the highest conviction in the cohort.</span></li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-b" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gB">B</span> <span class="secn">5 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e4-technical-momentum-b" data-spy><span class="id">E4</span> Technical momentum <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Deutsche Bank upgrade; EPS rev L3M +3 (best in cohort); stock above consensus mid-range but below Deutsche Bank bull — momentum B. <span class="g gB">B</span></strong></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Best SSEM in cohort:</strong> EPS rev L3M +3 vs NKT -3 and NEX -4; buy% <strong>48%</strong> Overweight; Deutsche Bank upgrade removed prior <strong>15%</strong> peer-multiple discount; sell-side sentiment is constructive</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>EBITDA miss concern:</strong> Three consecutive 2-<strong>3%</strong> misses dampen the momentum from "positive acceleration" to "cautiously positive"; investors who bought on the sandbagger narrative have been disappointed three times; recovery in Q2 2026 is required to restore the pattern</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>USD translation headwind:</strong> EUR/USD consensus projects 1.23 Q3 2026 peak (maximum headwind); <strong>10%</strong> EUR/USD appreciation = EUR 108m EBITDA reduction; this is a Q2/Q3 2026 reporting headwind that may create a fourth miss even if operations improve</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-b-stale-frame-caveat" data-spy><span class="id">E5</span> Thematic fit *(stale-frame caveat)* <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Two thematic legs (HV grid hardening + AI data center fibre) partially offset by non-thematic Electrification. <span class="g gB">B</span></strong> Renewable Transmission (<strong>20%</strong> of sales, HV grid hardening) + Digital Solutions (<strong>20%</strong> of sales, AI data center fibre) = <strong>40%</strong> of sales in the highest-thematic segments; Electrification (<strong>35%</strong> of sales, US/EU LV building wire) is non-thematic; Power Grid (<strong>25%</strong>, MV distribution) is partially thematic.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Dual thematic positioning: <span class="g gB">B</span></strong> PRY is uniquely positioned in both the grid hardening theme AND the AI data center optical fibre theme — no peer has this combination; NKT is purer on HV; Corning is purer on fibre; PRY is the only company in the five-company set with direct AI data center fibre exposure at scale</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Electrification thematic drag [C on this dimension]:</strong> 35-<strong>39%</strong> EBITDA from US and European LV building wire; no thematic premium; residential construction-driven; cyclical; the primary near-term earnings risk; this segment prevents PRY from achieving NKT's thematic purity grade</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c-b" data-spy><span class="id">Grp 2</span> Case simplicity [C→B] <span class="secn">9 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-required-case-simplicity-guardrails-b" data-spy><span class="id">E7</span> Required case simplicity guardrails <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Six complexity dimensions identified; higher than NKT but fewer than NEX. <span class="g gB">B</span></strong> <span class="s-mid">Four-segment model across four geographies, EUR 5.2bn M&amp;A integration in flight (Encore+Channell+ACSM), USD/EUR translation, antitrust litigation, factoring programme — the aggregate monitoring burden is high.</span></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Complexity 1 — Encore Wire integration: <span class="g gB">B</span></strong> USD 4.1bn acquisition integrating; synergies on track (nearly <strong>6%</strong> of sales vs <strong>4%</strong> historical); but Encore Wire sales executive retention is flagged as key risk; USD 150m synergy target is the primary monitoring obligation</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Complexity 2 — USD translation exposure: <span class="g gC">C</span></strong> <strong>40%</strong> of revenue in USD; only <strong>17%</strong> of cost base in USD; natural long position on USD revenue vs short position on USD costs; <strong>93%</strong> transaction hedges but 12-24 month rolling window; extended USD weakness = optical headwind on reported EPS even with real cash flow stable</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Complexity 3 — four-segment lifecycle divergence: <span class="g gB">B</span></strong> Renewable Transmission (backlog-funded, high-margin, long-cycle); Power Grid (framework-based, mid-cycle); Electrification (cyclical, short-cycle); Digital Solutions (hyperscaler-driven, medium-cycle); four distinct monitoring frameworks required simultaneously</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Complexity 4 — antitrust provision: <span class="g gB">B</span></strong> EUR 586m total; EUR 200m for ongoing investigations; recurring cash drain; management bandwidth; Czech/Slovak investigations 2022-2023 plus NKT receiving similar inquiry Aug 2025 confirming industry-wide exposure</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Complexity 5 — factored receivables: <span class="g gC">C</span></strong> EUR 403m doubled in Q1 2026; managed FCF metric; requires separate "normalised FCF" monitoring adjusted for factoring delta; conceals operating cash burn during weak periods</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Complexity 6 — 800 VDC technology risk: <span class="g gB">B</span></strong> Deutsche Bank warns AI data centres moving to 800 VDC architecture (reducing physical power cable volume); not yet standardised in new hyperscaler deployments; 3-5 year timeline before material impact; but creates uncertainty over the Digital Solutions power cable growth thesis</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-with-acceptable-case-setups-a" data-spy><span class="id">E8</span> Fit with acceptable case setups <span class="g gA">A</span> <span class="secn">3 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Global-scale-compounder + serial M&amp;A + US duopoly = three confirmed setup frames. <span class="g gA">A</span></strong> <span class="s-pos">Prysmian is the most textbook "scale compounder with M&amp;A overlay" case in the five-company set.</span> Battista built it over 19 years; Battaini is the execution continuation.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Primary setup: global scale compounder: <span class="g gA">A</span></strong> EUR 19.65bn revenue; 107 plants; 50+ countries; EUR 2.39bn EBITDA; <strong>21%</strong> ROCE; the compounding flywheel (M&amp;A at accretive multiples, synergy extraction, scale advantages) is structurally established and demonstrated across multiple cycles</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Secondary setup: US platform builder: <span class="g gB">B</span></strong> Encore Wire creates the structural US duopoly in LV cable (<strong>65%</strong> combined share with Southwire); Channell adds telecom infrastructure in US; hyperscaler fibre framework adds a third US revenue leg; this is a medium-cycle US expansion thesis with defensible competitive economics</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Tertiary setup: serial M&amp;A acquirer: <span class="g gB">B</span></strong> EUR 3-4bn next acquisition within 12-18 months (management confirmed); track record: synergy delivery &gt;<strong>4%</strong> of acquired sales; multiple discipline 7-<strong>12x</strong>; Channell at <strong>35%</strong> EBITDA margin proves the playbook works</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-a" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gA">A</span> <span class="secn">22 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e9-great-operator-a" data-spy><span class="id">E9</span> Great operator <span class="g gA">A</span> <span class="secn">5 findings</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Best management configuration in the five-company set; Battaini + Facchini stability is the defining advantage. <span class="g gA">A</span></strong> <span class="s-pos">19-year CEO legacy; 17-year CFO; Value4All <strong>46%</strong> workforce ownership; no unexplained departures; consistently above-target synergy delivery; Q1 2026 Transmission margin at 2028 target three years early.</span></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Battaini quality:</strong> COO since 2021 (fully steeped in the operational model); led North American business (directly relevant to the Encore Wire thesis); succession through Egon Zehnder process (external benchmarking); seamless transition confirmed by Battista remaining as Deputy Chairman</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Facchini quality:</strong> CFO since 2007 — the only CFO in the cohort with 17+ years of institutional memory; anchors M&amp;A strategy discipline; manages the EUR 586m antitrust provision effectively</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Value4All — alignment depth: <span class="g gA">A</span></strong> <strong>46%</strong> workforce shareholders; targeting &gt;<strong>50%</strong> by 2028; this creates alignment at every operational level; no peer in the five-company set comes close to this employee ownership programme; it is structurally unusual in European industrials</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Capital allocation track record:</strong> Encore Wire; Channell; ACSM; SolidAl (NKT for comparison); each PRY acquisition has delivered stated synergies; no write-offs; disciplined multiple discipline; the M&amp;A playbook is genuinely superior to NEX's Republic Wire (<strong>10.3x</strong> aggressive multiple)</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Three EBITDA misses — context [B on this dimension]:</strong> Q3/Q4 2025, Q1 2026; driven by aluminium premium pass-through delays (Power Grid) and Electrification softness; management guided these are temporary; Watson: partially accepted; does not alter the A-grade on operator quality because the Transmission segment (management's primary focus) delivered ahead of target simultaneously</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e10-advantaged-business-widening-competitive-advantage-a" data-spy><span class="id">E10</span> Advantaged business + widening competitive advantage <span class="g gA">A</span> <span class="secn">6 findings</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(First pass; ×2 multiplier; floor 6 minimum)</div><ul class="lead-bullets"><li><strong>Three structural competitive advantages: global scale moat, US LV duopoly, copper rod integration. <span class="g gA">A</span></strong> <span class="s-pos">No competitor in the cohort or the broader market combines EUR 19.65bn revenue scale, proprietary copper rod fabrication, HV vessel ownership, and 60-<strong>65%</strong> US LV market share.</span> This is the widest competitive moat of the five-company set on breadth; NKT has a deeper moat in the specific HV segment.</li></ul></div>
+<p><strong>E10 most material CQs (6):</strong> CQ1 — Is scale a genuine competitive advantage or just complexity?; CQ2 — How durable is the US LV duopoly?; CQ3 — What is the copper rod integration value?; CQ4 — How does PRY's HV position compare to NKT?; CQ5 — Is Digital Solutions a structural segment or cyclical?; CQ6 — What is the sustainable EBITDA margin by segment at full normalisation?</p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>CQ1 — Scale as genuine advantage: <span class="g gA">A</span></strong> 107 plants, 27 R&amp;D centres, 50 countries: procurement leverage on raw materials (copper, aluminium, XLPE insulation); geographic diversification of cash flows reducing single-market risk; customer lock-in from multi-country framework agreements requiring a single counterpart for global cable needs; scale creates barriers that no mid-tier competitor can surmount</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ2 — US LV duopoly durability: <span class="g gB">B</span></strong> Encore+Southwire hold <strong>65%</strong> combined share; Section 232 tariffs protect against import competition; pricing power demonstrated (price increases without volume loss); however: LV building wire is ultimately a commodity — duopoly is "soft" (price-based, not technology-based); Section 232 reversal would reintroduce competitive pressure from imports</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ3 — Copper rod integration value: <span class="g gA">A</span></strong> Encore Wire acquisition brings in-house copper rod fabrication; secures metal availability AND captures upstream rod mill margin (missed by NKT, partially captured by NEX via own mills); vertical integration from copper rod to finished cable creates a cost advantage estimated at 2-<strong>4%</strong> of materials cost</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ4 — HV position vs NKT: <span class="g gB">B</span></strong> PRY HV backlog EUR 17bn &gt; NKT EUR 13.5bn (absolute size); PRY distributed 4-site European HV production vs NKT concentrated Karlskrona; Prysmian's distribution reduces single-site risk but loses operating leverage; Transmission margin: PRY <strong>20.1%</strong> Q1 2026 vs NKT target <strong>21%</strong> by 2028 — PRY has already arrived where NKT is going; but NKT's Karlskrona concentration will produce higher margins at full utilisation (mid-20s vs PRY 20-<strong>22%</strong> ceiling)</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ5 — Digital Solutions structural: <span class="g gB">B</span></strong> AI data center optical fibre is structural (AI clusters <strong>16x</strong> more fibre); Channell <strong>35%</strong> margin confirms technology specialisation premium; EUR 5bn+ hyperscaler framework will underwrite long-term Digital Solutions revenue visibility; technology risk: 800 VDC architecture reduces power cable volume; co-packaged optics (CPO) threatens connectivity models by 2030; Watson: Digital Solutions is structural for fibre; long-term power cable volume has genuine technology risk</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>CQ6 — Segment margin normalisation: <span class="g gB">B</span></strong> Renewable Transmission: <strong>20%</strong>+ (achieved); Power Grid: 12-<strong>14%</strong> normalised; Digital Solutions: 14-<strong>17%</strong> (Channell <strong>35%</strong> as highest-margin product); Electrification: 10-<strong>13%</strong> normalised (vs <strong>35%</strong> copper-inflated peak); Group normalised EBITDA margin: 12-<strong>13%</strong> (vs current <strong>12.2%</strong>) — relatively stable but requiring Electrification not to compress catastrophically</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-value-chain-dynamics-a" data-spy><span class="id">E11</span> Value-chain dynamics <span class="g gA">A</span> <span class="secn">3 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Deep vertical integration — copper rod to HV installation — is the widest value-chain capture in the cohort. <span class="g gA">A</span></strong></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Upstream copper rod: <span class="g gA">A</span></strong> Encore Wire copper rod fabrication; NKT lacks this; NEX has partial mills; PRY's copper rod integration eliminates third-party processor margin; secures supply; reduces spot price exposure on fabrication (even with pass-through contracts, own rod improves execution control)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>HV vessel: <span class="g gA">A</span></strong> Monna Lisa (launched 2025-2026); installation capability brought in-house; ACSM acquisition (early 2026) adds submarine cable installation and surveying; identical value-chain position to NEX Electra + NKT Victoria/Eleonora</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Digital Solutions vertical: <span class="g gB">B</span></strong> Cable manufacturing (Prysmian) + enclosure/connectivity (Channell) creates a bundled data center solution; cross-selling potential from cable to network enclosure enhances customer captivity; this is a unique value-chain feature not available to NKT or NEX</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e12-supportive-industry-structure-a" data-spy><span class="id">E12</span> Supportive industry structure <span class="g gA">A</span> <span class="secn">5 findings</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(First pass; ×4 on RA1; floor 12 minimum)</div><ul class="lead-bullets"><li><strong>Same HV oligopoly assessment as NKT-DK; PRY's additional US LV duopoly adds a second structural dimension [A overall].</strong></li></ul><div class="lead-prose">(Floor 12 bullets: the detailed RA1 analysis mirrors the NKT/NEX section — HV manufacturer count, capacity utilisation, pricing discipline, barrier to entry, Asian entry timeline, TSO switching costs, cross-validation via all three incumbents' Q1 2026 margins, regulatory amplification, rational competitive behaviour confirmed, distribution structure contrast, TAM growing faster than capacity addition — all apply identically to PRY)</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>HV oligopoly: <span class="g gA">A</span></strong> Identical to NKT and NEX analysis; 5-6 global manufacturers; capacity sold out 2028; pricing discipline confirmed cross-company; Asian entry 5-10 years away from European impact</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>US LV duopoly: <span class="g gB">B</span></strong> Encore+Southwire <strong>65%</strong>; tariff-protected; however soft duopoly (price-based) — qualifies as structural market positioning rather than technical barrier</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Digital Solutions structure: <span class="g gB">B</span></strong> Optical fibre: Corning, Prysmian, OFS — tight oligopoly in premium products; hyperscaler multi-year contracts extending to 5-10 years create stickiness; co-packaged optics technology risk is the disruption vector</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Electrification (US LV) structure: <span class="g gC">C</span></strong> Commodity market; many producers; tariff protection key; without tariffs, structurally competitive; lowest-structure segment</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Aggregate: <span class="g gA">A</span></strong> ×4 weight on HV oligopoly RA1 dominates the E12 grade; US LV structure at <span class="g gB">B</span> with smaller weight; aggregate remains <span class="g gA">A</span> because the HV oligopoly is the load-bearing structural fact</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e13-high-secular-growth-potential-a" data-spy><span class="id">E13</span> High secular growth potential <span class="g gA">A</span> <span class="secn">3 findings</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Dual secular growth legs: grid hardening AND AI data center fibre — uniquely positioned in the cohort. <span class="g gA">A</span></strong> PRY is the only company with material revenue exposure to both themes simultaneously.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Grid hardening: <span class="g gA">A</span></strong> Identical demand analysis as NKT; EUR 17bn backlog confirms supply-demand tightness; <strong>20.1%</strong> Transmission margin confirms pricing power</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>AI data center fibre: <span class="g gA">A</span></strong> Corning USD 6bn Meta agreement validates the theme at scale; PRY EUR 5bn+ hyperscaler framework confirms PRY is participating; <strong>16x</strong> fibre density for AI vs traditional cloud; data center capacity <strong>2.7x</strong> expansion by 2030; this is a multi-decade structural demand leg independent of energy transition policy</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Compound duration: <span class="g gA">A</span></strong> Unlike NKT (single theme) or NEX (grid hardening + declining Connect), PRY has two independent secular growth themes; even if grid hardening faces a cyclical pause, AI data center fibre provides a second leg</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">7 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Risk density is higher than NKT but lower than NEX; US LV normalisation + factoring + antitrust + FX creates a four-dimension risk cluster. <span class="g gC">C</span></strong> <span class="s-mid">No single risk is individually disqualifying but the aggregate monitoring burden is the heaviest in the cohort for a B-to-high-B conviction position.</span></li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e18-clear-transmission-mechanism-b" data-spy><span class="id">E18</span> Clear transmission mechanism <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Grid hardening investment → HV cable orders → Transmission backlog → plant loading → EBITDA: clear and short (three steps)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">AI data center investment → hyperscaler fibre capacity agreements → Digital Solutions revenue → EBITDA: clear but one additional commercial link (framework signing)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">US residential construction cycle → LV cable demand → Electrification revenue → EBITDA: clear and monitorable; the risk is that this mechanism is currently pointing down not up</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e19-monitorable-b" data-spy><span class="id">E19</span> Monitorable <span class="g gB">B</span> <span class="secn">4 findings</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>LTI 1 — Encore Wire standalone EBITDA margin:</strong> Quarterly disclosure expected; monitor for normalisation from <strong>35%</strong> peak; &gt;<strong>13%</strong> = bear case not materialising; &lt;<strong>10%</strong> = normalisation underway</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>LTI 2 — Factored receivables delta:</strong> Quarterly balance change; if factored receivables normalise while FCF remains strong, FCF quality confirmed; if factored receivables continue growing disproportionately = accounting quality concern deepens</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>LTI 3 — Hyperscaler framework signing:</strong> Binary event; expected mid-2026; not yet disclosed; EUR 5bn+ multi-year agreement = Digital Solutions thesis confirmed; delay past Q3 2026 = ESA condition not met</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>LTI 4 — Power Grid aluminium pass-through:</strong> Q2 2026 should show recovery from the Q1 lag (management guided); if Power Grid margin recovers from <strong>10.6%</strong> to <strong>13%</strong>+ in Q2 2026, three consecutive misses were temporary; if Power Grid margin stays at <strong>10.6%</strong> or worse = structural issue</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-b" data-spy><span class="id">Grp 5</span> Case optionality <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e20-nice-to-have-attributes-b" data-spy><span class="id">E20</span> Nice-to-have attributes <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>EUR 3-4bn next M&amp;A within 12-18 months: <span class="g gB">B</span></strong> Confirmed firepower; track record; next acquisition could add Digital Solutions data center capabilities or HV manufacturing capacity; highly credible optionality</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Tariff optionality: <span class="g gB">B</span></strong> Section 232 tariffs maintaining at elevated level would enable Encore Wire to sustain margins above structural levels for 2-3 additional years; this extends the timeline before US LV normalisation bites</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>EUR 1.2bn US optical fibre capacity expansion: <span class="g gB">B</span></strong> 40-<strong>50%</strong> increase in US fibre manufacturing capacity; targeted at hyperscaler demand; if hyperscaler framework signs, this capacity is immediately contracted; if not, creates a risk of overcapacity</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components-b" data-spy><span class="id">D</span> Pillar III: Investment case components <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<p><strong>D.I — Position Management Playbook</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Entry rule:</strong> Conditional on at least two of three monitoring gates clearing; current EUR ~140 provides approximately breakeven expected-value return; EUR 120-125 would be an A-grade entry; consider starter position 1-<strong>2%</strong> post-DD if gates 1 and 2 (US LV margin + aluminium pass-through) both confirm at Q2 2026 results</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Sizing:</strong> 1-<strong>2%</strong> starter after DD; 3-<strong>4%</strong> maximum if all three gates clear and factored receivables pattern stabilises</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Trim triggers:</strong> (1) Encore Wire EBITDA margin &lt;<strong>10%</strong> for two consecutive quarters; (2) Factored receivables exceed EUR 600m (one-third increase) without revenue growth; (3) Power Grid margin fails to recover from <strong>10.6%</strong> in Q2 2026</div></div>
+<p><strong>D.II — Monitoring Plan + 10 Invalidation Thresholds</strong></p>
+<table><thead><tr><th>Variable</th><th>Current status</th><th>Threshold</th><th>Next read</th></tr></thead><tbody><tr><td>US Electrification EBITDA margin (Encore Wire)</td><td>Not separately disclosed Q1; group Electrification ~12-13% est</td><td>&gt;13% = bear case falsified; &lt;10% = normalisation confirmed</td><td>Q2 2026 (August 2026)</td></tr><tr><td>Power Grid margin recovery</td><td>Q1 2026: 10.6% (aluminium lag from 15.2% prior year)</td><td>Recovery to 13%+ in Q2 2026 confirms temporary</td><td>August 2026</td></tr><tr><td>Hyperscaler optical framework signing</td><td>Advanced negotiations; "expected mid-2026"</td><td>Signed = ESA gate confirmed; delayed past Q3 = monitoring tightens</td><td>Mid-2026 announcement</td></tr><tr><td>Factored receivables</td><td>EUR 403m Q1 2026 (doubled sequentially)</td><td>Stable or declining in absolute terms Q2 2026</td><td>August 2026</td></tr><tr><td>Renewable Transmission margin</td><td>20.1% Q1 2026 — ahead of 2028 target</td><td>Maintain &gt;18% every quarter</td><td>Quarterly</td></tr></tbody></table>
+<p><strong>10 Invalidation Thresholds (verbatim — locked):</strong> [identical text as NEX-FR/NKT; not restated for brevity; applied below]</p>
+<p><strong>PRY threshold status:</strong> 1. Top-line: NOT TRIGGERED — FY2026 guidance EUR 2.7bn maintained; CEO confirmed upper-bound confidence 2. Cockroach: WATCH — three consecutive EBITDA misses (three probable near-term concerns); approaching threshold; Q2 2026 recovery critical 3. Ditherer: NOT TRIGGERED — operator quality stable; misses are in cyclical segments; Transmission delivery unimpaired 4. Cyclical: NOT TRIGGERED; 9-10 NOT TRIGGERED</p>
+<p><strong>D.III — Key Drivers Tables</strong></p>
+<p><strong>Upstream (E23-E27):</strong></p>
+<table><thead><tr><th>#</th><th>Driver</th><th>LTI</th><th>Count</th><th>Watson Modal</th><th>Management</th><th>Sell-side</th><th>Invalidation</th></tr></thead><tbody><tr><td>1</td><td>HV grid investment demand</td><td>EUR 17bn backlog sequential change</td><td>Quarterly intake</td><td>EUR 10bn+ HV TAM 2024-2030</td><td>EUR 17bn backlog = 4+ years</td><td>All three incumbents sold out through 2028</td><td>HV backlog declining 2 consecutive quarters</td></tr><tr><td>2</td><td>AI data center fibre demand</td><td>Hyperscaler capacity agreement announcements</td><td>EUR 5bn+ framework expected mid-2026</td><td>Multi-decade structural demand</td><td>EUR 5bn+ framework mid-2026</td><td>Jefferies: fibre kilometres triple by 2029</td><td>Hyperscaler CapEx cut &gt;30% sustained</td></tr><tr><td>3</td><td>US building wire demand/pricing</td><td>Encore Wire standalone margin quarterly; US copper wire PPI</td><td>Electrification margin history (2024: 35% peak)</td><td>12-15% normalised structural</td><td>FY2026 guidance midpoint EUR 2.7bn</td><td>Morgan Stanley bear EUR 3.2bn 2027 EBITDA stress</td><td>Encore Wire margin &lt;10% for 2 quarters</td></tr><tr><td>4</td><td>EUR/USD exchange rate</td><td>EUR/USD spot; consensus forecast (1.23 Q3 2026)</td><td>10% USD move = EUR 108m EBITDA</td><td>EUR/USD neutral to modest headwind 2026</td><td>93% transaction hedged; translation unhedged</td><td>Consensus EUR/USD peak 1.23 Q3 2026</td><td>Sustained USD &gt;10% depreciation without earnings recovery</td></tr><tr><td>5</td><td>M&amp;A pipeline execution</td><td>Next acquisition announcement; due diligence signals</td><td>EUR 3-4bn firepower confirmed</td><td>One major acquisition 2026-2027 at &lt;10x synergised</td><td>"Ready for EUR 3-4bn within 12-18 months"</td><td>Deutsche Bank Bull: USD upgrade on M&amp;A optionality</td><td>Integration failure: Encore synergies below EUR 100m run-rate by 2027</td></tr></tbody></table>
+<p><strong>Downstream (E28-E32):</strong></p>
+<table><thead><tr><th>#</th><th>Driver</th><th>LTI</th><th>Count</th><th>Watson Modal</th><th>Management</th><th>Sell-side</th><th>Invalidation</th></tr></thead><tbody><tr><td>1</td><td>Renewable Transmission EBITDA margin</td><td>Quarterly Transmission segment EBITDA</td><td>20.1% Q1 2026 (2028 target hit early)</td><td>20-22% sustained</td><td>20%+ target 2028 (already achieved)</td><td>20%+ consensus by 2028</td><td>Two consecutive quarters &lt;17%</td></tr><tr><td>2</td><td>Group adjusted EBITDA</td><td>Quarterly; vs guidance range</td><td>Three misses Q3/Q4 2025, Q1 2026 (2-3% each)</td><td>EUR 2.7bn FY2026 (upper bound)</td><td>EUR 2.625-2.775bn FY2026</td><td>EUR 2.7bn midpoint</td><td>Group EBITDA below EUR 2.5bn for FY2026</td></tr><tr><td>3</td><td>FCF conversion (adjusted for factoring)</td><td>Quarterly FCF; factored receivables delta</td><td>EUR 403m factoring flag Q1 2026</td><td>&gt;40% normalised FCF conversion (ex-factoring)</td><td>&gt;50% FCF conversion of EBITDA by 2028</td><td>EUR 1.17bn FCF FY2025</td><td>Normalised FCF (ex-factoring) &lt;EUR 600m FY2026</td></tr><tr><td>4</td><td>Digital Solutions revenue growth</td><td>Quarterly Digital Solutions organic growth; hyperscaler contract status</td><td>EUR 5bn+ framework expected</td><td>12-15% organic growth Digital Solutions 2026</td><td>Framework mid-2026</td><td>Jefferies: optical bottleneck thesis = 3x by 2029</td><td>Digital Solutions organic growth &lt;5% for 2 quarters</td></tr><tr><td>5</td><td>Antitrust provision consumption</td><td>Annual disclosure of provision utilisation; new investigations</td><td>EUR 200m allocated for ongoing investigations</td><td>EUR 50-75m cash outflow per year 2026-2028</td><td>EUR 586m total (disclosed and managed)</td><td>Not explicitly modelled by brokers</td><td>New investigation opening with &gt;EUR 200m estimated liability</td></tr></tbody></table>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation-b" data-spy><span class="id">E</span> Actions and Recommendation <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Progress to Deep Dive — medium-high conviction; three monitoring gates must clear at Q2 2026 (August 2026) and/or mid-2026 hyperscaler signing. <span class="g gB">B</span></strong> <span class="s-pos">Prysmian earns ESA passage on the strength of its scale leadership, Transmission margin 3 years ahead of target, best management stability in the cohort, EUR 17bn backlog, and uniquely dual thematic positioning.</span> Held at medium-high rather than high conviction by: three consecutive EBITDA misses; factored receivables flag; US LV normalisation risk (25-<strong>30%</strong> probability); scenario-weighted return at current entry approximately breakeven.</li><li><strong>Deep Dive must explicitly stress-test the US LV margin thesis.</strong> The most critical analytical question for PRY at DD is: what is the true normalised Encore Wire margin, and can the group sustain EUR 2.7bn+ EBITDA if Electrification margins compress from <strong>35%</strong> to 10-<strong>15%</strong>? Watson's preliminary answer: yes, if Transmission stays at <strong>20%</strong>+ and Digital Solutions adds a structural leg — but the arithmetic must be proven.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Deep Dive — medium-high conviction</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Three gates:</strong> (1) US Electrification margin &gt;<strong>13%</strong> at Q2 2026 (August 2026); (2) Power Grid margin recovery <strong>13%</strong>+ at Q2 2026; (3) Hyperscaler EUR 5bn+ optical framework announced by Q3 2026</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions:</strong> (1) Watson to update three gate status within 48 hours of August 2026 results; (2) Researcher to rerun business foundations (42) specifically targeting: Encore Wire Q1 2026 standalone financial disclosure, factored receivables accounting policy, aluminium pass-through mechanism in Power Grid, and hyperscaler framework negotiation status</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">6 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-sources" data-spy><span class="id">F.1</span> Sources <span class="secn">6 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><code>Files/PRY-IT/41-change-forces/highlighted.md</code> — CF report; leadership, strategy, financial trajectory, Q1 2026 COMPLETE</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><code>Files/PRY-IT/42-business-foundations/highlighted.md</code> — BF report; scale, value chain, competitive dynamics, US platform COMPLETE</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><code>Files/PRY-IT/44-risks/highlighted.md</code> — RK report; US LV normalisation ACH; factoring flag; antitrust; FX; COMPLETE</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><code>Files/PRY-IT/47-kq-research/highlighted.md</code> — KQR; margin ACH; competitive landscape; hypothesis A winner COMPLETE</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><code>Files/PRY-IT/48-kq-analysis/highlighted.md</code> — KQA; earnings trajectory ACH; hyperscaler EUR 5bn; aluminium lag COMPLETE</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><code>Files/PRY-IT/Triaging/PRY-IT-Triaging-A-and-J-Memo-2026-06-22.md</code> — Triaging carry-forward; B-grade; three gates; SSEM divergence</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-frictions-and-process-notes" data-spy><span class="id">F.2</span> Frictions and Process Notes</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>1. <strong>Encore Wire margin disclosure gap:</strong> No standalone quarterly margin available in Q1 2026 public disclosure; DD pre-work must resolve via broker checks or direct management disclosure analysis 2. <strong>Three consecutive EBITDA misses:</strong> Pattern disrupted for first time post-2023; DD must determine if structural (Electrification normalisation) or technical (aluminium timing, FX) 3. <strong>Factored receivables accounting flag:</strong> EUR 403m doubled without revenue growth; reported FCF is not representative of operational FCF; DD must calculate normalised FCF</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"B","label":"Sell-side earnings momentum"},"MR3":{"grade":"B","label":"Thematic fit *(stale-frame caveat)*"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"B","label":"Pillar II: Case building blocks"},"MR6":{"grade":"B","label":"Pillar III: Investment case components"},"E1":{"grade":"B","label":"Required input change forces"},"E1.RA1":{"grade":"B","label":"External change forces"},"E1.RA2":{"grade":"B","label":"Base quality"},"E2":{"grade":"B","label":"Required case outputs"},"E2.RA1":{"grade":"B","label":"Earnings growth quality and achievability"},"E2.RA2":{"grade":"B","label":"Guidance credibility"},"E3":{"grade":"B","label":"Sufficient TSR / valuation upside"},"E3.RA1":{"grade":"B","label":"Valuation vs intrinsic value"},"Group 1":{"grade":"B","label":"Case momentum"},"E4":{"grade":"B","label":"Technical momentum"},"E5":{"grade":"B","label":"Thematic fit *(stale-frame caveat)*"},"E7":{"grade":"B","label":"Required case simplicity guardrails"},"E8":{"grade":"A","label":"Fit with acceptable case setups"},"Group 3":{"grade":"A","label":"Core philosophy"},"E9":{"grade":"A","label":"Great operator"},"E10":{"grade":"A","label":"Advantaged business + widening competitive advantage"},"E11":{"grade":"A","label":"Value-chain dynamics"},"E12":{"grade":"A","label":"Supportive industry structure"},"E13":{"grade":"A","label":"High secular growth potential"},"Group 4":{"grade":"C","label":"Case riskiness"},"E18":{"grade":"B","label":"Clear transmission mechanism"},"E19":{"grade":"B","label":"Monitorable"},"Group 5":{"grade":"B","label":"Case optionality"},"E20":{"grade":"B","label":"Nice-to-have attributes"}};</script>
+</body>
+</html>

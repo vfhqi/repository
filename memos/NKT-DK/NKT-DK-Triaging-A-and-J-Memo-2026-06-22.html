@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NKT-DK — Triaging memo — 22-Jun-26 — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">19</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">36</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">11</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-c">MR2 — Sell-side earnings momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-b">MR3 — Thematic fit<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-a">MR4 — Pillar I: Case change elements<span class="nav-rating-pill A">A</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-b">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">63</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-a">C.1 — Pillar I: Case change elements<span class="nav-rating-pill A">A</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-a">Element E1 — Required input change forces<span class="nav-rating-pill A">A</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-a">Element E2 — Required case outputs<span class="nav-rating-pill A">A</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-b">Element E3 — Sufficient TSR / valuation upside<span class="nav-rating-pill B">B</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-b">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">45</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-b">Group 1 — Case momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">13</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-b">Element E4 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">4</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-a">Element E5 — Thematic fit<span class="nav-rating-pill A">A</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-c">Element E6 — Sell-side earnings momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">4</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-b">Group 2 — Case simplicity<span class="nav-rating-pill B">B</span><span class="nav-fc">15</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-b">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-a">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill A">A</span><span class="nav-fc">9</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e15-invalidating-attributes-nr">Element E15 — Invalidating attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e16-strenuously-seek-to-avoid-attributes-nr">Element E16 — Strenuously seek-to-avoid attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e17-capital-constraining-attributes-nr">Element E17 — Capital-constraining attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e18-clear-transmission-mechanism-inputs-to-earnings-">Element E18 — Clear transmission mechanism, inputs to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e19-monitorable-transmission-mechanism-leading-track">Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">12</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">NKT-DK — Triaging memo — 22-Jun-26</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">NKT-DK</span> NKT-DK — Triaging memo — 22-Jun-26 — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 22-Jun-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">DKK 1,052 (22-Jun-26)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">25.0x (FactSet; 75th percentile vs 10-year history)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">31% (FactSet SSEM; concentrated 2-broker pool)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (stock near 52-week high)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">NKT-DK (NKT A/S)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Electrical equipment / High-voltage power cable manufacturing</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">High-performance cable manufacturers (NKT / Nexans / Prysmian — Richard-defined thematic peer group: &quot;grid hardening&quot;)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Nexans (NEX-FR); Prysmian (PRY-IT)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">DKK 1,052 (22-Jun-26)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">DKK 479–1,135</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">not in local data; stock is mixed currently at ~93% of 52w high after a 40% rally (DNB Carnegie, May-26)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (stock near 52-week high)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">25.0x (FactSet; 75th percentile vs 10-year history)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">DKK 1,187 (blended — Jefferies DKK 1,305, DNB Carnegie DKK 1,070)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">36 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Progress to ESA. <span class="g gA">A</span></strong> <span class="s-pos">NKT is the purest high-voltage cable play in the cohort</span> and the single most compelling expression of the European grid-hardening thesis; the earnings re-rating from 2027 capacity ramp is structural and visible</li><li><strong>Execution is the load-bearing risk. <span class="g gC">C</span></strong> <span class="s-mid">The EUR 300m Karlskrona capex overrun and near-term FCF burn are real</span>; the False Friend ACH in the Risks report deserves respect — negative working capital and copper-inflated revenue can mask operational deterioration</li><li><strong>Valuation is fair-to-full. <span class="g gB">B</span></strong> <span class="s-mid">DKK 1,052 is near the 52-week high and DNB Carnegie's DKK 1,070 fair value</span>; Jefferies carries DKK 1,305 (2030 roll-forward); PEG of <strong>0.5x</strong> is sector-cheapest but assumes flawless 2027 delivery</li><li>**Progress: <span class="g gA">A</span><span class="s-pos"> highest-priority stock in the cohort</span>; ESA must resolve the Karlskrona timeline and the False Friend risk weighting before ESA-stage capital deployment</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">11 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Pure-play cable manufacturer:</strong> NKT A/S designs, manufactures, and installs low-, medium-, and high-voltage power cables, operating exclusively in European and Nordic markets following the 2024 divestment of NKT Photonics</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Three business lines:</strong> Transmission (extra-high-voltage subsea and underground interconnectors — the profit engine), Distribution (medium-voltage grids, low-voltage building wires), and Grid Solutions &amp; Accessories (AC onshore projects, offshore repair, accessories)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Revenue scale:</strong> EUR 2,722m standard metal revenue in FY25, up from EUR 1,263m in 2021 — a <strong>21%</strong> CAGR driven overwhelmingly by organic high-voltage execution</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Backlog dominance:</strong> EUR 13.5bn high-voltage order backlog as of Q1 2026; 75–<strong>80%</strong> of group EBITDA derives from high-voltage vs 20–<strong>25%</strong> for Prysmian and Nexans — NKT is the purest play</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Financial character:</strong> EBITDA margin <strong>14.3%</strong> in FY25 (expanding toward mid-20s by 2030 on management targets); net cash EUR 963m (-<strong>2.5x</strong> leverage); FCF deeply negative during the EUR 2bn peak capex cycle; ROCE <strong>24%</strong> (headline) / <strong>8.4%</strong> ROIC (underlying — negative working capital flatters the headline)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Investment style:</strong> Classic capacity-expansion compounder setup; earnings visibility locked through a USD 13.5bn backlog; FCF inflection point post-2027 when capex normalises to ~<strong>4%</strong> of revenue</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Geographic focus:</strong> Europe-only; insulates against Chinese competitive pressure that plagues global cable markets</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Operational split (FY25 approx):</strong> Transmission segment: ~<strong>55%</strong> revenue, ~75–<strong>80%</strong> EBITDA; Distribution segment: ~<strong>30%</strong> revenue, ~15–<strong>20%</strong> EBITDA; Grid Solutions &amp; Accessories: ~<strong>15%</strong> revenue, ~<strong>5%</strong> EBITDA; <em>the gross margin skew toward Transmission is the primary profit-quality differentiator vs Nexans and Prysmian</em></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Balance sheet character:</strong> Net cash EUR 963m / leverage -<strong>2.5x</strong> as of FY25; NWC is structurally negative at -EUR 1,524m (-<strong>35.8%</strong> of revenue) due to prepayments on long-cycle HV projects; this is a working capital advantage that reverses if order intake slows materially; <span class="s-mid">headline leverage flatters underlying financial gearing</span></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Peer comparison:</strong> Among the three grid-hardening cohort members, NKT is mid-size (revenue EUR 2.7bn vs Prysmian EUR 21bn and Nexans EUR 7bn standard metal) but commands the highest HV EBITDA margin concentration; <span class="s-pos">NKT is the purest single-stock expression of the HV cable investment thesis in the cohort</span></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>CEO:</strong> Claes Westerlind (CEO since May 2023; internal succession from EVP Karlskrona); 15+ years high-voltage domain expertise; CFO transition April 2026 (Michael Yong replacing Line Fandrup)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">6 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change forces are exceptional. <span class="g gA">A</span></strong> <span class="s-pos">NKT is positioned at the intersection of every structural demand driver</span>: offshore wind, HVDC interconnectors, grid electrification, data centres, energy security — and occupies a top-tier oligopoly position within the three-player EHV market</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>The 2027 capacity ramp is the single load-bearing driver. <span class="g gA">A</span></strong> <span class="s-pos">EUR 13.5bn backlog locks in volumes; Karlskrona and Cologne expansions converting at double the revenue-per-km of 2019–21 vintage contracts</span>; earnings visibility to 2030 is unusually high</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>FCF optics are misleading today. <span class="g gC">C</span></strong> <span class="s-neg">Negative EUR 92m FCF in Q1 2026 and negative EUR 244m in FY25 are the capex cycle, not structural weakness</span>; but the Risks report's False Friend ACH is legitimate — prepayment-inflated cash balances and copper-inflated revenue can disguise execution deterioration</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Sell-side mixed at peak valuation. <span class="g gC">C</span></strong> <span class="s-mid">DNB Carnegie at Hold (DKK 1,070 fair value = ~<strong>2%</strong> downside from current); Jefferies at Buy (DKK 1,305) based on 2030 roll-forward</span>; only <strong>31%</strong> Buy-rated at FactSet consensus; no Sell ratings but groupthink risk is real</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Management quality first-pass. <span class="g gC">C</span></strong> <span class="s-mid">The EUR 300m Karlskrona overrun cracked an otherwise pristine conservative reputation</span>; <strong>142%</strong> whistleblower spike in 2025 and absolute-TSR bonus design are governance flags; E9 operator assessment is ESA scope but the Triaging-depth read is cautious — credible operator with a documented credibility fracture</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Cohort positioning. <span class="g gA">A</span></strong> <span class="s-pos">NKT is the highest-conviction stock in the Richard-defined grid-hardening peer group</span>: superior backlog-to-revenue ratio, highest HV/EHV EBITDA concentration, cleaner pure-play status, and stronger 2025–28 EPS CAGR than either Nexans (<strong>14%</strong>) or Prysmian (<strong>18%</strong>)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><span class="s-pos">Stock at DKK 1,052 vs 52-week range DKK 479–1,135</span>; near the high; up ~<strong>40%</strong> in the prior period (DNB Carnegie confirmed); above 200-day average; momentum is positive but the stock has already captured a meaningful re-rating — upside from here requires 2027 delivery to start materialising</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-c" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><span class="s-neg">SSEM composite momentum score -4 (FactSet)</span>; EPS revisions L1M: 0, L3M: -3, L6M: -4, L12M: +3; EBITDA revisions L1M: -2, L3M: -3; <span class="s-mid">only <strong>31%</strong> Buy-rated</span>; DNB Carnegie recently downgraded to Hold; Applications segment facing EPS headwinds from Central European competition — sell-side momentum is deteriorating at the margin even as the structural story remains intact</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-b" data-spy><span class="id">MR3</span> Thematic fit <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><span class="s-pos">NKT is an exceptionally clean fit for the grid-hardening / energy transition thesis</span>: pure-play cables, 75–<strong>80%</strong> HV/EHV EBITDA weighting, zero China exposure, multi-year contracted backlog; rated B not A because no active Viewforth thematic to inject (per Richard's Q5: no current thematics) and the stock has already partially re-rated on the theme</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-a" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gA">A</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><span class="s-pos">Change forces (E1) are sector-leading; earnings trajectory (E2) is exceptional by peer standards (<strong>15%</strong> revenue CAGR, <strong>30%</strong> EPS CAGR 2025–2028 vs NEX <strong>3%</strong>/<strong>14%</strong>, PRY <strong>6%</strong>/<strong>18%</strong>)</span>; valuation upside (E3) is present but thinner than the underlying earnings quality implies given current pricing</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-b" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><span class="s-pos">Thematic fit and setup identification strong</span>; <span class="s-mid">sell-side momentum is mixed; simplicity is solid but the Karlskrona single-site concentration requires acknowledgement</span>; value-chain dynamics are highly favourable; Group 3 and Group 4 provide partial signals at Triaging depth</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">4 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gA">A</span></strong> <span class="s-pos">NKT's change forces are the strongest in the grid-hardening cohort</span>; the earnings pathway from backlog to margin expansion is the clearest and most quantified of the three peers</li><li><strong>E1 — exceptional structural and internal change. <span class="g gA">A</span></strong> Three-driver convergence: grid electrification supercycle + "Charging Forward" strategy pivot from investment to execution + Karlskrona capacity additions unlocking EUR 900m+ 2030 EBITDA</li><li><strong>E2 — peer-leading earnings trajectory. <span class="g gA">A</span></strong> <strong>15%</strong> revenue CAGR and <strong>30%</strong> EPS CAGR 2025–2028; EBITDA expanding from <strong>14.3%</strong> (FY25) toward mid-20s (2030); <strong>100%</strong> beat rate on full-year EBITDA guidance across L3Y</li><li><strong>E3 — valuation present but fair-to-full. <span class="g gB">B</span></strong> PEG <strong>0.5x</strong> is cheapest in the sector on a growth-adjusted basis; P/E <strong>25.0x</strong> at 75th percentile of 10-year history; DNB Carnegie DKK 1,070 PT implies ~<strong>2%</strong> downside; upside to Jefferies DKK 1,305 requires 2027 execution</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gA">A</span></strong> Three convergent change forces: (1) external: ENTSO-E projects 2031–35 European offshore network investment <strong>41%</strong> higher than 2025–30; ~20,000km of HVDC cable auctions underway; data centres pushing global electricity demand up <strong>140%</strong> by 2060; (2) internal: "Charging Forward" strategy pivots from investment-phase to execution-phase; reorganisation into Transmission/Distribution/Grid Solutions aligns structure with end-market; (3) capacity: Karlskrona third extrusion tower + Eleonora vessel operational 2027, structurally doubling delivery capacity; EUR 13.5bn backlog locks in multi-year revenue at doubled revenue-per-km vs 2019–21 vintages</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 — Required case outputs. <span class="g gA">A</span></strong> Jefferies models <strong>15%</strong> revenue CAGR and <strong>30%</strong> EPS CAGR for 2025–2028, versus Nexans <strong>3%</strong>/<strong>14%</strong> and Prysmian <strong>6%</strong>/<strong>18%</strong>; FY25 EBITDA EUR 390m beat initial guidance by <strong>10%</strong>; Q1 2026 EBITDA EUR 97m cleared consensus by <strong>15%</strong>; four beats and one miss in L5 quarters; management has beaten EBITDA guidance midpoint in every full year since 2021</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 — Sufficient TSR / valuation upside. <span class="g gB">B</span></strong> PEG <strong>0.5x</strong> is sector-cheapest; EPS 24MF DKK 44.5 (FactSet); P/E <strong>25.0x</strong> at 75th percentile of own history — not cheap in absolute terms; Jefferies DKK 1,305 target implies ~<strong>24%</strong> upside from DKK 1,052; DNB Carnegie DKK 1,070 implies ~<strong>2%</strong> upside; upside is present but asymmetric — requires 2027 flawless delivery to be realised</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Cohort-relative calibration note:</strong> NKT's E1/E2 grades (both A) are the highest in the grid-hardening cohort; Nexans carries E1=B (CEO/CFO departures and GSI delay risk lower the internal change forces quality) and PRY carries E1=B (Encore Wire integration complexity); NKT's change forces are structurally cleaner and more quantified than peers — the A grade is cohort-relative, not absolute-universe</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">6 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gB">B</span></strong> <span class="s-pos">Technical momentum strong; thematic fit exceptional; setup identification (capacity-expansion compounder) is the clearest in the cohort</span>; sell-side momentum is a drag; value-chain dynamics highly favourable</li><li><strong>Group 1 momentum. <span class="g gB">B</span></strong> Stock near 52-week high; sell-side mixed (only <strong>31%</strong> Buy); thematic fit B; combined positive but not A</li><li><strong>Group 2 simplicity. <span class="g gB">B</span></strong> Two fulcrum drivers (HV capacity ramp + pricing power); independent but positively correlated; Applications segment adds moderate complexity</li><li><strong>Group 3 philosophy. <span class="g gB">B</span></strong> Value-chain dynamics are strongly favourable; operator and business quality assessments deferred to ESA per procedure</li><li><strong>Group 4 riskiness. <span class="g gC">C</span></strong> False Friend ACH is dominant in the Risks report (zero disconfirming items); Karlskrona EUR 300m capex overrun; concurrent CFO + divisional management transitions; acknowledged risk — does not block progress at Triaging</li><li><strong>Group 5 optionality. <span class="g gNR">NR</span></strong> Not in scope at Triaging</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gB">B</span></strong> Technical momentum above 200-day average; DKK 1,052 near 52-week high; sell-side SSEM composite -4; only <strong>31%</strong> Buy; thematic alignment strong</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gB">B</span></strong> Two primary EPS drivers (HV capacity ramp drives volume; structural pricing power drives margin); drivers are correlated (same demand supercycle underpins both); Applications segment adds moderate complexity via Central European competitive dynamics; fulcrum count: 2 — within guardrail</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gB">B</span></strong> Value-chain dynamics confirmed as highly favourable at Triaging depth (NKT commands pricing power over utilities; metal pass-through eliminates commodity risk); operator and business quality deferred to ESA</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gC">C</span></strong> False Friend ACH dominates the Risks report BLUF; EUR 300m Karlskrona overrun is a real delivery scratch; negative NWC acts as short-term debt and could reverse quickly on order intake slowdown; concurrent management transitions are a monitoring flag</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Post-2027 capital return optionality flagged (Jefferies models EUR 2.7bn net cash by 2030; buybacks likely) — not in scope at Triaging</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Cohort-relative building blocks note:</strong> NKT's Group 4 (riskiness <span class="g gC">C</span>) is the weakest group and reflects the EUR 300m overrun and False Friend ACH; Nexans carries Group 4 at a similar level (GSI delay + CEO/CFO turnover); PRY carries Group 4 at B (cleaner execution, no overrun flagged); across the cohort, Group 4 is the shared weak point — execution risk is systemic in EHV cable manufacturing</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Progress to Early-Stage Assessment. <span class="g gA">A</span></strong> <span class="s-pos">NKT clears every Triaging gate</span>; it is the highest-priority stock in the cohort; the only question is whether the 2027 capacity ramp executes on time and whether the False Friend risk is correctly weighted</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment (high conviction)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> No conditions; NKT clears Triaging gates cleanly</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Researcher to run Business Foundations and Leadership Foundations queries before ESA begins — specifically verify Karlskrona commissioning timeline and Q2 2026 execution data; (2) Watson to resolve the False Friend ACH weighting at ESA before any capital deployment recommendation — zero disconfirming items in the ACH is a flag that demands explicit analytical treatment, not a default park</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">63 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gB">B</span></strong> <span class="s-pos">NKT has the strongest change forces in the cohort</span> but a mid-range Pillar II driven by mixed sell-side momentum and a credibility-damaging Karlskrona capex overrun; overall verdict is B — material upside with execution risk that must be monitored</li><li><strong>Load-bearing tension. <span class="g gB">B</span></strong> <span class="s-mid">EUR 13.5bn backlog locks earnings to 2030; but the EUR 300m overrun and <strong>142%</strong> whistleblower spike demand verification before ESA-stage capital</span> — positive thesis and execution risk are both genuine</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-a" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gA">A</span> <span class="secn">18 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gA">A</span></strong> <span class="s-pos">Three convergent change forces, peer-leading earnings trajectory, and a growth-adjusted valuation</span> that prices in less than peers; the only drag is valuation at 75th percentile of own history which is fair-to-full rather than cheap</li><li><strong>E1 verdict. <span class="g gA">A</span></strong> Three structural drivers converging on a single capacity expansion; backlog visibility exceptional</li><li><strong>E2 verdict. <span class="g gA">A</span></strong> <strong>15%</strong> revenue CAGR, <strong>28%</strong> EPS CAGR 2025–28E; <strong>100%</strong> beat rate on full-year EBITDA guidance over L4Y</li><li><strong>E3 verdict. <span class="g gB">B</span></strong> Valuation is fair-to-full; PEG <strong>0.5x</strong> is sector-cheapest; but DNB Carnegie DKK 1,070 implies ~<strong>2%</strong> downside from current</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-a" data-spy>Element E1 — Required input change forces <span class="g gA">A</span> <span class="secn">7 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E1 (Required input change forces) verdict. <span class="g gA">A</span></strong> <span class="s-pos">Three convergent structural change forces</span> — external demand supercycle, internal strategic pivot, capacity expansion — all pulling in the same direction with no plausible early-reversal scenario; NKT's pure-play HV positioning makes it the cleaner expression of all three forces vs Nexans and Prysmian</li></ul></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1 — External demand change force: <span class="g gA">A</span></strong> <span class="s-pos">ENTSO-E projects 2031–35 European offshore HVDC network investment at <strong>41%</strong> above 2025–30 levels</span>; ~20,000km of HVDC cable auctions underway in Europe alone; data centre electricity demand projected +<strong>140%</strong> by 2060; energy security mandates creating structural HVDC interconnector pipeline beyond wind cycle — all three external forces are additive and multi-decade<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>EU policy lock-in:</strong> REPowerEU, Fit-for-55, and the EU Action Plan for Grids collectively commit €<strong>584bn</strong> to grid investment through 2030; political reversibility risk is low</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Beyond-wind demand:</strong> subsea interconnectors (North Sea Link, GrePower, Viking Link successors), onshore HVDC backbones, and data-centre tie-ins provide multi-sector demand diversification not dependent on a single policy cycle</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ1 — Internal strategic change force: <span class="g gA">A</span></strong> <span class="s-pos">"Charging Forward" strategy (Nov-25) pivots NKT from investment-phase to execution-phase</span>; new three-division structure (Transmission / Distribution / Grid Solutions) aligns operational accountability to end-market; Photonics divestment complete; capital allocation <strong>100%</strong> concentrated on HV cable execution — no strategic distraction risk<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>CEO execution mandate:</strong> Westerlind appointed specifically to execute existing strategy, not pivot it; lower "new-CEO disruption" risk than Nexans (two departures) or Prysmian (CEO succession April-24)</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>SolidAl confirmation signal:</strong> EUR 192m acquisition, <strong>7.0x</strong> EV/EBITDA with full synergy (EUR 7m) confirmed by Q4 2025 — M&amp;A execution record is clean to date</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA3 CQ1 — Capacity change force: <span class="g gA">A</span></strong> <span class="s-pos">Karlskrona third extrusion tower delivers ~<strong>35%</strong> Transmission capacity uplift when operational in 2027</span>; <em>Eleonora</em> cable-lay vessel adds offshore installation capability; EUR 13.5bn backlog locks future volume at doubled revenue-per-km vs 2019–21 vintage contracts — structural pricing improvement is already contracted, not speculative<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Backlog composition:</strong> 75–<strong>80%</strong> of group EBITDA is HV/EHV; Karlskrona delivers at EBITDA margins 5–7pp above the group average — capacity ramp is margin-dilutive in the near term (ramp-up costs) and strongly margin-accretive from 2027</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Peer comparison:</strong> Nexans order backlog EUR 8bn; Prysmian EUR 12bn; NKT EUR 13.5bn on a smaller revenue base = highest backlog/revenue ratio in the cohort</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA4 CQ1 — Backlog quality and pricing vintage: <span class="g gA">A</span></strong> <span class="s-pos">EUR 13.5bn backlog (Q1 2026) is dominated by 2023–26 vintage contracts</span> signed at HVDC cable prices that are 40–<strong>60%</strong> above the 2019–21 vintage; the pricing improvement is already contracted and cannot be reversed by short-term copper price movements; <em>revenue-per-km on Karlskrona capacity is ~2× the historical average on a metal-adjusted basis</em><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Backlog duration:</strong> The backlog covers ~5 years of Transmission capacity at FY25 production rates; visible revenue to 2031 without a single new order required; <span class="s-pos">no other cohort peer has equivalent forward revenue lock</span></div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Backlog concentration check:</strong> Largest single project not disclosed but management guides no single project &gt; ~<strong>15%</strong> of total backlog; concentration risk is manageable</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Pricing floor protection:</strong> Contracts include cost escalation clauses for labour and energy inflation; copper is fully pass-through in all contracts; the margin floor is structurally protected</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA5 CQ1 — Data-centre and new-load demand overlay: <span class="g gB">B</span></strong> <span class="s-mid">Data centre electricity demand is an additive but secondary demand driver</span>; IEA projects European data-centre power demand +<strong>40%</strong> by 2030 requiring new transmission infrastructure; NKT is already working on grid connection cables for data centres in the Nordic region; <em>not yet a primary revenue source but reinforces demand ceiling</em><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>AI-capex acceleration signal:</strong> Hyperscaler (Microsoft, Google, Meta) European data centre announcements in 2025–26 imply structural grid connection requirements in NKT's core geographies (Denmark, Germany, Netherlands)</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Secondary to offshore wind:</strong> Data centre demand is incremental to the offshore wind and interconnector backlog; it does not displace it; it is an upside option on top of a contracted base</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (Element E1):</strong> The strongest counter is <span class="s-mid">demand timing slippage</span>: permitting delays, supply-chain bottlenecks, and developer financing failures could defer 2027–28 volume ramp; this is real but addressed by EUR 13.5bn contracted backlog — demand is not in question, execution timeline is; counter rated as monitoring risk, not invalidating</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (Element E1):</strong> (1) Researcher to verify Karlskrona Q3/Q4 2026 commissioning milestones via Q2 2026 earnings call transcript and investor day materials; (2) Watson to track ENTSO-E 2025 Ten-Year Network Development Plan updates for any capacity-auction deferrals</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-a" data-spy>Element E2 — Required case outputs <span class="g gA">A</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E2 (Required case outputs) verdict. <span class="g gA">A</span></strong> <span class="s-pos">NKT leads the cohort on earnings trajectory by a clear margin</span>: <strong>15%</strong> revenue CAGR and <strong>28%</strong> EPS CAGR 2025–28E vs Nexans <strong>3%</strong>/<strong>14%</strong> and Prysmian <strong>6%</strong>/<strong>18%</strong>; four consecutive EBITDA beats vs guidance; the output pathway is contracted, not forecast-dependent</li></ul></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E2 RA1 CQ1 — Near-term earnings trajectory: <span class="g gA">A</span></strong> <span class="s-pos">FY25 EBITDA EUR 390m (+EUR 100m YoY); Q1 2026 EBITDA EUR 97m (<strong>15%</strong> beat consensus)</span>; management has exceeded full-year EBITDA guidance in every year since 2021; 2026 guidance of EUR 450–490m set conservatively (mid-singles below analyst consensus) — "beats and raises" pattern is structural given conservative guidance posture<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Beat composition:</strong> Q1 2026 beat driven by Transmission margin strength (Q1 EBITDA margin <strong>16.0%</strong> vs FY25 <strong>14.3%</strong>); Applications margin headwind from Central European competition is the near-term drag</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>2030 target visibility:</strong> Management guides &gt;EUR 900m EBITDA by 2030 from EUR 390m in FY25 — a <strong>2.3x</strong> uplift; Jefferies models EUR 905m at conservative assumptions; the gap between current and 2030 earnings is the investment thesis in summary</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 RA2 CQ1 — EPS CAGR and re-rating path: <span class="g gA">A</span></strong> <span class="s-pos"><strong>28%</strong> EPS CAGR 2025–28E (Jefferies estimate)</span>; DKK 44.55 24MF EPS (FactSet) vs DKK current P/E <strong>25.0x</strong> — if CAGR holds, P/E will compress naturally from <strong>25.0x</strong> to sub-<strong>10x</strong> on 2030 earnings at flat price; the re-rating upside is unlocked by <em>time</em> not by multiple expansion<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Peer-relative EPS growth:</strong> PRY EPS CAGR <strong>18%</strong> (positive), NEX EPS CAGR <strong>14%</strong> (positive) — NKT leads the cohort at <strong>28%</strong>; strongest in peer group on the metric that drives TSR in compounders</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>FCF inflection:</strong> FCF turns positive post-2026 as peak capex cycle ends; Jefferies models EUR 2.7bn net cash by 2030 — post-inflection buyback yield is the next TSR driver</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E2 RA3 CQ1 — Annual EBITDA progression and management guidance posture: <span class="g gA">A</span></strong> FY22 EBITDA EUR 192m → FY23 EUR 290m → FY24 EUR 344m → FY25 EUR 390m → FY26E guidance EUR 450–490m → 2030 target &gt;EUR 900m; <span class="s-pos">management has beaten full-year EBITDA guidance midpoint in every year since 2021</span>; guidance is intentionally set mid-singles below consensus per Jefferies (Jefferies: "management deliberately builds buffer into full-year targets")<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Beat frequency:</strong> Four full-year beats in L4Y (FY22, FY23, FY24, FY25); one partial miss in the Applications segment in H1 2025; the Transmission segment has never missed annual guidance</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>2026 Q1 beat detail:</strong> EUR 97m EBITDA in Q1 2026 vs EUR 84m consensus (<strong>15%</strong> beat); beat driven by Transmission segment project timing and margin improvement; Applications segment contributed a small drag from Central European competition — the beat was concentrated in the value-generating segment</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E2 RA4 CQ1 — Capital efficiency trajectory: <span class="g gB">B</span></strong> <span class="s-mid">ROIC <strong>8.4%</strong> underlying (adjusted for negative NWC) is below sector average today</span>; <em>headline ROCE <strong>24%</strong> is flattering — negative NWC of EUR 1,524m (-<strong>35.8%</strong> of revenue) acts as hidden debt</em>; post-2027 ROIC trajectory depends on Karlskrona delivering at modelled utilisation rates; <span class="s-pos">Jefferies models ROIC expanding to &gt;<strong>20%</strong> by 2029 as capex falls and capacity utilises</span><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>NWC quality check:</strong> Negative NWC is predominantly from customer prepayments on long-cycle HVDC projects; this is structural (prepayments precede revenue recognition) not alarming; but prepayments reverse if projects cancel or delay — this is the balance-sheet component of the False Friend ACH</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>FCF trajectory:</strong> FY25 FCF -EUR 244m; FY26E FCF expected -EUR 150–200m (capex peak); FY27E FCF expected neutral to slightly positive; FY28–30E FCF positive and accelerating; <span class="s-pos">FCF inflection in 2027 is the investment case trigger for ESA-stage deployment</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (Element E2):</strong> <span class="s-mid">Three consecutive EBITDA misses</span> (Q3 2025, Q4 2025, Q1 2026... <em>wait — Q1 2026 was a <strong>15%</strong> beat; the near-term miss risk was avoided</em>); Applications segment EBITDA margin contracted <strong>290bps</strong> YoY in early 2025 from Central European competition — this is the earnings risk within the headline trajectory; rated monitoring risk</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Downstream actions (Element E2):</strong> (1) Watson to update E2 with Q2 2026 actuals when published (July 2026) — must confirm Transmission margin is tracking above 2026 guidance; (2) Researcher to clarify Applications segment margin recovery timeline at ESA stage</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-b" data-spy>Element E3 — Sufficient TSR / valuation upside <span class="g gB">B</span> <span class="secn">5 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E3 (Sufficient TSR / valuation upside) verdict. <span class="g gB">B</span></strong> <span class="s-mid">DKK 1,052 is near-full at DNB Carnegie's DKK 1,070 fair value</span>; Jefferies DKX 1,305 requires 2030 roll-forward and flawless execution; PEG <strong>0.5x</strong> is sector-cheapest but valuation is not a compelling asymmetric entry; sufficient upside at B — not a cheap stock, not a stretched one</li></ul></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E3 RA1 CQ1 — Absolute valuation check: <span class="g gB">B</span></strong> P/E <strong>25.0x</strong> forward (FactSet); 75th percentile of NKT's 10-year own history; EPS 24MF DKK 44.55; price DKK 1,052 — the stock is fairly valued on near-term earnings at the high end of own-history multiples; upside to a <strong>30x</strong> P/E (justified by <strong>28%</strong> CAGR) would be ~DKK 1,335, aligning with Jefferies; downside at <strong>20x</strong> (de-rating on execution miss) would be ~DKK 890<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Decimal protocol:</strong> DKK 1,052 / DKK 44.55 = <strong>23.6x</strong> on next-12M EPS (factoring in some forward growth); FactSet 24MF P/E registers <strong>25.0x</strong> on consensus estimates — consistent</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>52-week context:</strong> DKK 479–1,135 range; current DKK 1,052 = <strong>93%</strong> of 52-week high; stock has already captured a <strong>120%</strong> re-rating from its 2024 trough; the easy money has been made</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E3 RA2 CQ1 — Sell-side target range: <span class="g gB">B</span></strong> Jefferies Buy DKK 1,305 (2030 roll-forward); DNB Carnegie Hold DKK 1,070; FactSet consensus not disclosed (only <strong>31%</strong> Buy); <span class="s-mid">blended PT ~DKK 1,187 implies ~<strong>13%</strong> upside from DKK 1,052</span>; this is "adequate" not "compelling"; the TSR sufficient bar at Triaging is satisfied at B<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Two-broker risk:</strong> Only 13 analysts cover NKT-DK; with only <strong>31%</strong> Buy-rated the majority are Hold — groupthink risk in either direction is elevated vs PRY (39 analysts, more diverse views)</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 RA3 CQ1 — Growth-adjusted valuation vs cohort: <span class="g gB">B</span></strong> PEG ratio = P/E <strong>25.0x</strong> ÷ EPS CAGR <strong>28%</strong> = <strong>0.89x</strong>; <span class="s-pos">sector-cheapest in the cohort</span>: PRY PEG <strong>25.9x</strong> ÷ <strong>18%</strong> = <strong>1.44x</strong>; NEX PEG <strong>16.9x</strong> ÷ <strong>14%</strong> = <strong>1.21x</strong>; NKT's PEG of <strong>0.89x</strong> is a genuine discount to growth despite the headline P/E appearing high<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>What PEG misses:</strong> PEG assumes linear growth; NKT's EPS trajectory is backloaded (2027 ramp-dependent); if the ramp slips 12 months, PEG-based value disappears temporarily; the investor must hold through the earnings trough</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>TSR scenario analysis:</strong> Base case (2027 on-time): stock re-rates to <strong>28x</strong> P/E on 2028 earnings ~DKK 90 EPS = DKK 2,520 (<strong>140%</strong> from current); bear case (12-month ramp slip, <strong>20x</strong> P/E on 2027 earnings): DKK ~800 (-<strong>24%</strong> from current); <span class="s-mid">TSR distribution is right-skewed but the downside is meaningful</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Counter-view considered (Element E3):</strong> Bull case: PEG <strong>0.5x</strong> is genuinely cheapest in sector; if 2027 ramp executes cleanly the stock re-rates to <strong>30x</strong> forward P/E on 2028 earnings = DKK ~1,800+; bear case: DNB Carnegie Hold at DKK 1,070 implies the stock is already at fair value; rated B because the risk/reward is balanced rather than asymmetric</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Downstream actions (Element E3):</strong> (1) ESA valuation work to run DCF against Jefferies and DNB Carnegie models explicitly; (2) Watson to flag if price moves &gt;<strong>10%</strong> from current in either direction before ESA begins — re-rate entry or risk-off signal</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-b" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">45 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gB">B</span></strong> <span class="s-pos">Technical momentum, thematic fit, and value-chain dynamics are strong</span>; sell-side earnings momentum is the drag; case simplicity is well within guardrails; False Friend ACH in the Risks report is the key monitoring item</li><li><strong>Group 1 momentum. <span class="g gB">B</span></strong> Stock near 52-week high; sell-side SSEM composite -4; only <strong>31%</strong> Buy — combined B</li><li><strong>Group 2 simplicity. <span class="g gB">B</span></strong> Two primary EPS drivers, both correlated to same demand cycle; within simplicity guardrails</li><li><strong>Group 3 philosophy. <span class="g gB">B</span></strong> Value-chain dynamics confirmed highly favourable; deeper E9/E10/E12/E13 deferred to ESA</li><li><strong>Group 4 riskiness. <span class="g gC">C</span></strong> False Friend ACH dominant; EUR 300m overrun; management transitions; not blocking at Triaging</li><li><strong>Group 5 optionality. <span class="g gNR">NR</span></strong> Not applicable at this stage</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-b" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gB">B</span> <span class="secn">13 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 (Case momentum) verdict. <span class="g gB">B</span></strong> <span class="s-pos">Stock near 52-week high and above 200-day average</span>; <span class="s-mid">SSEM composite -4 and only <strong>31%</strong> Buy-rated is a headwind</span>; combined assessment is B — positive technical momentum, mixed sell-side</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-b" data-spy>Element E4 — Technical momentum <span class="g gB">B</span> <span class="secn">4 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E4 (Technical momentum) verdict. <span class="g gB">B</span></strong> <span class="s-pos">DKK 1,052 vs 52-week range DKK 479–1,135</span>; near high, above 200-day; positive momentum signal; <span class="s-mid">DNB Carnegie downgrade to Hold at DKK 1,070 is a directional warning</span> — not a momentum killer but warrants monitoring</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E4 RA1 — Price trend analysis: <span class="g gB">B</span></strong> DKK 1,052 (22-Jun-26); 52-week range DKK 479–1,135; current = <strong>93%</strong> of 52-week high; stock has doubled from 2024 trough; <em>source: Yahoo Finance fallback — prices.json did not contain NKT-DK</em>; momentum positive but not breakthrough (not at new all-time highs)<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Technical context:</strong> Q1 2026 earnings beat (EUR 97m EBITDA, <strong>15%</strong> above consensus) drove the most recent leg; stock had been consolidating in the DKK 980–1,050 range before the beat</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Peer comparison:</strong> PRY-IT at <strong>99%</strong> of 52-week high (EUR 155.45 vs EUR 157.25 high); NEX-FR at <strong>94%</strong> (EUR 158.60 vs EUR 169.00 high); NKT momentum is broadly in line with cable cohort peers</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E4 RA2 — Relative momentum vs cohort: <span class="g gB">B</span></strong> NKT at <strong>93%</strong> of 52-week high; PRY-IT at <strong>99%</strong> of 52-week high (EUR 155.45 vs 157.25); NEX-FR at <strong>94%</strong> of 52-week high (EUR 158.60 vs 169.00); <span class="s-mid">NKT is the weakest momentum stock in the cohort on a 52-week basis despite having the strongest underlying earnings trajectory</span>; the gap reflects the DNB Carnegie downgrade overhang and the market's higher weighting on PRY's US diversification narrative<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Divergence signal:</strong> PRY outperforming NKT by ~70 TSR points over L1.5Y (per Jefferies leadership report data); this divergence is notable given NKT's stronger fundamental case; <span class="s-mid">either PRY is overvalued or NKT is undervalued — ESA to arbitrate</span></div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Volume analysis:</strong> Not available in local data; Yahoo Finance fallback does not provide volume time series; flagged as data gap for ESA initiation</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (Element E4):</strong> <span class="s-mid">DNB Carnegie downgraded to Hold with DKK 1,070 fair value</span>; if consensus shifts to Hold/Sell from current mixed Buy/Hold, a de-rating from <strong>25x</strong> to <strong>20x</strong> P/E is plausible; this is a real downside scenario, not dismissed</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Downstream actions (Element E4):</strong> (1) Watson to track price vs 200-day average monthly; flag if stock breaks below 200-day on high volume; (2) Confirm 200-day average from local data or Yahoo Finance at ESA initiation</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-a" data-spy>Element E5 — Thematic fit <span class="g gA">A</span> <span class="secn">5 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict <span class="g gA">A</span> — double-weight element.</strong> <span class="s-pos">NKT is the purest expression of the grid-hardening / energy transition thesis in the peer cohort</span>; 75–<strong>80%</strong> of group EBITDA from HV/EHV vs 20–<strong>25%</strong> for Nexans and Prysmian; no China exposure; fully contracted backlog; rated A in the cohort context</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1 — Thematic alignment: <span class="g gA">A</span></strong> <span class="s-pos">Grid hardening thesis aligns NKT to all five structural demand drivers</span>: offshore wind (largest single backlog component), HVDC interconnectors (North Sea, Baltic, Mediterranean), energy security (REPowerEU), grid electrification (EV charging, heat pumps), and data centres (power pull demand); thematic fit is unusually broad for a single-product company<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Purity of fit:</strong> 75–<strong>80%</strong> HV/EHV EBITDA share is the highest in the global cable sector; Prysmian's equivalent is ~<strong>25%</strong> and Nexans ~<strong>25%</strong>; NKT is the clearest single-stock expression of the theme</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>No thematics active flag:</strong> Richard confirmed no active Viewforth thematics to inject (Q5 = no thematics); rated B not A in MR3 because of this; the underlying thematic fit remains A in a vacuum</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2 — Downside thematic scenarios: <span class="g gB">B</span></strong> <span class="s-mid">Two legitimate downside scenarios</span>: (1) EU grid investment timeline slips — real but multi-decade structural, not cyclical; (2) Offshore wind programme cuts — UK is accelerating, Nordic states are accelerating, Mediterranean states are beginning; no credible scenario exists where all European markets simultaneously pause HV cable demand<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>China protection moat:</strong> Chinese cable manufacturers (Hengtong, ZTT) are excluded from European offshore wind tenders under EU strategic procurement rules; NKT's European-only geography is a structural tariff and security moat</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA3 — Cohort thematic purity ranking: <span class="g gA">A</span></strong> <span class="s-pos">NKT ranks #1 in the cohort on thematic purity by every available metric</span>: HV/EHV EBITDA share 75–<strong>80%</strong> (PRY ~<strong>25%</strong>, NEX ~<strong>25%</strong>); backlog/revenue ratio highest in global sector; geographic exposure exclusively European (eliminates US copper oversupply risk and Chinese competition risk); pure-play cable (post-Photonics divestment) vs NEX/PRY which retain lower-voltage distribution and accessories segments<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Thematic premium justification:</strong> The thematic purity premium is structural: institutional funds tracking the "energy transition infrastructure" theme will systematically overweight NKT relative to diversified peers; this provides a persistent floor on the multiple that partially offsets the FCF-negative phase headwind</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>No Viewforth thematic active (context note):</strong> Richard confirmed no active Viewforth thematics for this batch (Q5); <span class="s-mid">the thematic case rests on the fundamentals of the grid-hardening sector, not on a Viewforth thematic injection</span>; no adjustment required</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Counter-view considered (Element E5):</strong> <span class="s-mid">Prysmian and Nexans outperformed NKT by ~70 and ~25 percentage points TSR respectively over the last 1.5 years</span>; if the market re-rates Prysmian's US acquisition (Encore Wire) or Nexans' US beachhead (Republic Wire) as a superior growth vector, NKT's European purity may become a multiple discount rather than a premium</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Downstream actions (Element E5):</strong> (1) Watson to re-assess thematic weighting at ESA if Richard activates any Viewforth thematic that specifically includes grid-hardening; (2) No immediate action — thematic case is intact</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-c" data-spy>Element E6 — Sell-side earnings momentum <span class="g gC">C</span> <span class="secn">4 findings</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E6 (Sell-side earnings momentum) verdict. <span class="g gC">C</span></strong> <span class="s-neg">SSEM composite score -4 (FactSet); only <strong>31%</strong> Buy-rated; L3M EPS revisions -3; L6M EPS revisions -4</span>; Applications segment headwinds are driving negative estimate drift; rated C — not a blocking signal at Triaging but must improve before ESA-stage capital deployment is appropriate</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E6 RA1 — SSEM composite analysis: <span class="g gC">C</span></strong> FactSet SSEM data (22-Jun-26): Buy% <strong>31%</strong> (only 4 of ~13 analysts at Buy); momentum score -4; EPS revisions L1M: 0, L3M: -3, L6M: -4, L12M: +3; EBITDA revisions L1M: -2, L3M: -3; <em>the L12M positive is from 2025 re-rating, not recent momentum</em>; DNB Carnegie explicitly downgraded to Hold in Jun-26 on DKK 1,070 fair value — <span class="s-mid">sell-side consensus is moving in the wrong direction at the margin</span><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Applications margin headwind:</strong> Central European competition in the low/medium voltage distribution segment is driving the estimate cuts; the Transmission segment remains on track — the negative revisions are not Transmission-driven, which is the key reassurance</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Peer comparison:</strong> PRY-IT SSEM score +9 (L12M EPS revisions +16, L3M +3); NEX-FR SSEM score -2 (less negative than NKT); NKT has the weakest sell-side earnings momentum in the cohort</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E6 RA2 — Applications vs Transmission estimate divergence: <span class="g gC">C</span></strong> <span class="s-mid">Applications segment EBITDA margin contracted <strong>290bps</strong> YoY in early 2025</span>; this is driving the -3 L3M EPS revisions at the aggregate level; <em>Transmission segment estimates are NOT being cut — the negative SSEM is solely Applications-driven</em>; this is critical context: the value-generating segment (Transmission, 75–<strong>80%</strong> of EBITDA) is performing in line with or above consensus, while the lower-value segment (Applications, 20–<strong>25%</strong>) is underperforming<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Analyst Buy% vs forecast:</strong> <strong>31%</strong> Buy-rated vs actual Q1 2026 beat of <strong>15%</strong> above consensus — the analyst community is behind the curve; most Hold ratings appear to reflect valuation concern (near DNB Carnegie fair value) rather than fundamental deterioration</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Estimate revision leading indicator:</strong> EPS revisions L1M = 0 (flat); the negative momentum has paused; if Q2 2026 shows Applications margin stabilisation, the SSEM score should recover from -4 toward 0 or positive</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (Element E6):</strong> <span class="s-mid">Negative SSEM may reflect conservative re-basing after Q4 2025 earnings, not structural deterioration</span>; Jefferies remains Buy at DKK 1,305 with a 2030 earnings base; the negative revisions are Applications-driven, not Transmission-driven — and Transmission is <strong>80%</strong> of value; C rating reflects current data, not a structural downgrade signal</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Downstream actions (Element E6):</strong> (1) Watson to re-check SSEM after Q2 2026 results (Jul-26); if Transmission EBITDA beats and Applications margin stabilises, SSEM should recover; (2) Flag if L3M EPS revisions deepen further below -5 — would require E6 downgrade to D at ESA</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-b" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gB">B</span> <span class="secn">15 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 (Case simplicity) verdict. <span class="g gB">B</span></strong> <span class="s-pos">Two primary EPS drivers (HV capacity ramp + structural pricing power); both correlated to the same demand supercycle</span>; within simplicity guardrails; Applications segment adds moderate complexity but does not bifurcate the investment thesis</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-b" data-spy>Element E7 — Required case simplicity guardrails <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict <span class="g gB">B</span> — double-weight element.</strong> <span class="s-pos">NKT's core thesis reduces to one dominant driver</span>: 2027 Karlskrona capacity ramp × contracted pricing = EBITDA inflection; the Applications segment is a separate noise source but is not load-bearing for the investment case; simplicity guardrails satisfied</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1 — Fulcrum driver count: <span class="g gB">B</span></strong> Primary driver: Transmission segment HV capacity ramp (EUR 13.5bn backlog × contracted margin = EUR 900m+ 2030 EBITDA); secondary driver: pricing power via oligopoly structure (NKT + Nexans + Prysmian control EHV cable globally, enabling sustained through-cycle pricing); <span class="s-mid">one interference source: Applications segment Central European competitive margin pressure</span>; the interference is ring-fenced — it cannot invalidate the Transmission thesis<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Driver correlation check:</strong> Both primary and secondary drivers are correlated (same structural demand supercycle underpins volume and pricing power); correlation is positive and intentional — adds concentration risk but not complexity risk</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Fulcrum count = 2:</strong> Within the E7 guardrail (≤3 fulcrum drivers for B; &gt;4 for C or below)</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2 — False-complexity tests: <span class="g gB">B</span></strong> <span class="s-mid">FX risk is real (<strong>5%</strong> SEK move = EUR 57m EBT impact)</span>; <em>copper passthrough fully eliminates commodity risk on the revenue line</em>; debt is net-cash (EUR 963m); no complex financial structures; no minority interests; no geographic complexity (European-only); the FX exposure is the single complexity item not fully neutralised<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>FX qualification:</strong> SEK/EUR exposure exists because Karlskrona costs are SEK-denominated; managed through hedging programme; not a thesis-breaker but should be confirmed at ESA</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA3 CQ1 — Management transitions and execution complexity: <span class="g gB">B</span></strong> <span class="s-mid">CFO transition from Line Fandrup to Michael Yong (April 2026) is potentially disruptive at a critical capex-peak period</span>; Yong comes from Renault's new EV division (Renault Ampere) — no prior cable-sector experience disclosed; this increases CFO learning curve risk during Karlskrona's most complex execution phase; <em>rated B because incoming CEO succession was internal and stable; the CFO transition is the only new complexity element</em><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Westerlind continuity:</strong> CEO Westerlind has unbroken domain continuity since 2017; the CEO succession was internal and smooth; management continuity at CEO level is strong</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Divisional transitions:</strong> Applications division leadership changes in 2025 contributed to the <strong>290bps</strong> EBITDA margin contraction; Watson views this as a ring-fenced complexity within a larger thesis, not a thesis-level risk</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA4 CQ1 — Currency complexity assessment: <span class="g gB">B</span></strong> <span class="s-mid">SEK/EUR exposure on Karlskrona-based costs</span>; <em>a <strong>5%</strong> SEK appreciation = EUR 57m negative EBT impact (management disclosure)</em>; SEK exposure is structural (manufacturing in Sweden, contracts in EUR/USD); hedging programme in place but hedge horizon typically 12–18 months; <span class="s-mid">unhedged SEK tail risk over the 5-year investment horizon is a real but manageable complexity</span><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Hedging adequacy:</strong> NKT does not disclose hedge ratios publicly; Jefferies estimates 70–<strong>80%</strong> of L12M SEK exposure is hedged; the residual is the complexity item, not the total exposure</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Context vs peers:</strong> NEX-FR has EUR/USD exposure on US Republic Wire acquisition; PRY-IT has EUR/USD exposure on Encore Wire; currency complexity is present across the cohort, not unique to NKT</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (Element E7):</strong> <span class="s-mid">Concurrent management transitions (CFO Michael Yong replacing Line Fandrup April-26, Applications divisional changes) could introduce execution complexity</span> during a critical 2026–2027 Karlskrona ramp period; this is a monitoring risk, not a simplicity-guardrail breach</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Downstream actions (Element E7):</strong> (1) ESA to confirm new CFO Michael Yong's integration and Q2 2026 guidance confirmation; (2) Watson to assess whether Applications margin headwind is ring-fenced or is beginning to affect Transmission resource allocation</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-a" data-spy>Element E8 — Fit with acceptable case setups <span class="g gA">A</span> <span class="secn">9 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gA">A</span></strong> <span class="s-pos">NKT fits two primary acceptable case setups with textbook clarity</span>: (1) Capacity-expansion compounder — the dominant identification; (2) Big demand change-driven EPS upgrade cycle — secondary; all 6 setup types assessed below</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA1 — Capacity-expansion compounder setup: <span class="g gA">A</span></strong> <span class="s-pos">Classic capacity-expansion compounder</span>: EUR 2bn peak capex 2024–26; contracted backlog EUR 13.5bn; Karlskrona tower 3 + Eleonora vessel capacity coming online 2027; EBITDA margins expanding from <strong>14.3%</strong> (FY25) to mid-20s (2030 target) on volume leverage; FCF inflection post-2027 as capex normalises to ~<strong>4%</strong> of revenue; <em>this is the setup Watson identified at Triaging May-26 (prior self-review debrief confirms E8 RA2 = primary)</em><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Compounder quality checks:</strong> ROIC is <strong>8.4%</strong> underlying (negative NWC flatters to <strong>24%</strong> headline); <strong>8.4%</strong> is below sector average today but expands dramatically post-2027 on higher margin and declining capex; the compounder thesis is <em>future ROIC</em>, not current ROIC</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Pattern match:</strong> closest sector compounder analogue = NextEra Energy in 2012–16 (capex heavy, backlog-driven, FCF-negative then inflecting); the setup is well-established</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1b — Compounder vs cyclical distinction: <span class="g gA">A</span></strong> <span class="s-pos">This is a compounder not a cyclical</span>: the earnings growth is contracted (not cyclically-driven), the capex programme is building permanent capacity (not maintenance spend), and the margin expansion pathway is locked in through long-duration contracts with inflation escalators; the risk is execution, not demand cycle reversal<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Compounder test 1 — durable competitive advantage:</strong> EHV oligopoly structure is structurally durable (see E11 RA4 — 5–7 year lead times for new entry); advantage is widening as NKT adds capacity ahead of competitors</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Compounder test 2 — reinvestment opportunity:</strong> EUR 2bn peak capex at &gt;<strong>20%</strong> target ROIC creates clear high-return reinvestment runway; <span class="s-pos">management is explicitly foregoing near-term returns to invest in a high-ROIC opportunity</span>; the absence of dividends since 2016 is a feature, not a bug, in this thesis</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Compounder test 3 — organic growth ceiling:</strong> EUR 13.5bn backlog implies ~5 years of organic growth at FY25 run-rates with zero new orders; organic growth ceiling is not yet visible on the horizon</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA2 — Big demand change-driven EPS upgrade setup: <span class="g gA">A</span></strong> <span class="s-pos">Structural demand supercycle</span> creating a sustained earnings upgrade cycle; 2025–2030 EPS CAGR <strong>28%</strong> is structural (backlog-contracted) not cyclical; both the volume driver and the pricing driver are demand-driven from the same electrification supercycle; rated as valid secondary setup but subordinate to the compounder primary</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA3 — Restructuring/self-help setup: <span class="g gNR">NR</span></strong> <em>No restructuring driver in the NKT investment case; Charging Forward is execution-phase, not cost-cutting; not applicable</em></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA4 — Balance-sheet repair setup: <span class="g gNR">NR</span></strong> <em>NKT is net-cash EUR 963m; no balance-sheet distress; not applicable</em></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA5 — Mean reversion / cyclical recovery setup: <span class="g gNR">NR</span></strong> <em>NKT is in the expansion phase of a structural supercycle, not a cyclical trough; not applicable</em></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA6 — Regulatory unlock / event-driven setup: <span class="g gNR">NR</span></strong> <em>No specific regulatory event driving the thesis; the regulatory backdrop (REPowerEU, EU Grid Action Plan) is a demand enabler, not a discrete regulatory unlock event; not applicable</em></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Counter-view considered (Element E8):</strong> <span class="s-mid">The compounder setup requires 2027 execution</span>; if Karlskrona commissioning slips 12+ months, the FCF inflection defers and the compounder thesis weakens toward a "speculative build" — this is the setup-failure scenario</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Downstream actions (Element E8):</strong> (1) Researcher to verify Karlskrona commissioning timeline at ESA — this is the single most important fact for the setup identification; (2) Watson to confirm FCF model assumptions at ESA (2027 FCF inflection date vs Jefferies model)</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 (Core philosophy) verdict. <span class="g gB">B</span></strong> <em>At Triaging, Element E11 (Value-chain dynamics) is in scope (second pass); Element E9 (Great operator), Element E10 (Advantaged business and widening competitive advantage), Element E12 (Supportive industry structure), and Element E13 (High secular growth potential) are not applicable at this stage.</em></li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">6 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gB">B</span></strong> <span class="s-pos">NKT commands clear pricing power over utility customers and operates within a protected oligopoly</span>; <span class="s-mid">the value-chain is exposed at the margin to customer leverage on project delays and to labour cost inflation at Karlskrona</span>; overall B — highly favourable dynamics with two monitoring risks</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E11 RA1 — Supplier bargaining power: <span class="g gB">B</span></strong> <span class="s-pos">Copper passthrough eliminates commodity risk</span>; steel and polymers partially hedged; Karlskrona real estate and machinery capex cannot be deferred — this is the EUR 300m overrun exposure source; <em>labour cost inflation in Sweden and Central Europe is an unhedged cost pressure</em>; supplier power is low except on labour</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA2 — Customer bargaining power: <span class="g gB">B</span></strong> <span class="s-pos">Customers (European TSOs: Elia, RTE, National Grid, Amprion) are long-contracted (5–15 year project timelines) with limited ability to dual-source</span>; only three global players (NKT, Nexans, Prysmian) can supply EHV subsea cable; customer switching cost is effectively infinite for awarded contracts; <span class="s-mid">the Great Sea Interconnector (GSI) delay at Nexans is a peer example of customer leverage on payment timing</span> — a reminder that TSO customers control cash flow timing on long-cycle projects</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA3 — Competitive intensity: <span class="g gB">B</span></strong> <span class="s-pos">Three-player EHV oligopoly (NKT / Nexans / Prysmian) is globally unique</span>; Chinese manufacturers excluded from European procurement; Prysmian is the largest, NKT the most margin-concentrated in HV; no new entrant viable within 10 years (manufacturing lead time + permitting); <span class="s-mid">Prysmian's Encore Wire acquisition strengthens US exposure, potentially intensifying European share competition</span> if transatlantic demand balances shift</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA4 — Entry barrier and new-entrant analysis: <span class="g gA">A</span></strong> <span class="s-pos">EHV submarine cable manufacturing is one of the highest-barrier industrial niches globally</span>; barriers include: (1) specialised manufacturing equipment (Caterpillar drives, extrusion equipment) with 5–7 year lead times; (2) cable-lay vessel fleet (limited global supply — fewer than 15 vessels capable of laying HVDC cable at depth); (3) accumulated installation know-how requiring decades of project execution; (4) customer relationship lock-in (utilities prefer proven suppliers for mission-critical infrastructure); (5) Chinese manufacturers face European procurement exclusion<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Vessel fleet as moat:</strong> NKT's Skagerrak and Orsino vessels plus new Eleonora (2027) give it 3 capable installation vessels; Prysmian's fleet includes Ulisse and Leonardo da Vinci; Nexans' Aurora and Nexans Skagerrak; the global fleet constrains new entrants from replicating the vertically integrated manufacturing+installation model</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Cost-of-entry:</strong> Building a new greenfield EHV cable factory requires EUR 500m+ capex + 7 years lead time + no guaranteed customers at start-up; <span class="s-pos">the economic moat is structurally self-reinforcing</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (Element E11):</strong> <span class="s-mid">Long-cycle TSO contracts create lumpy revenue recognition</span>; project delay (as per GSI at Nexans) can cause quarterly revenue misses without being P&amp;L-damaging long-term; quarterly noise from this source is structurally elevated vs simpler businesses</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Downstream actions (Element E11):</strong> (1) ESA to deepen E11 with specific NKT contract pricing and inflation-escalation clause analysis; (2) Watson to flag any news of TSO customer (Elia, RTE, Amprion) project deferrals — these are lead indicators for E11 deterioration</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 (Case riskiness) verdict. <span class="g gC">C</span></strong> <em>Light first-pass at Triaging per procedure. Deep element work (Elements E15–E19) is Early-Stage Assessment / Deep-Dive scope; noting below as not applicable at this stage. Key risks identified at Triaging depth for monitoring: (1) False Friend ACH (zero disconfirming items in Risks report BLUF — NWC illusion + P&amp;L illusion); (2) Karlskrona EUR 300m capex overrun; (3) <strong>142%</strong> spike in whistleblower complaints; (4) dual CFO + divisional management transitions; (5) antitrust probes Slovakia + Czech Republic; (6) Applications margin compression.</em></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 4 risk monitoring items (Triaging-depth, pre-ESA):</strong><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>False Friend ACH (highest-plausibility failure mode per Risks report BLUF):</strong> Zero disconfirming items returned in the BLUF; NWC prepayment illusion (EUR 1,524m) and copper-inflated revenue create dual false-friend risk — <span class="s-mid">P&amp;L may look healthy while order intake deteriorates</span>; <em>this ACH must be explicitly weighted and counter-argued at ESA before capital deployment</em></div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Karlskrona EUR 300m capex overrun:</strong> <span class="s-mid">The "first scratch" in management's conservative reputation (DNB Carnegie)</span>; <strong>40%</strong> cost blowout on the Karlskrona expansion was not forecast or disclosed early; raises questions about management cost control during the critical 2026–27 ramp phase</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Whistleblower complaint surge:</strong> <strong>142%</strong> YoY spike in internal whistleblower complaints in 2025 alongside <strong>75%</strong> temporary employee turnover — <em>Risks report flagged as operational strain signal</em>; <span class="s-mid">not typical for a well-run industrial at a capex peak</span>; requires direct investigation at ESA (E9 / E10 scope)</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext"><strong>Antitrust probes:</strong> Active antitrust investigations in Slovakia and Czech Republic; <span class="s-mid">shared legacy cartel litigation with Nexans</span>; fines if imposed would not be investment-case-invalidating but indicate persistent compliance culture issues</div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext"><strong>Applications segment EBITDA compression:</strong> <strong>290bps</strong> YoY margin contraction in early 2025 from Central European competition; <span class="s-mid">if compression deepens, it could offset Transmission upside and delay EBITDA target achievement</span></div></div><div class="subfinding"><span class="subnum">1.6</span><div class="subtext"><strong>Management TSR incentives:</strong> Absolute TSR-linked bonuses (not relative TSR vs peers); <span class="s-mid">management could receive maximum payouts during a broad market rally even if NKT underperforms PRY or NEX</span>; perverse incentive if market conditions normalise</div></div></div></div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e15-invalidating-attributes-nr" data-spy>Element E15 — Invalidating attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Structural ACH Screening -- We are looking for evidence that none of the 10 general invalidating ACHs applies; each structural risk must be explicitly tested and ruled out or mitigated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E15 (Invalidating attributes) is first assessed at Deep Dive</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e16-strenuously-seek-to-avoid-attributes-nr" data-spy>Element E16 — Strenuously seek-to-avoid attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case-Specific ACH Screening -- We are looking for identification and rigorous testing of the 2-4 case-specific alternate hypotheses most credible given this stock&#x27;s situation; avoiding generic lists or unexamined risks.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E16 (Strenuously seek-to-avoid attributes) is first assessed at Deep Dive</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e17-capital-constraining-attributes-nr" data-spy>Element E17 — Capital-constraining attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Volatility Profile -- We are looking for a manageable volatility profile: limited earnings variability, predictable news-flow, low short interest, and adequate liquidity for typical portfolio position sizes.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E17 (Capital-constraining attributes) is first assessed at Deep Dive</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e18-clear-transmission-mechanism-inputs-to-earnings-" data-spy>Element E18 — Clear transmission mechanism, inputs to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E18 (Clear transmission mechanism, inputs to earnings per share) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e19-monitorable-transmission-mechanism-leading-track" data-spy>Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E19 (Monitorable transmission mechanism, leading tracking indicators to earnings per share) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5 (Case optionality).</strong> <em>Not yet in scope at Triaging. Jefferies models EUR 2.7bn net cash by 2030 with post-cycle buyback optionality; post-2027 capital return programme is a potential ESA-era upside; flagged for Element E20 assessment at Early-Stage Assessment.</em></li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment; flagged for inclusion in NKT-DK ESA memo</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">5 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation. <span class="g gA">A</span></strong> <span class="s-pos">Progress NKT-DK to Early-Stage Assessment with high conviction</span>; it is the highest-priority stock in the grid-hardening cohort; the change-forces case is exceptional and the setup is clear; the Karlskrona execution risk and False Friend ACH are the two load-bearing items that ESA must resolve before capital deployment</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment — high conviction</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing — next-stage actions:</strong> ESA scope must cover Element E2 (deepened earnings model), Element E8 primary setup carve-out (Karlskrona commissioning timeline), Element E9 (Great operator — Westerlind deep assessment), Element E10 (Advantaged business), Element E12 (Supportive industry structure), Element E13 (High secular growth potential), Element E18 (Transmission mechanism), Element E19 (Monitorable tracking indicators), Element E20 (Nice-to-have attributes), and Section D (Pillar III position management); False Friend ACH from Risks report must receive explicit weighted treatment in the ESA</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If parking — reassessment criteria:</strong> N/A — NKT clears all Triaging gates; parking is not recommended at Triaging stage; the only scenario warranting delay would be a further EUR 200m+ Karlskrona overrun disclosure or a confirmed project cancellation within the EUR 13.5bn backlog</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>ESA priority ranking within cohort:</strong> NKT-DK should be prioritised above NEX-FR and PRY-IT for ESA initiation; <span class="s-pos">NKT has the purest change forces and the clearest setup identification (capacity-expansion compounder)</span>; NEX and PRY also clear Triaging but with more analytical ambiguity requiring resolution; Watson recommendation: run NKT ESA first, then NEX and PRY in parallel</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Researcher to run Business Foundations (42) and Leadership Foundations (43) re-queries specifically targeting Karlskrona commissioning timeline, Q2 2026 interim results, and Applications margin recovery — <em>before ESA writing begins</em>; (2) Watson to resolve the False Friend ACH at ESA with a structured weighting exercise — the Risks report ACH returned zero disconfirming items, which is a methodology flag requiring an explicit counter-argument audit before ESA-stage capital recommendation</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">12 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">8 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>41-change-forces/highlighted.md</strong> [AS, 2026] — Primary source for E1 (all three change forces), E2 (earnings trajectory), E3 (backlog and target data), E7 (management transitions), E8 (compounder setup), E11 (value-chain); <em>3,816 lines; read in full</em></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>42-business-foundations/highlighted.md</strong> [AS, 2026] — Primary source for financial data (FY25 revenue EUR 2,722m, EBITDA EUR 390m, ROIC <strong>8.4%</strong>, FCF -EUR 244m, NWC -EUR 1,524m); <em>read first 500 lines</em></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>43-leadership-foundations/raw-AS.md</strong> [AS, 2026] — Source for E7 (management transitions: CFO Fandrup → Yong April-26), Group 3/E11 (operator quality light-pass), CEO track record; <em>read first 400 lines including full BLUF and §1-§3</em></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>44-risks/raw-AS.md</strong> [AS, 2026] — Source for Group 4 riskiness, False Friend ACH (zero disconfirming items), Karlskrona EUR 300m overrun, NWC illusion; <em>read first 150 lines (BLUF)</em></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>master-dashboard/data/factset-valuation.json</strong> [FactSet local, 22-Jun-26] — P/E <strong>25.0x</strong>, P/E percentile 75, EPS 24MF DKK 44.55</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>master-dashboard/data/factset-ssem.json</strong> [FactSet local, 22-Jun-26] — Buy% <strong>31%</strong>, momentum score -4, EPS revisions confirmed</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Yahoo Finance (web fallback)</strong> [22-Jun-26] — Price DKK 1,052, 52-week range DKK 479–1,135; <em>prices.json did not contain NKT-DK — fallback per D-IA-4RR-08 procedure; noted as data gap</em></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>nkt-triaging-self-review-debrief-2026-05-14.md</strong> [Watson internal, 14-May-26] — Prior Triaging grades for cross-validation; confirmed E1=A, E5=A, E7=B, E8=A, E11=B+ from prior session; prior session based on Watson estimates only (no Researcher reports); <em>current memo supersedes with full family</em></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">4 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Prices.json data gap:</strong> NKT-DK (NKT.CO) is absent from master-dashboard/data/prices.json; all four cohort tickers were absent; fallback to Yahoo Finance used for all four; 52-week range and live price noted as Yahoo Finance source in memo; <em>flagged for pipeline refresh</em></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Cohort grouping flag:</strong> NKT-DK is in cohort CHM19 (Chemicals — cables and wires) in cohorts-v3.json; PRY-IT is in IND12 (Industrials — unresolved); Richard's explicit instruction (Message 2) defines the operational peer group as "grid hardening cable" (NKT / NEX / PRY) for this batch; grading calibration uses this Richard-defined peer group, labelled clearly throughout</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>HTRO-SE isolation:</strong> Richard confirmed HTRO-SE is not comparable to the other three and thesis differs; grades for NKT/NEX/PRY are calibrated against each other; HTRO-SE grades use separate fibre/telecom comparison set</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Prior self-review debrief:</strong> May-26 Triaging was based on Watson estimates only (no Researcher reports available at that time); current session uses full 4-report family for all three Triaging stocks; all grades re-calibrated from first principles; prior E8 RA2 identification as primary setup confirmed and retained</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/nkt-dk-triaging-self-review-debrief-2026-06-22.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"C","label":"Sell-side earnings momentum"},"MR3":{"grade":"B","label":"Thematic fit"},"MR4":{"grade":"A","label":"Pillar I: Case change elements"},"MR5":{"grade":"B","label":"Pillar II: Case building blocks"},"MR6":{"grade":"NR","label":"Pillar III: Investment case components [NR]"},"C.1":{"grade":"A","label":"Pillar I: Case change elements"},"C.2":{"grade":"B","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"B","label":"Case momentum"},"Group 2":{"grade":"B","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"},"Group 5":{"grade":"NR","label":"Case optionality [NR]"}};</script>
+</body>
+</html>

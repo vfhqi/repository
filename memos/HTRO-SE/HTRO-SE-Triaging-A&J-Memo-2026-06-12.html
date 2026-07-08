@@ -1,0 +1,1063 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investment Analyst Analysis-and-Judgement Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:19px; font-weight:700; margin-top:2px; line-height:1.1; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-identification-and-metadata">Section A — Identification and Metadata</span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary-bluf">Section B — Executive Summary (BLUF)<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-element-level-analysis">Section C — Element-Level Analysis<span class="nav-fc">115</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-internal-and-external">E1 — Required Input Change Forces (internal and external)<span class="nav-fc">42</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum">Group 1 — Case Momentum<span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-assessment">E5 — Thematic Fit Assessment<span class="nav-fc">24</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity">Group 2 — Case Simplicity<span class="nav-fc">49</span></span>
+<span class="nav-item nav-element" data-anchor="e7-required-case-simplicity-guardrails">E7 — Required Case Simplicity Guardrails<span class="nav-fc">30</span></span>
+<span class="nav-item nav-element" data-anchor="e8-fit-with-acceptable-case-setups">E8 — Fit with Acceptable Case Setups<span class="nav-fc">19</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">Investment Analyst Analysis-and-Judgement Memo</div>
+      <div class="meta">Memo reference: IA-AJ-HTRO-SE-TRIAGING-V2 Date: 13-May-26 (research), presented for morning briefing Stage: Triaging — first A&amp;amp;J pass Analyst: Watson (Investment Analyst role) </div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-metadata-header" data-spy>
+<div class="snap-bar"><span class="id">HTRO-SE</span> Investment Analyst Analysis-and-Judgement Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 12-Jun-26 20:59</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">HTRO-SE</span></div>
+<div class="dr"><span class="k">Exchange</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Currency</span><span class="v">SEK reporting; material EUR, USD, GBP exposure</span></div>
+<div class="dr"><span class="k">Country</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Industry</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Telecoms infrastructure / fibre cable and connectivity equipment</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">--</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">--</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">--</span></div>
+<div class="dr"><span class="k">50-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Buy rating</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging — first A&amp;J pass</span></div>
+<div class="dr"><span class="k">Initiated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Last updated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Change Forces</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Business Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Leadership Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Risks</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Carried from</span><span class="v">--</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<p><strong>Before proceeding, a major disambiguation issue must be flagged.</strong> The research corpus provided contains material from at least two distinct companies that share the HTRO-SE ticker reference:</p>
+<p>1. <strong>Hexatronic Group AB</strong> — a fibre cable and connectivity infrastructure manufacturer listed on Nasdaq Stockholm. This is identified explicitly in the AJ-Triaging-V1 memo (the prior Watson output, [W]) and matches the thesis around DC interconnect, FTTP decline, and hyperscaler capex.</p>
+<p>2. <strong>Hoist Finance AB / Hoist Technology Group</strong> — a debt-purchasing financial services company and/or industrial hoisting equipment manufacturer. Multiple research files (Q5, Q6, Q7, Q8, Q9, Q10) appear to have been run against a different HTRO-SE or a confused name/ticker pairing. The Q5 file discusses "lifting and hoisting technology for industrial and marine applications." The Q9 file explicitly states the company is "Hoist Finance AB (HTRO-SE)" and describes an NPL (non-performing loan) debt purchaser.</p>
+<p><strong>This creates a serious analytical problem.</strong> The Q5–Q9 research files describe a business — industrial hoisting equipment / debt purchasing — that is entirely inconsistent with the Hexatronic Group AB thesis described in the primary IA A&amp;J memo (AJ-Triaging-V1) and in the Q10 bear case file (which actually also appears to have been run against the wrong company — it discusses "aviation maintenance technology" and "SaaS transition narratives").</p>
+<p><strong>Resolution taken in this memo:</strong> I am writing this Triaging A&amp;J memo for <strong>Hexatronic Group AB (Hexatronic)</strong> — the fibre cable and connectivity infrastructure company — which is the correct subject per the AJ-Triaging-V1 memo, the ticker metadata, and the sector context (telecoms infrastructure / fibre cable). The Q5–Q9 and Q10 research files appear to have been produced for a different company or represent a ticker-mapping error. Their content is flagged as suspect and not used as primary evidence unless it corroborates Hexatronic-specific facts. The prior Watson IA memo (AJ-Triaging-V1, [W]) is treated as the most reliable synthesis of the Hexatronic research corpus, and I will build from it with fresh analytical judgement.</p>
+<p>This disambiguation issue is flagged in RESEARCH GAPS and BATCH-DECISIONS TAKEN below.</p>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary-bluf" data-spy><span class="id">B</span> Executive Summary (BLUF) <span class="secn">5 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>The Master Ratings portrait is a B/C split. The case clears Triaging on the strength of B-grade external change forces and thematic fit. The C-grade building blocks are precisely what ESA is designed to probe — the case progresses, not because it is clean, but because the positive forces are genuine enough and the unresolved questions are answerable at the next stage.</div>
+<p><strong>Page-level BLUF</strong></p>
+<p>Hexatronic is a fibre cable and connectivity manufacturer at a structural inflection: its Data Centre (DC) interconnect segment became the largest EBITA contributor for the first time in Q1-26, while its legacy Fibre Solutions (FS) Europe segment remains in a structural inventory trough that is deeper and longer-duration than a conventional cycle. The investment case is not clean — it requires a new, unproven CEO to execute a three-segment strategic pivot while simultaneously managing FS decline, M&amp;A integration risk, and Chinese price competition. But the DC demand force is real, multi-year, and structurally independent of European operator procurement behaviour. The Triaging qualitative test asks whether the case has <strong>large amounts of positive change forces</strong>. On balance: yes, but they are directional rather than compounding. Progress to Early-Stage Assessment.</p>
+<p><strong>Section B BLUF Bullets — Judgement First</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>The DC demand inflection is the real and load-bearing positive change force.</strong> Hyperscaler capex at USD 250bn+ system-level in 2026, AI-driven bandwidth escalation, and BEAD programme clearance (50 of 56 US states approved) collectively constitute the most durable external demand vector Hexatronic has had in its history. DC becoming EBITA-dominant in Q1-26 is not a one-quarter aberration — it reflects a multi-year investment in DC product capabilities that is now converting to earnings. This is the case.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>The FS structural impairment is the real and load-bearing negative change force.</strong> European Fibre-to-the-Premises (FTTP) is not a destocking cycle — it is structural over-build by Nordic operators combined with Chinese cable manufacturers (ZTT, Hengtong) applying structural price competition that does not resolve when volumes recover. FS Europe at -<strong>31%</strong> organic in Q1-26 is the third consecutive double-digit decline quarter. The FS recovery timing is disputed (bull: H2-26; base/bear: 2027+) and the structural floor is unknown. This is the primary risk.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>CEO Henrik Fröberg is credible but unproven, and the governance structure carries independence risk.</strong> Fourteen months in role, one delivered cost programme (PIP completed Q3-26 vs original Q4-26 target), and a coherent three-segment strategy are the evidence base. Five executive departures in the prior 18-month window and the Chairman-CEO Nicolin-Fröberg historical relationship (both previously at Ansell) are the risk base. This is the single most important management-quality question ESA must resolve.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The case setup is a trough-on-trough turn (Setup 3) with a secondary new-CEO inflection (Setup 5) — both are recognisable and have historical precedent, but the concurrent variables create complexity above the ideal.</strong> The simplest version of the bull case is: DC ramps to <strong>50%</strong>+ of revenue by 2027-28 while FS stabilises, and normalised EBITA is materially higher than current actuals. This is a coherent and investable thesis — if the variables resolve.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>At SEK ~5bn market cap and with positive sell-side earnings revision momentum (post-Q1-26 +49% re-rating event), the case passes the Triaging filter with medium conviction.</strong> The stock is not obviously cheap on current earnings, but it is significantly below pre-drawdown highs and the forward earnings power — on a normalised DC-dominant mix — is substantially higher than the current actuals imply.</div></div>
+<p><strong>Master Ratings (first pass — light at Triaging)</strong></p>
+<table><thead><tr><th>Rating dimension</th><th>Grade</th><th>Basis</th></tr></thead><tbody><tr><td><strong>Technical momentum</strong></td><td><strong>C</strong></td><td>Re-rated +49% intraday on Q1-26 beat; prior L18M was bottom of peer stack; no sustained uptrend yet confirmed; improving from trough but not a momentum stock</td></tr><tr><td><strong>Sell-side earnings momentum</strong></td><td><strong>C/B</strong></td><td>Post-Q4-25 and Q1-26 beats have turned revision direction positive; LTM trend was negative; RedEye primary coverage; sell-side pool thin (estimated 3-5 brokers); guidance credibility Medium/Yellow; recent direction is the right one</td></tr><tr><td><strong>Thematic fit</strong></td><td><strong>B</strong></td><td>Inside active cables/connectivity theme; direct AI-DC beneficiary; BEAD optionality; FS structural impairment prevents A-grade; second-order energy/Iran context mildly supportive</td></tr><tr><td><strong>Pillar I — Case change elements</strong></td><td><strong>B</strong></td><td>DC external demand force is genuinely A-grade in magnitude and duration; FS structural headwind is D-grade; net is B — strong forces partially offset by structural impairment</td></tr><tr><td><strong>Pillar II — Case building blocks</strong></td><td><strong>C</strong></td><td>Case simplicity is challenged (four concurrent variables); CEO unproven at 14 months; value chain partially commoditised in FS; DC moat genuine but YELLOW conviction; overall C</td></tr><tr><td><strong>Pillar III — Investment case components</strong></td><td><strong>n/a</strong></td><td>Not assessed at Triaging stage — first written at Early-Stage Assessment</td></tr></tbody></table>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-element-level-analysis" data-spy><span class="id">C</span> Element-Level Analysis <span class="secn">115 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<p><strong>C.I — Pillar I: Case Change Elements</strong></p>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-internal-and-external" data-spy><span class="id">E1</span> Required Input Change Forces (internal and external) <span class="secn">42 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>E1 is the most important element at Triaging. It asks two questions: (RA1) what external and internal change forces are acting on Hexatronic, and are they strong and durable enough to form the core of an investment thesis? (RA2) Is the base on which these forces act robust enough to carry the change forces into improved financial outcomes? Both RAs are assessed at 6-bullet floor per CQ, doubled to reflect the ×2 weighting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Rationale: The external change forces (DC demand, BEAD, European DC build) are genuinely B-grade in magnitude and duration; the FS structural impairment and Chinese pricing competition are D-grade headwinds; the base quality is C (DC moat genuine, management unproven, LTIP misaligned, FS over-built). The net of these forces — strong external tailwinds partially offset by structural headwinds and an unproven management base — is B. The case has enough positive change forces to progress to ESA; it does not have enough certainty to progress to Deep Dive without the FS timing and management track record questions resolved.</div>
+<p><strong>First pass — ×2 double-weight — 6-bullet floor per RA and per CQ</strong></p>
+<p><strong>E1 RA1 — Change Forces Summary</strong></p>
+<p><strong>[B] Net assessment: the external change forces are genuine, directional, and multi-year — but internally bifurcated, with DC demand as A-grade and FS structural decline as D-grade. The net is B.</strong></p>
+<p>The change forces acting on Hexatronic in 2025-26 are among the most interesting in the European mid-cap cables and connectivity space. The company sits at the intersection of two structural dynamics moving in opposite directions: accelerating demand for fibre interconnect inside and between data centres (driven by hyperscaler capex and AI bandwidth escalation) and decelerating demand for fibre-to-the-premises cables (driven by operator over-build and Chinese price competition). The resolution of this tension over the next 24-36 months is the entire investment case.</p>
+<p><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds?</strong></p>
+<p><strong>[B] External change forces: genuinely B-grade — DC demand is A-grade in isolation; FS headwind pulls the net to B</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Hyperscaler capex at USD 250bn+ system-level in 2026 creates the most durable demand vector Hexatronic has ever had.</strong> The five hyperscalers (Microsoft, Google, Amazon, Meta, Oracle) collectively guided to USD 250bn+ in infrastructure capex in 2026 — a material step-up from 2024-25 levels. Fibre interconnect is a direct, non-discretionary beneficiary: every new DC build requires fibre, and every capacity expansion requires denser interconnect. The procurement horizon for fibre follows DC construction pipelines with 3-5 year lead times, meaning capex committed today translates into fibre procurement across the 2026-2030 window. This is not a one-quarter demand event — it is a multi-year structural pull.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>AI bandwidth escalation creates a multiplicative demand dynamic that compounds the raw DC count tailwind.</strong> AI training and inference workloads are intrinsically bandwidth-intensive. GPU-to-GPU communication inside training clusters requires fibre optic interconnect at densities an order of magnitude above traditional server farms. The industry-wide shift from 100G to 400G and 800G ethernet inside DC environments is accelerating fibre-per-rack intensity. The mathematics of this is important: Hexatronic benefits not just from more data centres being built, but from each data centre requiring significantly more fibre per square metre than its predecessor generation. This multiplicative dynamic — more DCs × more fibre per DC — is structurally bullish for DC-specialist cable suppliers and distinguishes the current cycle from prior hyperscaler investment cycles.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>DC becoming the largest EBITA contributor in Q1-26 is a structural milestone, not an aberration.</strong> The research (AJ-Triaging-V1) is explicit: DC became Hexatronic's single largest EBITA contributor in Q1-26 for the first time in company history. This milestone reflects a multi-year investment in DC-specific product capabilities (MPO connectors, high-density fibre solutions, bespoke cabling systems for hyperscaler environments) that is now at an inflection. The revenue mix shift has further to run — DC is still less than <strong>50%</strong> of total revenue, meaning the mix improvement story has a 2-3 year runway ahead of it.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>BEAD (Broadband Equity, Access and Deployment) programme adds a second independent US demand vector with a 12-18 month lag.</strong> BEAD has cleared 50 of 56 US states and territories as of Q1-26 and represents USD 42.5bn of federal funding for broadband infrastructure in underserved rural and suburban areas. Phasing of actual cable procurement typically lags state approval by 12-18 months, making BEAD primarily a 2027-2028 revenue event. However, its existence shifts the probability distribution of US fibre demand materially upward and provides a second structural demand vector that is independent of hyperscaler capex decisions. BEAD and DC are not correlated demand sources — disruption to one does not necessarily propagate to the other.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>European DC construction creates a third, domestically-rooted demand vector that reduces geographic concentration risk.</strong> European DC capacity is expanding materially — driven by GDPR data sovereignty requirements, EU hyperscaler investment (Microsoft and Google both announced multi-billion-euro European DC expansions in 2025-26), and energy transition infrastructure (green hydrogen data centres). Hexatronic has existing European DC relationships; this domestic EU pipeline is a demand vector that does not require US market penetration and provides geographic diversification. It is smaller than the hyperscaler-driven US demand force, but it is structurally independent and growing.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>The external change force net verdict is B — strong and durable on the DC vector, real but lagged on BEAD, and reinforced by European DC, but partially offset by FS structural impairment.</strong> The DC force alone would rate A. The FS structural headwind (documented in CQ2 below) operates as a partial offset at the consolidated revenue level, preventing the external change force net from reaching A-grade. On a segment-by-segment basis, the DC and International Connectivity external forces are A-grade; the FS external environment is D-grade. The Hexatronic investment case is a bet on the DC and International Connectivity forces winning the revenue mix war against FS decline over a 2-4 year horizon.</div></div>
+<p><strong>E1 RA1 CQ2 — Strong internal change forces?</strong></p>
+<p><strong>[C/D] Internal change forces: bifurcated — the DC pivot and PIP are genuine positives; FS structural impairment and CEO transition are genuine negatives; net is C, pulled down by the D-rated findings</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>CEO Fröberg's Performance Improvement Programme (PIP) delivered ahead of schedule — Q3-26 vs original Q4-26 target — and represents the most concrete positive internal change force.</strong> The PIP is a cost-reduction programme initiated by Fröberg after his appointment in March 2025. Its delivery ahead of schedule demonstrates that the new CEO can execute against a defined operational target — the simplest and most credible form of management credibility-building at the 14-month mark. The savings are on the cost side and do not address structural revenue decline in FS Europe, but they do prove execution capability on a defined programme, which is the most an investor can reasonably demand at this tenure length.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>The three-segment reorganisation (FS / DC / International Connectivity) is a coherent internal structural change that enables segment-level valuation and clearer capital allocation.</strong> The prior undifferentiated business structure obscured the DC inflection. The new structure allows investors to value each segment separately, track DC as a proportion of total EBITA, and monitor FS decline as an isolated drag rather than a contamination of the whole. This structural change is an internal force that improves the investability of the case, independent of what happens in any individual segment.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>Management's deliberate decision to under-invest in FS Europe during the inventory digestion phase and redirect resources toward DC is directionally correct capital allocation.</strong> Rather than pursuing volume in a structurally over-supplied FS Europe market (which would have compressed margins further), management has preserved cash flow and channelled investment toward the DC segment where returns are materially higher. The capex deferral evidence (Q4-25 capex of SEK 27m vs OCF of SEK 349m — a very low ratio) suggests deliberate cash conservation, which is the right response to a structural trough in the legacy segment.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>The FS structural impairment is a genuine, durable, and directionally negative internal change force.</strong> FS Europe organic revenue was -<strong>31%</strong> in Q1-26 — the third consecutive quarter of double-digit decline. The inventory overhang at Nordic operator level is not cleared. Chinese cable manufacturers (ZTT, Hengtong) have structural cost advantages that are not cyclical — they are permanent features of the competitive landscape. The FS margin floor is uncertain, and the research corpus (AJ-Triaging-V1) explicitly rejects the "simple inventory cycle" interpretation in favour of a structural assessment. This is the most important negative internal change force in the case.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>Five executive departures in the prior 18-month window create institutional knowledge risk and a potential signal of internal strategic disagreement.</strong> The departure of five senior executives in the period immediately preceding and surrounding Fröberg's appointment is a negative internal force. Whether these were managed-out (clearing the decks for the new CEO's team) or voluntary departures driven by disagreement with strategic direction is not established in the research corpus. Both scenarios carry risk: the former suggests the culture required a disruptive reset; the latter suggests internal resistance to the DC pivot strategy. This warrants direct investigation at ESA through management research.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>HTRO Americas (BEAD-exposed) represents a nascent positive internal force, but is too early-stage to rate above optionality.</strong> The Americas segment exists and has some operational infrastructure to capture BEAD procurement volumes from 2027 onwards. It is not yet a material EBITA contributor. Its value at this stage is as a real option on BEAD volumes, not as a current earnings driver. The internal force it represents is positive but small and distant.</div></div>
+<p><strong>E1 RA2 — Robust Base Summary</strong></p>
+<p><strong>[C] The base is adequate but not strong. DC competitive position provides real quality; FS structural impairment and management transition weaken the aggregate base quality to C.</strong></p>
+<p>The base on which the change forces act is an above-average European mid-cap industrial with genuine DC product capability and a coherent strategic framework, but with material impairments in its largest legacy segment and a management team in transition. The base is robust enough to carry the DC demand force — but only just. If either FS decline accelerates further or the CEO fails to execute the DC pivot, the base will not support the investment case.</p>
+<p><strong>E1 RA2 CQ1 — Absence of external headwinds?</strong></p>
+<p><strong>[D] External headwinds are present, structural, and material — not absent</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>Chinese cable manufacturers are the most significant and most structurally durable external headwind.</strong> ZTT, Hengtong, and Yangtze Optical Fibre have structural cost advantages rooted in lower-cost manufacturing, domestic raw material supply, and state-subsidised capital that are not eroding. They have demonstrated the ability to obtain EU CE marking for standard products within 2-3 years, which means the regulatory certification barrier that once protected EU incumbents in standard-product segments is narrowing. In FS Europe — Hexatronic's largest legacy segment — this headwind is already producing -<strong>31%</strong> organic revenue declines.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>European operator consolidation creates a buyer power headwind that compounds Chinese pricing pressure.</strong> The consolidation of European telecoms operators (Telia, Telenor, Elisa, Deutsche Telekom) over the 2015-2025 period has created larger, more sophisticated procurement entities with multi-source capability and greater pricing leverage over component suppliers. Hexatronic's FS segment sells into this consolidated operator base — the customer power dynamic is structurally more adverse than it was five years ago.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>FTTP structural over-build is a medium-duration headwind with uncertain resolution timing.</strong> The Nordic operators overbought fibre cable in 2021-23, driven by genuine demand growth and post-COVID hoarding behaviour. The inventory overhang is not yet cleared. The timing of FS recovery ranges from H2-26 (bull case) to 2027+ (base/bear case). Until the overhang clears, FS Europe will generate sub-normal revenue regardless of management's execution quality.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>US political risk to BEAD programme funding is a non-trivial external headwind on the second demand vector.</strong> BEAD depends on US federal appropriations continuity under a politically uncertain environment. The probability of significant BEAD disruption is non-negligible. This does not invalidate BEAD as a demand vector but adds a country-specific policy risk that is external and beyond management control.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>Macro risk-off environment (Iran conflict, European industrial recession risk) creates a potential demand-dampening headwind for FS and international construction activity.</strong> Richard's current macro posture reflects genuine risk-off concerns. European industrial construction — a secondary demand vector for fibre cables — is sensitive to macro conditions. This is a less important headwind than Chinese pricing competition but is real and current.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>Net assessment: external headwinds are present and material — the grade is D for the absence-of-headwinds question because headwinds are definitively present and structural in the FS segment.</strong> The DC external forces are genuinely headwind-free; the FS external environment is genuinely headwind-heavy. The aggregate answer to "absence of external headwinds" is No.</div></div>
+<p><strong>E1 RA2 CQ2 — Well-invested base?</strong></p>
+<p><strong>[C] The base investment is adequate but not exceptional — DC capabilities are being actively built; FS has been deliberately under-invested; overall capital investment quality is C</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>DC segment investment is visible and ongoing.</strong> Hexatronic has invested in MPO connector technology, high-density fibre assembly, and hyperscaler-grade connectivity systems over the past 3-4 years. This investment is now generating EBITA returns — DC became EBITA-dominant in Q1-26 precisely because the product investment reached commercial maturity. The DC base is well-invested for current demand.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>FS Europe has been deliberately under-invested during the trough, which is the right capital allocation decision but creates a catch-up capex requirement.</strong> The deliberate capex deferral in FS (Q4-25 capex SEK 27m vs OCF SEK 349m) preserves cash flow during the structural trough. However, it may create a catch-up capex requirement when FS recovery eventually materialises. The asymmetry is: if FS recovers, Hexatronic may need to invest to meet demand; if FS does not recover, the low capex is justified. The uncertainty is the future FS capex profile.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>Manufacturing and operational footprint is adequate for current scale.</strong> Hexatronic has production in Sweden, UK, US, and China. This geographic distribution provides natural currency hedging (production close to markets) and reduces logistical concentration risk. The footprint is not a competitive differentiator but it is not a structural constraint either.</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>R&amp;D investment in DC-specific capabilities is the most important capital allocation decision in the current cycle, and it is being made.</strong> The development of bespoke DC connectivity systems (MPO termination, trunk cables, engineered cabling for hyperscalers) requires specialised engineering investment that Hexatronic is demonstrably making. Whether the investment is sufficient to maintain competitive differentiation against larger cable manufacturers as the DC market scales is the key ESA question.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>Balance sheet leverage is moderate and serviceably positioned for the current period.</strong> The research (AJ-Triaging-V1) notes Q4-25 capex of SEK 27m vs OCF of SEK 349m. Working assumption: leverage is below 2× net debt/EBITDA. This is serviceable but not fortress-grade. The deliberate cash conservation during the FS trough has preserved balance sheet capacity for DC investment and potential M&amp;A — which is the right posture.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>LTIP misalignment is a base quality flag.</strong> The management LTIP requires 14-<strong>21%</strong> EBITA growth for meaningful vesting. Current EBITA growth is 7-<strong>8%</strong>. At current rates, the LTIP vests minimally, weakening the incentive structure at a critical strategic inflection. This reduces confidence in management retention at precisely the moment when execution matters most.</div></div>
+<p><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis?</strong></p>
+<p><strong>[C] Delivery congruency is mixed — Q1-26 beat confirms the DC inflection thesis; FS structural decline confirms the thesis risk; overall delivery pattern is consistent with a trough-on-trough setup</strong></p>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>Q1-26 delivered the thesis-confirming event: DC EBITA-dominant for the first time.</strong> The +<strong>49%</strong> intraday re-rating on Q1-26 results was driven by the structural milestone of DC becoming the largest EBITA contributor. This is precisely the delivery signal the thesis predicts and requires. A company whose thesis rests on a DC-led revenue mix shift has just produced the first concrete evidence of that mix shift reaching EBITA dominance. The delivery is congruent with the thesis.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>Q4-25 EBITA beat of approximately 18% vs sell-side consensus demonstrates a pattern of sandbagging relative to guidance.</strong> Consistent beats suggest either management sets conservative guidance deliberately (positive — creates upside surprise potential) or the sell-side is systematically under-modelling the DC ramp (positive — the market is not fully priced in). Either interpretation supports the thesis.</div></div>
+<div class="finding"><span class="fnum">27.</span><div class="ftext"><strong>Three consecutive quarters of double-digit FS Europe organic decline are congruent with the thesis risk — the structural FS impairment is real and is tracking as modelled.</strong> The bear case scenario in the research (RedEye base: SEK 28 fair value; bear: SEK 15) explicitly models prolonged FS decline. The actual delivery is tracking the base/bear scenario in FS, not the bull scenario. This is important: the bull case for the stock requires DC growth to outrun FS decline, and current delivery shows the race is tight.</div></div>
+<div class="finding"><span class="fnum">28.</span><div class="ftext"><strong>PIP delivery ahead of schedule is a concrete positive congruency signal.</strong> Cost programmes delivering ahead of schedule are a credible early-indicator of management execution capability. One data point — but the right kind.</div></div>
+<div class="finding"><span class="fnum">29.</span><div class="ftext"><strong>The guidance credibility assessment is Medium/Yellow.</strong> Management has beaten guidance consistently but only recently. The prior guidance credibility (under the previous CEO, which is the baseline investors would historically apply) is not established for Fröberg specifically. Medium/Yellow is the appropriate calibration.</div></div>
+<div class="finding"><span class="fnum">30.</span><div class="ftext"><strong>Insider ownership at approximately 13% provides some alignment signal.</strong> This is adequate but not exceptional for a European mid-cap. It reduces (but does not eliminate) the agency risk concern associated with a company in strategic transition.</div></div>
+<p><strong>E1 RA2 CQ4 — Large change-from-current / mispricing?</strong></p>
+<p><strong>[C] The potential mispricing exists but is not yet confirmed — the stock has already re-rated significantly from trough; the residual mispricing thesis rests on the forward earnings recovery case</strong></p>
+<div class="finding"><span class="fnum">31.</span><div class="ftext"><strong>The stock has already captured a significant portion of the DC inflection re-rating.</strong> The +<strong>49%</strong> single-session re-rating on Q1-26 results means the market has already recognised the DC EBITA inflection. The easy part of the re-rating is done. The remaining upside requires the market to progressively reprice the stock as: (a) DC becomes a larger fraction of revenue (not just EBITA); (b) FS stabilises and ceases to be a drag; (c) Fröberg builds a track record that justifies higher quality multiples. All three are 12-36 month events.</div></div>
+<div class="finding"><span class="fnum">32.</span><div class="ftext"><strong>The stock is significantly below pre-drawdown highs, suggesting residual upside if the normalised earnings case materialises.</strong> If DC ramps to <strong>50%</strong>+ of revenue by 2027-28 and FS stabilises at a lower-but-stable base, the normalised EBITA is materially above current actuals. The market is currently pricing a blend of the current (trough) earnings and some probability-weighted forward recovery — not the full normalised case. This creates residual upside.</div></div>
+<div class="finding"><span class="fnum">33.</span><div class="ftext"><strong>The spread between bull (SEK 43), base (SEK 28), and bear (SEK 15) scenario valuations represents genuine uncertainty, not mispricing per se.</strong> The wide scenario spread (nearly 3× between bull and bear) reflects fundamental uncertainty about FS recovery timing and DC mix trajectory, not a consensus that is systematically wrong in one direction. The potential mispricing argument requires a conviction about FS recovery timing or DC growth rate that exceeds current consensus — and that conviction is not yet established at Triaging.</div></div>
+<div class="finding"><span class="fnum">34.</span><div class="ftext"><strong>At SEK ~5bn market cap, the stock is mid-cap European infrastructure.</strong> This is within Viewforth's mandate parameters. The market cap is neither micro (liquidity risk) nor large-cap (already well-followed). The size is consistent with a concentrated long-only mid-cap approach.</div></div>
+<div class="finding"><span class="fnum">35.</span><div class="ftext"><strong>The FS recovery timing assumption is the single most important uncertain variable in the valuation.</strong> If FS recovers in H2-26 (bull case), the normalised EBITA is reached sooner and the IRR is higher. If FS recovery is 2027+, the investor must fund the trough period at current valuation multiples. The forward IRR sensitivity to FS timing is high, and this timing is not deterministic from available evidence.</div></div>
+<div class="finding"><span class="fnum">36.</span><div class="ftext"><strong>The DC conversion rate (what fraction of hyperscaler capex flows to Hexatronic) is not established.</strong> Hexatronic is a tier-2 supplier (component into system integrators) rather than a direct hyperscaler vendor. The revenue capture rate from a given level of hyperscaler capex is not well-documented in the research corpus. This is a specific ESA research task.</div></div>
+<p><strong>E1 RA2 CQ5 — Low trading multiple?</strong></p>
+<p><strong>[C] Valuation is not obviously cheap on current earnings post-re-rating, but potentially attractive on normalised forward earnings — the case requires a forward earnings recovery thesis, not a value thesis at current multiples</strong></p>
+<div class="finding"><span class="fnum">37.</span><div class="ftext"><strong>Post-Q1-26 re-rating has compressed the value argument.</strong> Before the +<strong>49%</strong> intraday re-rating, the value-with-catalyst argument was stronger. At SEK ~5bn market cap and with Q1-26 adj. EBITA of SEK 146m (annualised run rate approximately SEK 585-600m), the current EV/EBITDA is approximately 8-9× on a run-rate basis — not obviously cheap, but not expensive for a company with genuine structural growth drivers in the DC segment.</div></div>
+<div class="finding"><span class="fnum">38.</span><div class="ftext"><strong>The current earnings base is distorted by FS trough, so current-year multiples are not the right lens.</strong> The appropriate multiple assessment is on normalised earnings — the 2027-28 EBITA if DC ramps and FS stabilises. ESA must build this model. A normalised EBITA 30-<strong>50%</strong> above current levels (driven by DC ramp and FS stabilisation) would imply the current valuation is genuinely attractive on a forward earnings basis.</div></div>
+<div class="finding"><span class="fnum">39.</span><div class="ftext"><strong>The RedEye base case fair value of SEK 28 per share provides a valuation anchor.</strong> Relative to the current price (post-re-rating, estimated SEK 18-22 range based on the market cap of SEK 5bn and share count), the base case target implies 25-<strong>55%</strong> upside. The bull case (SEK 43) implies materially more. These targets are analyst-generated and should be re-validated at ESA with an independent financial model.</div></div>
+<div class="finding"><span class="fnum">40.</span><div class="ftext"><strong>The P/E multiple on current EPS is less meaningful than the EV/EBITA on forward normalised earnings.</strong> The current EPS is deeply distorted by FS structural decline. A forward P/E on 2027-28 normalised EPS would be the right lens, and that model does not yet exist at Triaging.</div></div>
+<div class="finding"><span class="fnum">41.</span><div class="ftext"><strong>Peer multiple context: European cables/connectivity infrastructure peers (Prysmian, Nexans, NKT) trade at 8-14× EV/EBITDA on forward earnings.</strong> Hexatronic's current implied multiple is at the lower end of this range, consistent with its higher risk profile (CEO transition, FS structural impairment, M&amp;A uncertainty) relative to the more established large-cap peers. As risk factors resolve at ESA and DD, the appropriate multiple could re-rate toward the mid-to-upper range of the peer group.</div></div>
+<div class="finding"><span class="fnum">42.</span><div class="ftext"><strong>The LTIP misalignment (14-21% growth required for meaningful vesting vs 7-8% current) suggests the company's own management does not view current multiples as reflective of the long-run earnings power.</strong> The LTIP design implicitly targets a much higher EBITA base — which either represents aspirational but unachievable targets, or a genuine management belief that the forward earnings power is significantly higher than current actuals. This is an interesting secondary signal.</div></div>
+<p><strong>E1 Element Rating: [B]</strong></p>
+<p><strong>E2, E3 — Not applicable at Triaging; first written at Early-Stage Assessment.</strong></p>
+<p><strong>C.II — Pillar II: Case Building Blocks</strong></p>
+</div><!-- /ele-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum" data-spy><span class="id">Grp 1</span> Case Momentum <span class="secn">24 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-assessment" data-spy><span class="id">E5</span> Thematic Fit Assessment <span class="secn">24 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>E5 asks whether Hexatronic fits the active thematic frameworks Richard is operating and whether the stock's positioning within live investment themes justifies the allocation of deep research resources. At Triaging with ×2 weighting, all four RAs are assessed at 6-bullet floor.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Rationale: Hexatronic is inside the active cables/connectivity theme, is a direct AI-DC beneficiary with EBITA confirmation, has BEAD optionality, and is differentiated within the cables cohort. The FS structural impairment prevents A-grade thematic purity — a pure DC cables play would rate higher. B reflects genuine and confirmed thematic fit with a material diluting element from the FS legacy business.</div>
+<p><strong>Second pass at Triaging — ×2 double-weight — 6-bullet floor per RA</strong></p>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn</strong></p>
+<p><strong>[C] Partial suitability — DC and BEAD are relatively recession-resistant; FS Europe is pro-cyclical; net is C</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>DC interconnect demand is relatively recession-resistant because hyperscaler capital programmes are multi-year commitments with long lead times.</strong> The hyperscalers announce and begin executing on DC programmes years before the revenue is spent. A mild economic downturn does not typically cause hyperscalers to abandon committed DC construction — sunk costs, competitive necessity, and long contract commitments create stickiness. AI infrastructure investment specifically has shown resilience through previous market dislocations. DC demand is not recession-proof but it is meaningfully more recession-resistant than discretionary industrial or consumer spending.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>BEAD is federal government funding and therefore counter-cyclical in its own right.</strong> Federal broadband infrastructure investment is typically maintained or increased during economic downturns as fiscal stimulus. BEAD's USD 42.5bn is already appropriated and is not subject to normal corporate capital budgeting cycles. A recession would not reduce BEAD deployment — it might accelerate it as a stimulus measure.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>FS Europe is clearly pro-cyclical.</strong> Telecoms operator capital programmes are sensitive to revenue growth, which is sensitive to economic activity. In a recession, operators defer infrastructure investment. FS Europe's current trough is partly structural (Chinese competition, over-build) and partly cyclical (macro pressure on operator capex). A recession would worsen the FS trough, not resolve it.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The current Iran conflict / risk-off macro environment (Richard's stated posture) is partially consistent with the DC/BEAD demand story but inconsistent with FS recovery timing.</strong> If the macro environment deteriorates further, FS recovery gets pushed further right. The DC demand force is insulated from this macro deterioration to a greater degree than FS. The risk-off posture increases the relative importance of the DC revenue mix within the Hexatronic thesis.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>Infrastructure telecoms spending has historically had a low correlation with GDP in downturns, providing a partial defensive quality.</strong> Maintenance-level fibre infrastructure spending (repair, replacement, upgrade) is less cyclical than new-build. Hexatronic's FS segment does have some maintenance-level demand that persists through cycles, even if the new-build volumes are severely depressed.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>Net assessment: Hexatronic is partially but not fully suitable for a bear market / economic downturn context — grade C.</strong> A pure DC play would score higher; Hexatronic's FS legacy prevents a B or higher on this dimension. The split between segments is important: for the DC segment, the answer is B; for the FS segment, the answer is D; the aggregate is C.</div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption</strong></p>
+<p><strong>[B] Positive suitability — Hexatronic is a direct physical infrastructure beneficiary of AI-driven DC demand; not threatened by AI in its core business</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>AI infrastructure build-out is the most direct and most powerful external demand vector for Hexatronic's DC segment.</strong> AI training and inference require massive amounts of fibre interconnect inside data centres. GPU clusters communicate via fibre at bandwidths that are orders of magnitude above traditional server farms. Hexatronic's DC product range (MPO connectors, trunk cables, high-density fibre systems) is directly positioned to benefit from AI-driven DC densification. This is not a second-order or derivative relationship — Hexatronic sells the physical cables that enable AI compute clusters to function.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>The AI-driven shift from 100G to 400G to 800G ethernet creates a fibre content intensification that compounds the raw volume growth.</strong> Each generation of ethernet standard requires denser, higher-quality fibre infrastructure. A data centre built for 400G ethernet requires approximately 2-3× the fibre content per rack of a 100G-era facility. This means AI-driven ethernet upgrades create demand for fibre even in existing DC facilities, not just in greenfield construction. This upgrade cycle is a multi-year recurring demand driver.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>AI disruption does not threaten Hexatronic's business model — it accelerates it.</strong> Unlike many sectors where AI threatens existing business models through automation or displacement, the cable manufacturing business benefits directly from AI infrastructure investment. The risk from AI is not disruption to Hexatronic — it is that AI hardware architectures evolve in ways that reduce fibre intensity (e.g., move toward co-packaged optics that place fibre components inside chips rather than on cables between chips). This is a 5-10 year technology risk, not a 2-3 year investment horizon risk.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>European AI sovereignty requirements (EU AI Act, GDPR data localisation) are creating EU-domiciled AI infrastructure demand that benefits Hexatronic's domestic European DC capabilities.</strong> European regulators are increasingly requiring AI workloads to be processed on EU-domiciled infrastructure. This creates demand for EU-based DC construction that would not exist without regulatory mandates. Hexatronic's European presence and EU certification position it well for this locally-generated demand.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>The primary AI-related risk for Hexatronic is that hyperscaler AI capex cycles could be front-loaded and moderate after 2026-27.</strong> If the current USD 250bn+ hyperscaler capex run rate represents a one-time catch-up rather than a sustained multi-year level, the DC demand growth rate could decelerate sooner than the bull case assumes. The consensus view is that AI infrastructure investment is multi-year; the risk is that it peaks earlier. ESA should assess the hyperscaler guidance trajectory specifically.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>Net assessment: Hexatronic is well-suited for the AI disruption theme — grade B.</strong> It benefits directly from AI infrastructure build; it is not threatened by AI; and it has regulatory tailwinds for European AI deployment. The primary constraint on reaching A-grade is the FS legacy drag and the fact that &lt;<strong>50%</strong> of revenue currently comes from DC, making the AI exposure partial rather than complete.</div></div>
+<p><strong>E5 RA3 — Suitability for Iran oil-price-induced inflation or demand deterioration</strong></p>
+<p><strong>[C] Mixed suitability — moderate resilience in DC/BEAD; FS vulnerable to operator capex deferral in an inflationary environment; net C</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>An Iran-driven oil price shock would create inflationary pressure on Hexatronic's input costs.</strong> Optical fibre (the primary input) is not directly oil-priced, but polyethylene cable sheathing and transportation costs are sensitive to energy prices. A sustained oil price increase of 20-<strong>30%</strong> would add 3-<strong>5%</strong> to Hexatronic's cost of goods sold. At current EBITA margins of approximately <strong>8.6%</strong> (Q1-26), this would have a visible but not catastrophic impact.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>Higher energy prices would strengthen the economic case for energy efficiency in data centres, which could accelerate DC build-out timelines.</strong> Hyperscalers are constructing their own renewable energy capacity and co-locating DC facilities near renewable energy sources. High energy prices increase the urgency of these programmes, which requires DC construction and therefore fibre interconnect. The inflationary scenario is therefore ambiguously positive for DC demand.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>European telecoms operator capex is sensitive to inflation through two channels: higher cost of capital and reduced consumer ARPU growth.</strong> In an inflationary environment with rising interest rates, operator capital programmes face higher discount rates and potentially lower revenue growth (as consumers reduce discretionary spending). Both effects would deepen the FS Europe trough. This is a negative for the FS recovery timing assumption.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>Hexatronic's revenue is primarily in SEK, EUR, GBP, and USD — a currency mix that provides partial hedging against any single oil-linked currency move.</strong> The geographic and currency diversification of Hexatronic's revenue base means that Iran-driven USD strength does not uniformly affect its financial position. This is a modest mitigant.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>The BEAD demand vector is not materially affected by Iran-driven oil price inflation.</strong> BEAD is federally funded broadband infrastructure. Its execution timeline is not sensitive to oil prices or US consumer inflation levels. An inflationary environment would not reduce BEAD procurement volumes.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>Net assessment: Hexatronic has moderate but not strong resilience to the Iran / inflation scenario — grade C.</strong> The DC and BEAD segments are relatively insulated; the FS segment is more exposed. The risk is that an inflationary macro environment further delays the FS recovery assumption, elongating the period during which Hexatronic's consolidated EBITA is depressed. C reflects this mixed picture.</div></div>
+<p><strong>E5 RA4 — Paradigm fit from business perspective summary</strong></p>
+<p><strong>[B] Good paradigm fit — fibre infrastructure for AI/DC is a first-tier active theme; cables/connectivity is an active research cohort for Richard; Hexatronic has differentiated DC exposure within the cohort</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>Hexatronic sits inside Richard's active cables/connectivity research theme, which provides analytical leverage.</strong> The pipeline already contains PRY (Prysmian), NKT, and NEX (Nexans) as cables cohort members. Richard has developing knowledge of cable competitive dynamics, European operator procurement behaviour, and Chinese competition from this prior work. Hexatronic benefits from this existing analytical infrastructure — its sector-specific assumptions do not need to be built from scratch, reducing the research cost at ESA.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The DC pivot angle differentiates Hexatronic from the pure-play large-cap cable peers (Prysmian, Nexans, NKT).</strong> Those companies are primarily FS cables businesses (power cables, telecoms cables) with modest DC exposure. Hexatronic's DC-as-EBITA-dominant milestone gives it a different return profile within the cables theme — more concentrated DC exposure at a mid-cap size that is not represented by the larger cohort members. Within a thematic cables allocation, Hexatronic provides differentiated exposure.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>AI-DC infrastructure is one of the most actively discussed investment themes in 2025-26.</strong> The AI capex cycle is front-of-mind for every institutional investor. Hexatronic's positioning as a physical infrastructure supplier to this capex cycle is a paradigm fit with the dominant investment narrative. This creates both demand from investors (as the DC angle becomes more widely recognised) and potential multiple uplift as the stock gets reclassified from "European cables manufacturer" to "AI infrastructure exposure."</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>BEAD's passage through 50 of 56 states creates a near-term catalyst for US broadband infrastructure stocks.</strong> The broadband infrastructure theme is active in both US and European markets. Hexatronic's Americas exposure, while small, positions it as a partial beneficiary of this theme. At ESA, the question is whether the Americas segment is large enough to contribute meaningfully to the BEAD investment case.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>The FS structural impairment is thematically off-narrative for the AI/DC story.</strong> A clean thematic fit would have <strong>100%</strong> of revenue in DC and BEAD-exposed segments. Hexatronic at less than <strong>50%</strong> DC revenue is a partial expression of the AI infrastructure theme, not a pure play. The FS legacy reduces the thematic purity, which is a genuine constraint on how investors in the AI/DC theme will position the stock.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>Richard's current risk-off posture creates a partial tension with the cyclical FS component.</strong> The active mandate context (Iran conflict, risk-off, targeting non-cyclical revenues) is more consistent with pure DC infrastructure than with a company carrying significant FS cyclical revenue. This tension does not disqualify the case but it means Hexatronic sits in a slightly awkward part of the current portfolio construction framework.</div></div>
+<p><strong>E5 Element Rating: [B]</strong></p>
+<p><strong>E4 — Technical momentum</strong> — carry forward from Generation stage rating of C. No new content at Triaging. E6 (Sell-side earnings momentum) — not applicable at Triaging.</p>
+<p><strong>Group 1 Rating: [B]</strong> — first pass, light. Active thematic alignment confirmed; DC inflection validated by earnings; FS drag prevents higher grade.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity" data-spy><span class="id">Grp 2</span> Case Simplicity <span class="secn">49 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-required-case-simplicity-guardrails" data-spy><span class="id">E7</span> Required Case Simplicity Guardrails <span class="secn">30 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>E7 asks whether the Hexatronic investment case is clear, simple, and followable at the required quality standard for a concentrated long-only position. Multiplier ×2 applies — simplicity is critical to case quality assessment.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Rationale: Case simplicity is challenged across all five guardrails. The zero-headwinds guardrail is definitively failed (D). The focused-bet and change-from-current guardrails are borderline (C). The perimeter is acceptable (B). Guidance is uncertain (C). The net element grade is C — the case is not simple, and that complexity creates genuine risks to monitoring, conviction maintenance, and risk management. The complexity is not disqualifying at Triaging; at Deep Dive, the simplicity requirement is tighter.</div>
+<p><strong>First pass at Triaging — ×2 double-weight — 6-bullet floor per RA</strong></p>
+<p><strong>E7 RA1 — Focused bet? (two or fewer fulcrum drivers, four or fewer key drivers)</strong></p>
+<p><strong>[C] Case does not meet the strict focused bet standard — two fulcrum drivers identified but four or more key drivers are in play concurrently</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>The two fulcrum drivers are correctly identified as (KD#1) DC Competitive Moat and (KD#2) M&amp;A Execution Quality.</strong> KD#1 drives the primary bull case (DC becomes <strong>50%</strong>+ of revenue with durable margins). KD#2 is the primary risk to capital (M&amp;A integration failures can destroy value even if the organic DC strategy is correct). These two fulcrums are the right analytical frame.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>However, the key driver count at the business level is four or more, not two or fewer.</strong> The key drivers that must simultaneously behave favourably for the thesis to deliver are: (1) DC revenue mix shift; (2) FS stabilisation; (3) CEO execution credibility; (4) M&amp;A execution quality. This is four concurrent load-bearing variables. Compare to a clean focused bet (one or two drivers): "HTRO is the leading DC fibre supplier in Europe, growing at <strong>25%</strong> p.a." versus the actual "HTRO's DC is growing while FS is declining while the CEO is rebuilding credibility while M&amp;A integration is being managed." The first is a focused bet; the second is not.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The interaction effects between the key drivers create complexity beyond the individual driver count.</strong> FS stabilisation and DC growth are not independent: if FS declines faster than DC grows (which is the bear case scenario), the net EBITA improvement does not materialise regardless of DC momentum. The drivers are correlated in a way that makes the combined probability lower than any individual driver probability. This is a structural complexity flag.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The path to simplification is time and revenue mix shift.</strong> As DC becomes &gt;<strong>50%</strong> of revenue (likely 2027-28 on current trajectory), the FS driver becomes secondary and the case simplifies to effectively one fulcrum (DC moat). The case is getting simpler over time, which is directionally positive.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>The trajectory of simplification means the case complexity is worst now and improves.</strong> Investing at the current stage means accepting maximum complexity with the expectation that it resolves. This is consistent with the trough-on-trough setup logic — the entry point is when complexity is highest and the multiple is compressed.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>Grade C — not a focused bet by the strict two-driver/four-driver standard, but the complexity is reducing over time.</strong> The case requires more than two load-bearing variables to simultaneously succeed, which places it in the complex-but-acceptable category at Triaging.</div></div>
+<p><strong>E7 RA2 — Narrow perimeter? (ten or fewer geographies and/or business units)</strong></p>
+<p><strong>[B] Perimeter is manageable — three segments, four primary geographies, below the guardrail threshold</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>The three-segment structure (FS / DC / International Connectivity) is explicitly designed to provide analytical focus.</strong> Fröberg's restructuring created a structure that allows segment-level EBITA tracking, which reduces the analytical complexity relative to the prior undifferentiated structure. Three segments is within the guardrail requirement.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>Geographic exposure spans Sweden/Nordic (FS core), UK, US (BEAD), and various European DC markets.</strong> Four to six geographically distinct markets. This is manageable. The dominant revenue exposure is still Northern Europe, with US as a growing secondary market.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>The International Connectivity segment consolidates a range of non-FS, non-DC products and geographies.</strong> This segment has some opacity — it bundles multiple products and markets into a single reporting line. ESA should seek to understand the segment composition more granularly to confirm the perimeter is as narrow as the three-segment structure implies.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>Historical M&amp;A has added complexity to the perimeter.</strong> Hexatronic's acquisitive history means the current business includes legacy acquisitions across multiple geographies and product lines. The degree to which these have been fully integrated (vs maintained as semi-autonomous units) is a perimeter risk. The five executive departures may partly reflect integration management changes.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>The KD#2 fulcrum (M&amp;A execution quality) is rated ORANGE precisely because the M&amp;A history creates perimeter uncertainty.</strong> An active M&amp;A pipeline adds geographic and business unit complexity. If another acquisition is announced, the perimeter broadens further.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>Net assessment: grade B — below the guardrail threshold on segment and geography count, but with caveats about the International Connectivity segment composition and M&amp;A pipeline risk.</strong> The structural perimeter is narrow enough; the actual complexity depends on what International Connectivity comprises.</div></div>
+<p><strong>E7 RA3 — Zero headwinds? (zero value-chain headwind risks to revenue)</strong></p>
+<p><strong>[D] Headwinds are present and structural — this guardrail is not passed</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>Chinese cable manufacturers are the most significant value-chain headwind, and they are structural not cyclical.</strong> ZTT, Hengtong, and Yangtze Optical Fibre operate at structurally lower cost bases. Their presence in the European FS market creates a price floor below which Hexatronic cannot profitably compete in standard-product FS cables. This headwind reduces Hexatronic's FS revenue addressable market and compresses FS margins on the revenue that remains. It does not resolve with the macro cycle.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>European operator consolidation creates a buyer power headwind that is also structural.</strong> The consolidation of telecoms operators over the past decade has created large, sophisticated procurement entities that can source cables from multiple suppliers and apply genuine pricing leverage. This structural shift in customer power has permanently altered the economics of FS cable supply in Europe.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>The inventory overhang at Nordic operator level is a medium-duration headwind.</strong> Not yet cleared. The volume component of FS Europe revenue will remain suppressed until the overhang clears, regardless of Hexatronic's competitive position.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>LTIP misalignment creates a management incentive headwind.</strong> Management's incentive structure is currently out of alignment with current financial performance. This reduces the strength of the incentive to deliver precisely when delivery matters most.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>Value-chain headwinds are concentrated in FS Europe; the DC segment does not face the same headwind profile.</strong> The DC value-chain dynamics are different — less commoditised, higher switching costs, more proprietary product content. The headwind risk is segment-specific.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>Net assessment: grade D on the zero-headwinds guardrail.</strong> This guardrail is definitively not passed. The FS structural headwinds are real, present, and documented. The requirement is zero value-chain headwind risks to revenue — Hexatronic has documented material headwinds. This is not disqualifying at Triaging (it is one of the risk dimensions ESA must assess) but it is an important negative signal on case simplicity.</div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items? (two or fewer change-from-current problems)</strong></p>
+<p><strong>[C] Three to four concurrent change-from-current items — above the ideal threshold but within the acceptable range for a trough-on-trough setup</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>The primary change-from-current item is the DC revenue mix shift.</strong> DC must become a larger fraction of total revenue for the multiple to expand from its current blended level to a DC-infrastructure level. This change is underway but not complete. Tracking metric: DC as % of total revenue (currently less than <strong>50%</strong>); target: <strong>50%</strong>+ by 2027-28.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The secondary change-from-current item is FS stabilisation.</strong> FS Europe must stop declining, or at minimum decline at a slower rate than DC is growing. This change has not yet occurred. FS was -<strong>31%</strong> organic in Q1-26. The change-from-current requires operator inventory clearance and some resolution of the Chinese pricing competitive dynamic. Neither has happened yet.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>The tertiary change-from-current item is CEO credibility accumulation.</strong> Fröberg must deliver multiple more consecutive positive results to transition from "credible but unproven" to "proven track record." This requires 3-5 more quarters of on-thesis delivery.</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>The quaternary change-from-current item is M&amp;A execution risk management.</strong> KD#2 ORANGE conviction means the M&amp;A pipeline represents an ongoing change-from-current risk. Any new acquisition announcement resets this risk.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>Four concurrent change-from-current items is above the ideal threshold.</strong> The guardrail asks for two or fewer. The Hexatronic case has four. This is the central case simplicity challenge.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>Net assessment: grade C — four concurrent change-from-current items is above the ideal guardrail standard but within the acceptable range for a trough-on-trough setup where the complexity is explicitly part of the investment rationale.</strong> The ×2 weighting on E7 makes this the most important simple test in the memo. The C grade here is the primary case simplicity constraint.</div></div>
+<p><strong>E7 RA5 — Conservative investor relations? (guidance is confirmed conservative)</strong></p>
+<p><strong>[C] Guidance credibility is Medium/Yellow — management has beaten guidance consistently in recent quarters but the track record is still recent under Fröberg's tenure</strong></p>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>Post-Q4-25 and Q1-26, the pattern of beating guidance by 10-20% on EBITA suggests a deliberate sandbagging posture.</strong> The Q4-25 EBITA beat of approximately <strong>18%</strong> and the Q1-26 +<strong>49%</strong> re-rating event both suggest management is setting guidance below what they expect to deliver. This is the pattern of a conservative IR posture.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>However, the pattern is only two to three data points under Fröberg's leadership.</strong> Two or three quarters of beats does not constitute a proven conservative guidance posture. The prior CEO's guidance credibility (which is what historical analysts would have calibrated against) is not relevant to Fröberg's posture. Building confidence in conservative IR requires at least 4-6 consistent beats.</div></div>
+<div class="finding"><span class="fnum">27.</span><div class="ftext"><strong>The LTIP target mismatch (14-21% required vs 7-8% current) may paradoxically indicate that management believes the guidance-period targets are achievable but the LTIP targets represent a medium-term stretch.</strong> If true, this would suggest guidance is conservative relative to near-term delivery capability.</div></div>
+<div class="finding"><span class="fnum">28.</span><div class="ftext"><strong>RedEye as primary covering broker (3-5 broker pool) means the consensus is thin.</strong> With a small consensus pool, it is easier to beat guidance — the signal quality of the beat is lower. A <strong>20%</strong> beat against five analysts is less meaningful than a <strong>10%</strong> beat against twenty analysts.</div></div>
+<div class="finding"><span class="fnum">29.</span><div class="ftext"><strong>The guidance credibility assessment at Medium/Yellow is the right calibration.</strong> Not yet Conservative (which would require a longer proven track record); not Aggressive (management has not promised above delivery). Medium/Yellow reflects an emerging but unconfirmed conservative posture.</div></div>
+<div class="finding"><span class="fnum">30.</span><div class="ftext"><strong>Net assessment: grade C — Medium/Yellow guidance credibility with an improving trend but insufficient track record under the current CEO to confirm conservative IR.</strong> ESA management research should specifically assess Fröberg's guidance posture through transcript analysis.</div></div>
+<p><strong>E7 Element Rating: [C]</strong></p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-with-acceptable-case-setups" data-spy><span class="id">E8</span> Fit with Acceptable Case Setups <span class="secn">19 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>E8 sweeps all six recognised setups and identifies which 1-2 best fit Hexatronic. The 3-bullet carve-out applies: (1) does the setup pattern fit? (2) what evidence supports or refutes? (3) what would confirm/disconfirm at ESA? Setup identification here drives the E8 carve-out at Early-Stage Assessment.</div>
+<p><strong>First pass at Triaging — 3-bullet carve-out per setup — all 6 setups + 2 guardrails</strong></p>
+<p><strong>RA1 — Mis-modelled, high-quality EPS upgrader</strong></p>
+<p><strong>[D] Weak fit — Hexatronic is not a clean high-quality EPS upgrader; the mis-modelling argument exists but requires resolution of fundamental uncertainties</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext">Pattern fit: Weak. A mis-modelled EPS upgrader requires a demonstrably high-quality business with a model error that, once corrected, unlocks sustained upgrades. Hexatronic's quality profile is C — it is not a demonstrably high-quality business in the sense that Atlas Copco or RELX are. The mis-modelling argument could apply to the DC ramp rate (consensus under-estimates DC conversion rates from hyperscaler capex) but this is a growth mis-model, not a quality mis-model.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext">Evidence: The Q4-25 EBITA beat of approximately <strong>18%</strong> and Q1-26 +<strong>49%</strong> re-rating suggest consensus has been materially under-modelling the DC EBITA contribution. This is consistent with the mis-modelling thesis. But the quality foundation required for this setup is not yet established.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext">Disconfirmation at ESA: If DC EBITA margins are declining as volume grows (indicating competitive pressure in the DC segment), the mis-modelled upgrader thesis is disconfirmed. ESA must establish DC segment margin trajectory specifically.</div></div>
+<p><strong>RA2 — Big demand change-driven EPSU or EPT</strong></p>
+<p><strong>[C] Partial fit — DC demand is driving an EPS step-up in the DC segment; the setup is forming but not yet at group level</strong></p>
+<div class="finding"><span class="fnum">4.</span><div class="ftext">Pattern fit: Partial. Earnings Per Share step-Up (EPSU) requires a step-change in demand creating a non-linear earnings uplift. The DC segment is experiencing precisely this — the DC inflection in Q1-26 (DC becoming EBITA-dominant) is an EPSU at the segment level. But total group EBITA has not yet stepped up non-linearly because FS decline is offsetting DC growth.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext">Evidence: DC segment EBITA inflection in Q1-26 is documented. Group EBITA at SEK 146m at <strong>8.6%</strong> margin (Q1-26) is below the sector threshold for a true EPSU claim at the consolidated level. The EPSU is forming inside the DC segment but has not yet propagated to group level.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext">Confirmation at ESA: Model DC and FS EBITA trajectories over 2026-28. If DC EBITA CAGR of <strong>30%</strong>+ outpaces FS EBITA decline over this period, the group-level EPSU case becomes investable. This is the primary ESA financial modelling task.</div></div>
+<p><strong>RA3 — Strong corporate change-driven EPSU / EPT</strong> ✓ <strong>SECONDARY FIT</strong></p>
+<p><strong>[B] Good secondary fit — new CEO driving three-segment pivot, PIP delivery, and DC re-prioritisation constitute genuine corporate change; multiple concurrent corporate change initiatives support EPT potential</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext">Pattern fit: Good secondary. This setup describes corporate change (new strategy, new CEO, restructuring) driving an Earnings Per Turn (EPT) — a cycle-level improvement in earnings trajectory. Fröberg's appointment in March 2025, PIP delivery ahead of schedule, three-segment reorganisation, and DC re-prioritisation are all components of a genuine corporate change narrative. The setup fits.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext">Evidence: PIP delivered Q3-26 vs Q4-26 target. Three-segment structure creates reporting clarity. DC EBITA dominance achieved. Fröberg's fingerprints are on the right decisions at the right time. The corporate change is real and is generating financial results.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext">Confirmation at ESA: CEO Research (18-CEOResearch) rerun for Fröberg specifically (current file has a WARN flag — it researched outgoing CEO Larsson Lyon). Fröberg track record at Ansell and strategic capital allocation philosophy must be established before this secondary setup reaches full conviction.</div></div>
+<p><strong>RA4 — Change-from-current clearing in high-quality compounder</strong></p>
+<p><strong>[D] Weak fit — Hexatronic is not a high-quality compounder in the Atlas Copco / RELX sense; the business quality profile is C, which prevents this setup from applying</strong></p>
+<div class="finding"><span class="fnum">10.</span><div class="ftext">Pattern fit: Weak. This setup requires a genuinely high-quality compounder (durable competitive advantages, high ROIC, long track record of compounding) experiencing a temporary change-from-current event (earnings miss, capex cycle, market concern) that creates an entry opportunity. Hexatronic's quality profile at C does not meet the "high-quality compounder" threshold. The FS structural impairment is not a temporary change-from-current — it is a structural impairment.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext">Evidence: DC moat is real but narrow (YELLOW conviction). FS competitive position has deteriorated. Management is in transition. These are not characteristics of a high-quality compounder temporarily disrupted.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext">Disconfirmation at ESA: If ESA establishes that DC segment ROIC and competitive moat depth are genuinely A-grade (above sector) and the FS impairment is genuinely temporary (not structural), this setup could be upgraded. Current evidence does not support this.</div></div>
+<p><strong>RA5 — Huge change-from-current clearing event in solid quality</strong></p>
+<p><strong>[C] Partial fit — the FS structural trough represents a large clearing event; quality is C, not A, but the clearing event magnitude is genuine</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext">Pattern fit: Partial. This setup describes a large, identifiable clearing event (structural trough, regulatory resolution, management crisis) that, when resolved, unlocks substantial forward EPS improvement in a fundamentally solid business. The FS structural trough is exactly this type of clearing event — if FS recovers to even <strong>70%</strong> of peak levels and DC continues growing, the improvement in group EBITA is substantial. The quality constraint is that "solid quality" requires at least B-grade business quality; Hexatronic is C.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext">Evidence: FS trough with -<strong>31%</strong> organic decline in Q1-26 is a large and visible clearing event. The potential forward EBITA improvement from even partial FS recovery + DC ramp is substantial relative to current actuals. The setup is partially fitting.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext">Confirmation at ESA: Establish FS structural floor. If FS has a stable recurring base (maintenance fibre, legacy contract revenues) that provides a floor independent of new-build volumes, the clearing event is better defined. If FS has no floor and could continue declining, the setup weakens.</div></div>
+<p><strong>RA6 — Trough-on-trough turn in solid quality cyclical</strong> ✓ <strong>PRIMARY FIT</strong></p>
+<p><strong>[B] Primary fit — Hexatronic's FS trough combined with DC inflection at the same time creates the classic trough-on-trough entry opportunity; solid quality is a stretch but the setup pattern is the best fit</strong></p>
+<div class="finding"><span class="fnum">16.</span><div class="ftext">Pattern fit: Primary and strongest. This setup describes a business experiencing a trough in one or more segments, where the trough creates a compressed entry valuation into a business that has durable earnings power at normalised levels. HTRO's FS segment is in a trough (inventory digestion + Chinese competition). The DC segment is at an inflection. The combination creates exactly the "through the trough" entry dynamic — the market is pricing current (trough) earnings, and normalised earnings are materially higher. The "solid quality" descriptor is a slight stretch for a C-quality business, but the setup mechanics are the closest match.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext">Evidence: DC inflection + FS trough at the same time is the defining market condition. Sell-side bull/base/bear scenarios (SEK 43 / SEK 28 / SEK 15) embed exactly this structure — the wide range reflects uncertainty about the normalised earnings level. The entry at current prices is implicitly a bet that normalised is closer to the base (SEK 28) or bull (SEK 43) scenario than the bear (SEK 15).</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext">Confirmation at ESA: Build a normalised earnings model (2027-28 EBITA under three scenarios: FS -<strong>20%</strong> structural floor, FS flat, FS +<strong>10%</strong> recovery; DC at <strong>25%</strong>/<strong>35%</strong>/<strong>45%</strong> CAGR). The spread of normalised EBITA scenarios will calibrate whether the trough entry is attractive at current valuation.</div></div>
+<p><strong>RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL]</strong></p>
+<p><strong>[C] Partially active — some unacceptable setup characteristics are present but are not disqualifying at Triaging</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext">The research does not indicate Hexatronic fits a "value trap" archetype (it has genuine change forces), a "management credibility collapse" scenario (Fröberg has delivered one data point positively), or a "terminal business model decline" (DC is growing). However, the FS structural impairment carries characteristics of structural business model deterioration that would, if unchec</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body>
+</html>

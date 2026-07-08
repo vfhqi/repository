@@ -1,0 +1,1307 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Enav S.p.A. (ENAV-IT) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">15</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">29</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-d">MR2 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">109</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-internal-and-externa">Element E1 — Required input change forces (internal and external)<span class="nav-rating-pill C">C</span><span class="nav-fc">18</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-change-forces-c" data-element-id="element-e1-required-input-change-forces-internal-and-externa">E1 RA1 — Change forces?<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-robust-base-c" data-element-id="element-e1-required-input-change-forces-internal-and-externa">E1 RA2 — Robust base?<span class="nav-rating-pill C">C</span><span class="nav-fc">12</span></span>
+</div>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">91</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">16</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-b">Element E4 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">13</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e5-ra1-suitability-for-bear-market-economic-downturn-c" data-element-id="element-e5-thematic-fit-c">E5 RA1 — Suitability for bear market / economic downturn<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra2-suitability-for-ai-disruption-c" data-element-id="element-e5-thematic-fit-c">E5 RA2 — Suitability for AI disruption<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra3-suitability-for-geopolitical-oil-price-induced-demand" data-element-id="element-e5-thematic-fit-c">E5 RA3 — Suitability for geopolitical / oil-price-induced demand shocks<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra4-paradigm-fit-from-business-perspective-summary-c" data-element-id="element-e5-thematic-fit-c">E5 RA4 — Paradigm fit from business perspective summary<span class="nav-rating-pill C">C</span><span class="nav-fc">4</span></span>
+</div>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">41</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">16</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">25</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">32</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-nr">Group 4 — Case riskiness [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">4</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">23</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">13</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">10</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Enav S.p.A. (ENAV-IT) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">ENAV-IT</span> A&amp;J MEMO — Enav S.p.A. (ENAV-IT) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 05-Jul-26 20:39</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">EUR 5.28 (2026-07-03, master-dashboard/data/prices.json)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">20.9x (P/E percentile 65th of 10-year range; not cheap — dial to STALE, see Section F.2)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (+13.4%); Stage 2 advance intact per 12M price history</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">ENAV-IT (Enav S.p.A.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Infrastructure — airports/trains (regulated air navigation services)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Mid-size European regulated airports and air navigation services (single-asset or national concessions, regulated return on capital)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Flughafen Wien (FLU-AT)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">EUR 5.28 (2026-07-03, master-dashboard/data/prices.json)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">EUR 3.43 to EUR 5.34</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">EUR 4.65</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (+13.4%); Stage 2 advance intact per 12M price history</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">20.9x (P/E percentile 65th of 10-year range; not cheap — dial to STALE, see Section F.2)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">EUR 5.06 (consensus; 29% buy rating; stale dial, see Section F.2)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">29 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BLUF: statutory sovereign monopoly with an infinite mandate and near-zero switching costs generates elite cash conversion (<strong>104.3%</strong> of EBITDA), but reported earnings are compressing under the RP4 tariff reset, sell-side conviction is deteriorating fast (Hold ratings <strong>18%</strong> to <strong>44%</strong> in three years), and Richard's own 17-Jun-26 IR call arithmetic implies consensus is running EUR 15-20m too low on 2026 costs — an <strong>8%</strong> EPS cut risk the market has not yet priced. A CEO transition (Monti to de Biasio, effective 14-May-26) lands mid-RP4 with zero board equity alignment across 8 of 9 directors.</div><ul class="lead-bullets"><li><strong>Overall verdict. <span class="g gC">C</span></strong> <span class="s-neg">Sell-side conviction is deteriorating (Hold ratings <strong>18.18%</strong> to <strong>44.44%</strong> in three years) into a CEO handover, and Richard's own cost-arithmetic from a direct IR call implies consensus 2026 EBITDA is overstated by EUR 15-20m (~6-<strong>7%</strong>), with EPS impact amplified to roughly <strong>8%</strong> given fixed-cost leverage</span> — a specific, quantified, near-term negative that the market has not yet re-rated for.</li><li><strong>Key risk.</strong> <u>Margin compression is structural, not transitory</u>: EBIT margin fell from <strong>18.1%</strong> (FY24) to <strong>13.7%</strong> (FY25) in the first RP4 year, wage inflation (personnel +<strong>6.8%</strong> to EUR 632.6m) is contractually locked via a 2026-28 union agreement, and the CEO succession (Monti to de Biasio, 14-May-26) removes the operator who delivered the FY23-25 track record.</li><li><strong>Key support.</strong> <span class="s-pos">The statutory monopoly is absolute</span>: "airlines flying through Italian airspace have zero alternatives," downside is capped at <strong>4.4%</strong> of service-unit revenue by EU risk-sharing, net leverage is <strong>0.5x</strong>, and free cash flow conversion of <strong>104.3%</strong> of EBITDA is best-in-class against Thales (<strong>97.0%</strong>) and funds an <strong>80%</strong>-of-FCF dividend policy through 2029.</li><li><strong>Recommendation.</strong> PROGRESS to Early-Stage Assessment with LOW-TO-MEDIUM conviction — the moat and cash-generation case clears Triaging's light bar, but the E1 change-force case is genuinely mixed and the E8 case-setup fit is closer to a margin-recovery-plus-dividend story than a high-conviction EPS upgrader; ESA must resolve whether the 2026 cost overshoot Richard flagged directly with IR crystallises.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">8 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Statutory monopoly, not a commercial franchise.</strong> Enav is Italy's sole civil air navigation service provider under national law "without any time limit" — every flight through or landing in Italian airspace must use Enav's infrastructure, with zero legal alternative.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Regulated-utility financial character at scale.</strong> FY2025 consolidated revenue EUR 1,024.7m (<strong>76%</strong> en-route / <strong>24%</strong> terminal split), EBITDA EUR 252.7m (<strong>24.7%</strong> margin), net income EUR 93.1m, net debt/EBITDA <strong>0.5x</strong> — a conservative, income-generative balance sheet.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Geography is narrow and structurally insulated.</strong> Revenue is <strong>96.3%</strong> Italy-domestic by billing currency and jurisdiction, but over <strong>80%</strong> of en-route traffic is international overflight, so the revenue base is geographically concentrated in regulatory terms yet demand-diversified across European carriers.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Investment style is a regulated-monopoly income compounder, not a cyclical or event-driven case.</strong> The RP4 (2025-2029) five-year performance plan locks tariffs, capex (EUR 568m) and a rising dividend (EUR 0.29 to EUR 0.32/share) — the case is a bond-like equity with optionality, not a re-rating story.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Vertical integration is unusually deep for the sector.</strong> Captive Techno Sky (maintenance) and IDS AirNav (software, 100+ clients/70 countries) put Enav in three of the four air-traffic value-chain stages, missing only hardware manufacturing (Thales/Indra/Leonardo territory).</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Non-regulated optionality is real but small.</strong> Non-regulated revenue reached EUR 52.1m in 2025 (+<strong>5.8%</strong>), targeted to double to EUR 106m by 2029 via drone/UTM (AIView Group acquisition), consulting and technology exports — currently ~<strong>5%</strong> of group revenue.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Ownership is majority-state, single-listed-ANSP structure.</strong> The Ministry of Economy and Finance (MEF) holds <strong>53.28%</strong> and appoints six of nine board directors; Enav is the only listed air navigation service provider globally, a governance and float-liquidity outlier.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Sell-side coverage is thin and deteriorating in conviction.</strong> Nine active brokers (5 Buy, 4 Hold), down from 11 brokers (9 Buy, 2 Hold) in 2022 — Hold ratings have risen from <strong>18.18%</strong> to <strong>44.44%</strong> over three years.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">4 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong><span class="g gD">D</span> Sell-side conviction is deteriorating into a CEO handover.</strong> Hold-rating share rose from <strong>18.18%</strong> (2022) to <strong>44.44%</strong> (2025); three brokers migrated Buy-to-Hold on RP4 margin concerns.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong><span class="g gD">D</span> Richard's own IR-call arithmetic flags an unpriced 2026 EPS cut risk.</strong> His 17-Jun-26 direct IR call implies consensus cost base is EUR 15-20m too low on ~EUR 270m forecast EBITDA — a ~6-<strong>7%</strong> EBITDA miss risk that could compound to ~<strong>8%</strong> at EPS given fixed-cost operating leverage.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong><span class="g gB">B</span> The statutory monopoly and cash-conversion profile are genuinely elite.</strong> <strong>104.3%</strong> FCF/EBITDA conversion, <strong>0.5x</strong> net leverage, and a legally capped <strong>4.4%</strong> maximum traffic-driven revenue loss provide a downside floor few regulated names can match.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong><span class="g gC">C</span> Recommendation: progress to Early-Stage Assessment, LOW-TO-MEDIUM conviction</strong>, conditional on the August 2026 H1 results resolving whether Richard's flagged cost overshoot crystallises into a formal guidance cut.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Price EUR 5.28 sits <strong>13.4%</strong> above the 200-day average (EUR 4.65) and <strong>6.3%</strong> above the 50-day (EUR 4.96); RS percentile 73rd overall and 99th versus sector — one of the strongest relative-strength readings in the Infrastructure — airports/trains sector, consistent with the Notion Monitoring note's 8/8 Minervini score history.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-d" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">EPS revisions are nominally positive (SSEM L3M +9, L6M +7) but buy-rating revisions are sharply negative (L3M -21pp, L6M -21pp, buy% now <strong>29%</strong>) and target-price revisions have decelerated (L6M +11 to L1M +2) — the rating migration (Hold <strong>18%</strong> to <strong>44%</strong>) is the dominant signal, not the EPS-count noise.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Assessed on stock-specific first-principles reasoning only, per Richard's 04-Jul-26 instruction (no live thematic overlay applied) — genuinely resilient revenue mechanics in a downturn are offset by capped upside and negligible AI-disruption risk cutting both ways (see Element E5 below).</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The regulatory framework (RP4) is locked and traffic is inflecting positively (en-route SUs +<strong>5.9%</strong> FY25, +<strong>8.6%</strong> Q1 2026), but the change-from-current is thin: margin is compressing, not expanding, and a new CEO with zero direct aviation experience inherits the plan rather than authoring an upgrade.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Simplicity is undermined by a live CEO transition plus 2 revenue-charging-zone consolidation plus a new M&amp;A vertical (drones) running concurrently; the closest case-setup fit is a margin-recovery-plus-dividend compounder, not a high-conviction EPS upgrader.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> The regulatory change-force case is real (RP4 approved, traffic recovering) but earnings are moving the wrong way in year one, and the CEO who delivered the pre-RP4 beat record has just left.</li><li><strong>E1 headline.</strong> Robust regulatory-visibility base undercut by margin compression, wage-cost lock-in, and a leadership handover mid-cycle.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gC">C</span></strong> External change forces (RP4 approval, traffic recovery, capacity bonus) are High-plausibility positives, but internal change forces (new CEO, board overhaul, wage inflation) skew negative; net change-from-current is modest and two-sided.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 — Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at this stage; first assessed at Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 — Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at this stage; first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Momentum is technically strong but sell-side-conviction-weak; simplicity is strained by three concurrent change programmes; value-chain dynamics are the strongest sub-case, anchored in an absolute statutory moat.</li><li><strong>Group headline.</strong> Group 1 mixed (strong price action, weak SSEM); Group 2 mixed-to-weak (thematic fit average, simplicity strained, best-fit setup is margin-recovery-plus-dividend); Group 3 solidly positive (value-chain dynamics); Groups 4-5 not yet in scope.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gC">C</span></strong> Price action is genuinely strong (RS 99th percentile vs sector) but earnings-revision sentiment (buy-rating migration) is deteriorating — a momentum/fundamentals divergence Watson flags explicitly.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gC">C</span></strong> Guardrails are strained: CEO transition, area-control-centre consolidation (4 to 2), and a new drone-M&amp;A vertical run concurrently against a single reasonably focused geography.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gB">B</span></strong> Value-chain dynamics are the strongest positive: an absolute, legally insurmountable demand-side moat with mechanical, largely-benign competitive dynamics.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gNR">NR</span></strong> Light first-pass note only at Triaging; risk Elements (E15-E19) are not yet in scope; Watson flags CEO-transition and wage-inflation risk as the two watch items to deepen at Deep Dive.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Not yet in scope; drone/UTM and government stake-sale optionality (per Richard's CEO-call notes) are flagged for Early-Stage Assessment.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gC">C</span></strong> Progress to Early-Stage Assessment with LOW-TO-MEDIUM conviction; the case clears Triaging's light bar on moat quality and cash generation but carries a specific, Richard-flagged near-term earnings-cut risk that ESA must resolve.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> August 2026 H1 results must show whether the 2026 cost base tracks Richard's IR-call-implied EUR 15-20m overshoot or holds to consensus; the new CEO's first strategic-plan refresh commentary (expected from 1H 2027) should be monitored for early signals at ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to track the August 2026 H1 print specifically against Richard's cost-overshoot thesis and flag any confirmation or refutation immediately; (2) Watson to run an ESA-stage E3 valuation-upside calculation once fresh factset-valuation.json / factset-ssem.json data is available (current files are stale beyond the 14-day threshold).</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">109 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> <span class="s-neg">Bad news first: sell-side is actively cutting conviction into a leadership transition, and Richard's own IR-call maths implies an unpriced cost overshoot</span> — but <span class="s-pos">the underlying moat (absolute statutory monopoly, <strong>4.4%</strong> legally capped downside, <strong>104.3%</strong> cash conversion) is genuinely top-decile within the cohort</span>.</li><li><strong>Load-bearing tension.</strong> The case pits an elite, bond-like regulatory moat against a demonstrably deteriorating sell-side conviction trend and a management handover at the worst possible moment in the RP4 cycle — Triaging's job is to flag this tension, not resolve it.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">18 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> External regulatory change forces are locked-in positives; internal change forces (leadership, cost base) are negatives; the net change-from-current is real but two-sided, not one-directional.</li><li><strong>E1 headline.</strong> Robust regulatory visibility and traffic recovery, undercut by margin compression and a leadership handover mid-cycle.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-internal-and-externa" data-spy>Element E1 — Required input change forces (internal and external) <span class="g gC">C</span> <span class="secn">18 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E1 (Required input change forces) verdict. <span class="g gC">C</span></strong> <span class="s-pos">RP4 approval and traffic recovery are High-plausibility external tailwinds</span>, but <span class="s-neg">the CEO transition, wage-cost lock-in and negative rating migration are real internal headwinds</span> — Watson grades this <span class="g gC">C</span> against the cohort, not <span class="g gB">B</span>, because the internal change forces are negative and load-bearing, not merely a caveat.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-change-forces-c" data-spy><span class="id">E1 RA1</span> Change forces? <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Change forces) answer: <span class="g gC">C</span></strong> <em><u>External change forces are structurally High-plausibility (RP4 lock-in, traffic recovery); internal change forces are net negative (CEO exit, wage inflation, board overhaul) — the RA nets to <span class="g gC">C</span> because the internal negative offsets a genuinely strong external positive.</u></em></div></div>
+<p><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">RP4 Performance Plan (2025-2029) approved by the European Commission via Decision 2025/1058 in May 2025 anchors regulated revenue and a EUR 568m capex programme through 2029 — the single largest external change force in the case.</span><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Traffic inflection is real and accelerating:</strong> en-route service units rose <strong>5.9%</strong> in FY2025 and accelerated to <strong>8.6%</strong> year-on-year in Q1 2026, outperforming Spain (+<strong>5.6%</strong>), Great Britain (+<strong>4.2%</strong>) and Germany (+<strong>4.0%</strong>).</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Operational-excellence bonus is mechanically captured:</strong> an en-route delay of 0.010 minutes in 2025 (versus a 0.14-minute EU target) triggered a EUR 12.9m capacity bonus — a repeatable, demonstrated mechanism, not a one-off.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Non-regulated growth is a genuine but small tailwind:</strong> revenue reached EUR 52.1m in 2025 (+<strong>5.8%</strong>), targeted to double to EUR 106m by 2029, but bespoke consulting margins of 60-<strong>70%</strong> remain unproven at scale internationally.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> the bear case (Risks report Section 9) argues RP4's ex-ante cost caps are themselves the dominant force, and CCNL wage inflation (personnel +<strong>6.8%</strong> to EUR 632.6m) will consume the traffic-driven upside before it reaches EBIT — Watson partially accepts this: the external tailwind is real, but its EPS conversion is contested (see E1 RA2 CQ4).</div></div>
+<p><strong>E1 RA1 CQ2 — Strong internal change forces? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ2 answer: <span class="g gD">D</span></strong> <span class="s-neg">The dominant internal change force is negative: CEO Pasqualino Monti, whose FY23-25 tenure delivered the current beat-track record, was replaced by external appointee Igor De Biasio on 14-May-26, an executive with Terna/infrastructure experience but zero direct aviation-sector background.</span><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Succession was politically catalysed, not strategically planned:</strong> the departing-CEO change "was catalyzed by the Italian Ministry proposing a new executive slate in April 2026" — a state-shareholder-driven rotation, not an internally-planned succession.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Governance disclosure gap on succession planning:</strong> the Leadership report flags "Presence of Succession/Contingency Plans" as absent or unpublished — a governance red flag independent of the CEO's individual quality.</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Chairman conflicts compound the transition:</strong> incoming Chairman Sandro Pappalardo retains concurrent roles at ITA Airways and ENIT, raising a related-party and attention-bandwidth question at the exact moment CEO continuity is already disrupted.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>One genuinely positive internal force:</strong> the AIView Group acquisition (<strong>85%</strong> stake, EUR 9.0m, March 2026) is a deliberate, board-approved move to scale the Drone-as-a-Service platform — the one internal change force Watson grades positively, though its EPS materiality is 3+ years out.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (CQ2):</strong> Richard's own CEO-call notes (22-Sep-25, with Monti) describe a state-aligned governance model that has previously absorbed leadership rotations without operational disruption (ENAV met performance targets through the 2023 CEO change), so the transition risk may be more optical than structural — Watson notes this but does not fully accept it, because de Biasio (unlike Monti) has zero direct aviation-sector background, a genuine capability-fit gap Monti did not carry.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Downstream actions (E1 RA1):</strong> (1) Track De Biasio's first 90 days of public commentary (post-14-May-26 AGM) for strategic-continuity signals versus disruption signals; (2) Confirm at ESA whether a formal succession/contingency plan has since been published, closing the governance disclosure gap identified here.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-robust-base-c" data-spy><span class="id">E1 RA2</span> Robust base? <span class="g gC">C</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Robust base) answer: <span class="g gC">C</span></strong> <em><u>The regulatory and balance-sheet base is genuinely robust (<strong>0.5x</strong> leverage, legally capped downside); the earnings base is not robust in year one of RP4, and the trading multiple is not obviously cheap — three of five Core Questions net positive, two net neutral-to-negative.</u></em></div></div>
+<p><strong>E1 RA2 CQ1 — Absence of external headwinds? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">No acute external macro or industry-competitive headwind threatens the core franchise</span>: the statutory monopoly is unaffected by competitive entry (a centralised ATC facility costs USD 200m-1bn plus certification, a prohibitive barrier), and Enav's collaborative-oligopoly peer set (top 15 European ANSPs manage ~<strong>80%</strong> of flights) is non-aggressive.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Middle East geopolitical risk is a genuine, if contained, exogenous headwind:</strong> overflights are ~<strong>10%</strong> of en-route volumes and a Middle East escalation could redirect international routes; Richard's own IR-call notes record "no impact so far" as of the call but flag it as a live watch item.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Domestic terminal traffic is a real, smaller external drag:</strong> domestic service units fell <strong>2.1%</strong> in 2025 on high-speed rail modal shift and ITA Airways' post-Lufthansa-takeover restructuring cutting terminal volumes below plan (Zone 1 -<strong>2.8%</strong>, Zone 2 -<strong>4.2%</strong> versus RP4 targets).</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because the domestic/ITA-driven terminal headwind and the Middle East overflight exposure are real, observable, ongoing external drags even though neither is existential.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> the risk-sharing mechanism caps ENAV's maximum annual traffic-driven revenue loss at <strong>4.4%</strong>, which substantially neutralises the financial impact of either external headwind — Watson accepts this caps the downside but does not erase the headwind from the change-force read, since capped losses are still losses relative to the RP4 baseline case.</div></div>
+<p><strong>E1 RA2 CQ2 — Well-invested base? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ2 answer: <span class="g gB">B</span></strong> <span class="s-pos">The capital base is well-invested and modernising</span>: the RP4 capex programme (EUR 568m through 2029, a <strong>15%</strong> increase on RP3's EUR 494m) targets digitising 26 towers, consolidating Area Control Centers from four to two, and deploying the 4-Flight ATM platform in Rome (2028) and Milan (2030).<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Actual capex is running below plan, which cuts both ways:</strong> 2025 cash capex reached EUR 77.0m, well below the RP4 annual pro-rata average of EUR 113.6m — a positive for near-term cash flow but a Risks-report-flagged FALSE FRIEND candidate (deliberate tech underinvestment inflating near-term EBITDA/cash flow while masking operational decay).</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Legacy technology remains a genuine weak spot:</strong> the proprietary datalink is described by EUROCONTROL as "a major black hole," cutting airspace sector capacity by <strong>11%</strong> — a live, unresolved infrastructure gap the RP4 4-Flight rollout is designed to fix but has not yet fixed.</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>CQ2 grade rationale:</strong> <span class="g gB">B</span> because the modernisation programme is credible and funded, but the FALSE FRIEND underinvestment risk and the still-unresolved datalink issue prevent an. <span class="g gA">A</span></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (CQ2):</strong> bulls would argue the below-plan capex simply reflects disciplined phasing rather than underinvestment — Watson partially accepts this (capex phasing is common in regulated infrastructure) but flags the Risks report's own characterisation of this as one of only two FALSE FRIEND scenarios (<strong>20%</strong> of analysed risks) as too significant to wave away at Triaging.</div></div>
+<p><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>CQ3 answer: <span class="g gB">B</span></strong> <span class="s-pos">Delivery track record under the departing CEO was strong and consistent</span>: FY2025 EBITDA of EUR 252.7m landed at the upper end of the upgraded EUR 245-253m guidance range, and FY2025 net income of EUR 93.1m beat the initial EUR 64.0m target by <strong>45.5%</strong>.<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>The historical beat pattern spans multiple years:</strong> record consolidated revenue of EUR 1,000.0m in FY2023 (+<strong>5.9%</strong>), peak net profit of EUR 125.7m in FY2024, both under Monti's tenure — a demonstrated, multi-year honest-tracker pattern, not a single lucky print.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>The congruency question going forward is unresolved:</strong> the new CEO inherits this delivery reputation but has not yet been tested against it; Q1 2026 already missed consensus (EPS -<strong>16.57%</strong>, revenue -<strong>9.78%</strong>) under the transition period, a fact Watson weighs as a genuine early wobble rather than dismissible seasonal noise.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>CQ3 grade rationale:</strong> <span class="g gB">B</span> for the historical record; Watson explicitly flags that this grade describes the PAST delivery pattern under a now-departed CEO, and is not yet evidence about the incoming CEO's delivery congruency.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (CQ3):</strong> the Notion recent-developments summariser (11-Jun-26) attributes the Q1 miss to "seasonal noise, not structural deterioration," evidenced by the stock's recovery from EUR 4.83 to EUR 5.39 within three weeks — Watson accepts the market judged it as noise but notes market judgement and fundamental congruency are different questions; ESA should test this explicitly against H1 results.</div></div>
+<p><strong>E1 RA2 CQ4 — Large change-from-current / mispricing? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ4 answer: <span class="g gD">D</span></strong> <span class="s-neg">The change-from-current is thin and arguably running the wrong direction near-term</span>: EBIT margin fell from <strong>18.1%</strong> (FY24) to <strong>13.7%</strong> (FY25) in the first RP4 year, and Richard's own IR-call arithmetic (17-Jun-26) implies consensus 2026 cost assumptions are EUR 15-20m too low on ~EUR 270m forecast EBITDA.<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Richard's own quantified cut thesis is the single most load-bearing data point in this Element:</strong> "RB: EUR 15-20m on EUR 270m forecast EBITDA is a big number. And then EPS fixed cost leverage means it'll be more than that <strong>5%</strong> at EPS level, maybe <strong>8%</strong>" — a specific, first-hand, quantified downgrade risk from Richard's direct conversation with Enav IR.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Consensus has not yet re-based for this:</strong> the Zeus (22-Jun-26) consensus-EPS commentary shows the market still expecting a <strong>55%</strong> EPS decline over 2026-2027, suggesting some cut is already anticipated, but Richard's cost-specific arithmetic (union performance-bonus sharing, AI Group cost, inflation running at <strong>3%</strong> not <strong>2%</strong>) is more granular than consensus appears to have modelled.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>CQ4 grade rationale:</strong> <span class="g gD">D</span> because "large change-from-current" as a Triaging Required Attribute asks whether the stock offers meaningful upside optionality from here, and the near-term evidence (both reported margin compression and Richard's own cost-overshoot maths) points toward downside risk to the change-from-current, not upside.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (CQ4):</strong> the RP4 framework mechanically re-bases toward the 2029 target trajectory (EUR 1.20bn revenue, EUR 361m EBITDA, EUR 165m net income), so any near-term cost overshoot is a timing question, not a structural derating of the five-year plan — Watson accepts the medium-term trajectory is intact but grades CQ4 on the near-term change-from-current specifically, where the evidence is negative.</div></div>
+<p><strong>E1 RA2 CQ5 — Low trading multiple? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>CQ5 answer: <span class="g gD">D</span></strong> <span class="s-neg">The stock is not cheap on any conventional measure</span>: forward P/E of <strong>20.9x</strong> sits at the 65th percentile of its own 10-year range, and one sell-side house (Finlabo) characterises the stock as trading at "an expensive multiple of 29.1 times consensus 2026 earnings."<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>EV/EBITDA sits below the technology-peer average but the comparison is not like-for-like:</strong> Enav trades at <strong>8.0x</strong> EV/EBITDA versus a cited peer average of <strong>12.4x</strong>, but that peer average blends in higher-growth technology names (Thales, Frequentis) whose growth profile Enav does not share.</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Multiple context versus the cohort is genuinely mixed:</strong> Flughafen Wien (cohort peer) trades on a comparable forward P/E (<strong>19.3x</strong>, 68th percentile) while Athens International Airport (cohort peer) trades materially cheaper (<strong>15.2x</strong>, 62nd percentile) — Enav is mid-pack on multiple within its own cohort, not visibly cheap.</div></div><div class="subfinding"><span class="subnum">10.3</span><div class="subtext"><strong>CQ5 grade rationale:</strong> <span class="g gD">D</span> because a Triaging "low trading multiple" test requires genuine cheapness, and 65th-percentile-of-own-history plus mid-pack-of-cohort does not clear that bar, irrespective of the quality of the underlying business.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>Counter-view considered (CQ5):</strong> the dividend-yield-anchored income-investor base may render P/E multiple comparisons less relevant than free-cash-flow yield, where Enav's <strong>104.3%</strong> FCF/EBITDA conversion and <strong>80%</strong>-of-FCF payout policy make the effective cash yield more attractive than the P/E alone suggests — Watson flags this as a legitimate alternative lens but does not let it override the CQ5 verdict, which is specifically about trading multiple, not cash yield.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Downstream actions (E1 RA2):</strong> (1) Rebuild the E3 valuation-upside case at ESA using fresh (non-stale) factset-valuation.json data once available; (2) explicitly test Richard's EUR 15-20m 2026 cost-overshoot thesis against the August 2026 H1 print as the single highest-priority ESA validation item.</div></div>
+<p><strong>E1 Element rating: <span class="g gC">C</span></strong> — External change forces (RP4 lock-in, traffic recovery) are genuinely strong (would support <span class="g gB">B</span> alone), but internal change forces (leadership transition, unresolved succession-planning gap) and the base-robustness read (margin compression, non-cheap multiple, and Richard's own quantified cost-overshoot thesis) pull the net Element grade down to <span class="g gC">C</span> against the cohort. Held off <span class="g gB">B</span> by the CEO-transition and cost-overshoot evidence; held off <span class="g gD">D</span> because the regulatory moat and cash-generation profile are too strong to grade below the cohort median.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">91 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Momentum is technically strong but sentiment-weak; simplicity is genuinely strained by three concurrent change programmes; value-chain dynamics are the standout positive sub-case.</li><li><strong>Group headline.</strong> Group 1 <span class="g gC">C</span> (price/SSEM divergence); Group 2 <span class="g gC">C</span> (simplicity strained, best setup fit is margin-recovery-plus-dividend); Group 3 <span class="g gB">B</span> (value-chain strong); Groups 4-5 not yet in scope. <span class="g gNR">NR</span></li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">16 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> Price action is genuinely strong; sell-side conviction is genuinely deteriorating; the divergence between the two is itself the load-bearing finding for this Group.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-b" data-spy>Element E4 — Technical momentum <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E4 verdict. <span class="g gB">B</span></strong> <span class="s-pos">Price sits <strong>13.4%</strong> above the 200-day average and <strong>6.3%</strong> above the 50-day</span>, with RS percentile 73rd overall and a striking 99th percentile versus sector — one of the strongest relative-strength readings in the Infrastructure — airports/trains sector.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E4 RA1 — Price/MA structure: <span class="g gB">B</span></strong> <span class="s-pos">Price EUR 5.28 versus 200D EUR 4.65 (12M rising for all 12 of the last 12 months) and 50D EUR 4.96</span>; the moving-average stack is in correct ascending sequence (50D above where it needs to be relative to longer averages), consistent with the Notion Monitoring note's 8/8 Minervini score sustained through April 2026.<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>12-month return of 43.5% substantially outperforms the sector:</strong> RS excess versus sector is +15.0 percentage points and versus industry +9.5 percentage points — genuine, sustained relative strength, not a brief bounce.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>The 52-week high (EUR 5.34) remains within 1.1% of the current price:</strong> the stock is not extended into new-high territory by a wide margin, reducing near-term mean-reversion risk relative to a stock trading well above its historical range.</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Base/pullback structure is orderly:</strong> maximum pullback since the last swing high is only <strong>3.9%</strong>, and the current pullback from swing high is <strong>1.0%</strong> — a tight, low-volatility base consistent with genuine institutional accumulation rather than speculative momentum.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E4):</strong> MR2's sharply negative buy-rating revisions (L3M -21pp, L6M -21pp) sit in direct tension with the technical strength — Watson explicitly does not resolve this divergence in E4's favour; it is flagged as the Group 1 headline finding rather than smoothed over.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E4):</strong> (1) Monitor whether the RS-percentile leadership persists through the August 2026 H1 print, the next scheduled test of Richard's cost-overshoot thesis; (2) Watch for a technical breakdown (loss of 50D support) as a leading indicator that the sell-side-conviction deterioration is starting to bite price action.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">13 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E5 (Thematic fit) verdict. <span class="g gC">C</span></strong> <span class="s-pos">Structural resilience in an economic downturn is genuine and well-evidenced</span> (regulated tariffs, near-zero switching costs, EU risk-sharing), but <span class="s-neg">that same regulatory structure caps upside participation in a recovery</span>, and AI-disruption exposure is a two-sided, unresolved question rather than a clear positive or negative — net <span class="g gC">C</span>, assessed stock-specifically without any live macro overlay.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra1-suitability-for-bear-market-economic-downturn-c" data-spy><span class="id">E5 RA1</span> Suitability for bear market / economic downturn <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Suitability for downturn) answer: <span class="g gC">C</span></strong> <em><u>Genuinely defensive revenue mechanics (regulated tariffs, inelastic demand, risk-sharing caps) are real structural resilience, not narrative resilience; but the same mechanics cap upside if a downturn resolves into a sharp recovery, making this a two-sided, not one-sided, downturn trade.</u></em></div></div>
+<p><strong>E5 RA1 CQ1 — Genuine structural resilience in an economic downturn? [C, factual-adjacent judgement]</strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">Demand for air navigation services is close to structurally inelastic in a downturn</span>: airlines cannot simply stop using Italian airspace to save cost, and even a severe volume shock is capped by regulation, not by market forces.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>The COVID precedent is the strongest evidence available:</strong> Italian airspace traffic fell <strong>90%</strong> in April 2020 and en-route service units fell <strong>59.6%</strong> over 9M 2020, yet Enav's only response was a single-year dividend suspension (FY2020) — no covenant breach, no equity raise, no going-concern issue.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The traffic risk-sharing mechanism mechanically limits the P&amp;L hit:</strong> ENAV absorbs <strong>100%</strong> of a traffic shock only within a <strong>2%</strong> dead-band; beyond that, airlines absorb <strong>70%</strong> of the variance between 2-<strong>10%</strong>, and beyond <strong>10%</strong> the shock passes through entirely to airlines — a legally engineered downside floor most cyclicals do not have.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>The two-year (N+2) balance-recovery lag is the genuine structural fragility inside the resilience story:</strong> a downturn's revenue and cost effects are recovered two years later, so a prolonged, multi-year downturn (unlike COVID's sharp V-shape) could create a sustained cash-flow deficit before recovery kicks in — this is the specific mechanism by which "resilient" can still mean "delayed pain," not "no pain."</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because the resilience is real and demonstrated, but the recovery-lag mechanism is a genuine, non-trivial fragility that prevents an unqualified <span class="g gB">B</span> or <span class="g gA">A</span> on downturn suitability.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a bull would argue the COVID precedent proves the case conclusively (a <strong>90%</strong> demand collapse produced only a one-year dividend pause) — Watson accepts COVID as strong evidence but notes COVID was a sharp V-shaped shock that resolved within the N+2 lag window; a structurally different, longer L-shaped downturn (e.g., a multi-year European recession) has not been tested against this mechanism.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra2-suitability-for-ai-disruption-c" data-spy><span class="id">E5 RA2</span> Suitability for AI disruption <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Suitability for AI disruption) answer: <span class="g gC">C</span></strong> <em><u>Air traffic control is not a knowledge-work function AI language models can substitute, so direct AI-disruption risk to the core franchise is low; but ENAV's own AI-adjacent growth thesis (drone/UTM, AIView) is unproven, making this a genuinely two-sided rather than clearly-positive AI story.</u></em></div></div>
+<p><strong>E5 RA1 CQ (continued) — Genuine AI-disruption exposure or benefit? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ answer: <span class="g gC">C</span></strong> <span class="s-pos">The core regulated business (real-time, safety-critical air traffic separation) is structurally resistant to large-language-model disruption</span>: this is a domain of hard real-time control systems and certified safety software, not a knowledge-retrieval or content-generation task that generative AI displaces.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>AI is a genuine input to Enav's OWN modernisation, not a threat to its franchise:</strong> remote digital towers and predictive-maintenance systems (targeting up to <strong>80%</strong> capex and <strong>18%</strong> opex savings per the Business Foundation report) use machine-learning techniques as a cost-efficiency tool internally.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The AIView Group acquisition is Enav's attempt to be an AI beneficiary, not a victim:</strong> the <strong>85%</strong>-stake, EUR 9.0m deal (closed March 2026) is explicitly aimed at AI-powered drone inspection for infrastructure, logistics and agriculture — real optionality, but former ENAV executives express "significant skepticism regarding near-term profitability" of this commercial drone push.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Automation risk to Enav's OWN air traffic controller workforce is a genuine longer-horizon two-sided consideration:</strong> digital tower remotisation threatens regional controller jobs (a union-friction risk already visible in the May 2026 eight-hour strike) even as it lowers Enav's own cost base — a benefit to the P&amp;L that is simultaneously a labour-relations risk.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>CQ grade rationale:</strong> <span class="g gC">C</span> because the core franchise carries genuinely low AI-disruption risk (a real positive), but the AI-enabled growth optionality (drones) is unproven and the automation-versus-labour tension is unresolved, preventing a clean <span class="g gB">B</span>/. <span class="g gA">A</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (this CQ):</strong> a bull case would grade this <span class="g gB">B</span> purely on "AI cannot replace an air traffic controller," treating the core-franchise resilience as the whole answer — Watson does not accept this in full, because the RA also legitimately covers whether Enav benefits FROM AI, where the drone/UTM thesis remains commercially unproven per Enav's own former executives.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra3-suitability-for-geopolitical-oil-price-induced-demand" data-spy><span class="id">E5 RA3</span> Suitability for geopolitical / oil-price-induced demand shocks <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 (Suitability for geopolitical shock) answer: <span class="g gC">C</span></strong> <em><u>Overflight exposure to Middle East routing (approximately <strong>10%</strong> of en-route volumes) is a genuine, quantified, first-principles fragility that Richard's own IR-call notes and the Risks report both independently flag; Italy is also a partial beneficiary of route diversion away from more directly affected corridors.</u></em></div></div>
+<p><strong>E5 RA3 CQ1 — Direct exposure to a Middle East conflict escalation or oil-driven demand shock? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-neg">Overflights are approximately <strong>10%</strong> of ENAV's en-route service unit volumes and are entirely outside Enav's control if international airspace closures redirect traffic away from Italy.</span><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Richard's own IR call (17-Jun-26) records the position as of that date as benign but explicitly live:</strong> "Started 28-Feb; March and April were strong months; so no impact so far" from the Iran conflict — a real-time, first-hand data point that the exposure had not yet crystallised as of Richard's call, not a structural absence of risk.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Italy may be a partial beneficiary of geopolitical rerouting, a genuine offsetting structural feature:</strong> the Change Forces report notes Russia-Ukraine and Israel-Palestine disruptions have "structurally benefited Italian airspace volumes" by shifting routing toward South-Eastern European corridors that transit Italian airspace.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>The risk-sharing mechanism again provides a mechanical floor:</strong> even a sustained overflight-volume shock from an escalation is subject to the same <strong>2%</strong>/<strong>10%</strong> risk-sharing bands as any other traffic shock, capping the downside at the same <strong>4.4%</strong> ceiling.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because there is a genuine, quantified, first-principles exposure (<strong>10%</strong> of volumes) that is currently benign but explicitly acknowledged as live and unresolved by Richard's own most recent primary-source check.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> the capped, mechanical downside protection could argue for a <span class="g gB">B</span> here since even a bad outcome is bounded — Watson holds at <span class="g gC">C</span> because the RA is testing genuine exposure/fragility, not just downside protection, and a <strong>10%</strong>-of-volume unhedged exposure to an active, ongoing regional conflict is a real fragility irrespective of how the P&amp;L eventually absorbs it.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra4-paradigm-fit-from-business-perspective-summary-c" data-spy><span class="id">E5 RA4</span> Paradigm fit from business perspective summary <span class="g gC">C</span> <span class="secn">4 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 (Paradigm fit) answer: <span class="g gC">C</span></strong> <em><u>Enav's paradigm fit nets to a genuinely two-sided read: excellent structural resilience characteristics for a downturn, near-zero disruption risk to the core franchise, but capped upside participation and unresolved geopolitical and automation tensions prevent a clean positive verdict.</u></em></div></div>
+<p><strong>E5 RA4 CQ1 — Overall paradigm fit from a first-principles business-quality perspective? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">Taking the three sub-tests together, Enav's business paradigm is genuinely well-suited to capital preservation in adverse conditions</span>, evidenced by the COVID precedent, the legal downside cap, and AI-resistance of the core function.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>The offsetting first-principles observation is that Enav's structure caps upside as much as it caps downside:</strong> the same regulatory mechanism (symmetrical risk-sharing, ex-ante cost recovery) that protects against a downturn also prevents Enav from capturing outsized upside in a strong recovery, unlike a volume-geared airport operator such as Flughafen Wien.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The paradigm fit is genuinely stock-specific, not thematic:</strong> this verdict rests entirely on Enav's own regulatory mechanics, ownership structure, and value-chain position — no live macro or sector thematic view was consulted or applied, per Richard's explicit 04-Jul-26 instruction.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because the case is a genuinely balanced two-sided profile (defensive floor, capped ceiling), not a one-directional thematic tailwind or headwind.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a case could be made that "capped upside" should not weigh negatively on a thematic-fit grade if the mandate is capital preservation — Watson notes this is a legitimate reframe for a different investment mandate, but grades E5 against the standard Triaging test (does the paradigm fit support the case, not does it merely fail to hurt it), which nets to. <span class="g gC">C</span></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) At Early-Stage Assessment, revisit the AI/drone optionality (AIView Group) once at least one further quarter of commercial traction data exists; (2) Track Middle East overflight volumes explicitly each quarter as the single most observable leading indicator for E5 RA3.</div></div>
+<p><strong>E5 Element rating: <span class="g gC">C</span></strong> — Genuine structural resilience to a downturn and near-zero AI-disruption risk to the core franchise are real positives; a capped upside ceiling, an unresolved AI-enabled growth thesis, and a live, quantified Middle East overflight exposure hold the grade at. <span class="g gC">C</span> Assessed entirely on stock-specific first-principles reasoning; no live thematic overlay was read or applied, per Richard's instruction of 04-Jul-26 (see Section F.2).</p>
+<p>Group 1 rating: <span class="g gC">C</span> first pass — light. Driven by the genuine price/sentiment divergence between strong technical momentum (E4 <span class="g gB">B</span>) and deteriorating sell-side conviction (MR2 <span class="g gD">D</span>), with thematic fit assessed as balanced (<span class="g gC">C</span>).</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">41 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gC">C</span></strong> <span class="s-neg">Three concurrent change programmes (CEO transition, ACC consolidation, drone M&amp;A) run simultaneously against a single reasonably-focused core geography</span> — the guardrails are strained, not broken.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">16 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E7 (Required case simplicity guardrails) verdict. <span class="g gC">C</span></strong> <span class="s-neg">The case carries more concurrent change-from-current items than a genuinely simple setup should</span>, even though the underlying geography and driver count are narrow.</li></ul></div>
+<p><strong>E7 RA1 — Focused bet? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> <em><u>Two fulcrum drivers (traffic volume, tariff mechanics) plus four secondary drivers (non-regulated growth, capacity bonuses, technology efficiency, financial-cost optimisation) sit exactly at the boundary the Required Attribute tests for — a marginal, not comfortable, pass.</u></em></div></div>
+<p><strong>E7 RA1 CQ1 — 2 or less fulcrum drivers AND 4 or less key drivers? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">Traffic volume growth and tariff realignment mechanics are the two clear fulcrum drivers</span>, both rated HIGH impact and HIGH plausibility in the Change Forces report's own key-drivers synthesis — a genuinely focused core.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>The secondary driver count sits at the ceiling, not comfortably under it:</strong> non-regulated commercial growth, regulated capacity bonuses, technology cost efficiencies and financial cost optimisation make four secondary drivers — exactly at the "4 or less" boundary the Core Question tests, with no margin for a fifth driver to emerge.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Cross-driver dependency compounds complexity rather than reducing it:</strong> the Change Forces report's own compound-probability calculation (<strong>85%</strong> traffic, <strong>80%</strong> regulatory, <strong>60%</strong> efficiency probabilities) implies only a <strong>40.8%</strong> joint likelihood of all drivers succeeding together — a mechanically complex, multiplicative case, not a single clean lever.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because the fulcrum-driver count comfortably passes but the secondary-driver count is at the ceiling and the drivers interact multiplicatively, which is a genuine (if modest) complexity cost.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a bull would argue the RP4 framework converts what looks like six drivers into effectively one regulatory mechanism (since tariffs mechanically absorb most variance) — Watson partially accepts this simplifies the FINANCIAL outcome but does not simplify the ANALYTICAL task of tracking six distinct operational drivers, which is what this Core Question tests.</div></div>
+<p><strong>E7 RA2 — Narrow perimeter? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> <em><u>A single country (Italy), a small number of business lines (en-route/terminal ANS, Techno Sky maintenance, IDS AirNav software, D-Flight/AIView drones), and a near-monopoly competitive position combine into a genuinely narrow operating perimeter.</u></em></div></div>
+<p><strong>E7 RA2 CQ1 — 10 or less geographies and/or business units? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">Enav operates in a single core geography (Italy) with four Area Control Centers and 45 control towers, plus a small number of distinct business units: core ANS, Techno Sky maintenance, IDS AirNav software (exported to 100+ countries but a single operating unit), and the D-Flight/AIView drone vertical.</span><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>International exposure exists but is thin and non-controlling:</strong> ENAV Asia Pacific was placed into voluntary liquidation in April 2025, actively simplifying rather than expanding the geographic footprint.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>IDS AirNav's international client base does not add geography risk in the way a multi-country operating footprint would:</strong> it is software sold from a single Italian base, not physical operations spread across jurisdictions.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gB">B</span>, not <span class="g gA">A</span>, because four distinct business lines (ANS, maintenance, software, drones) plus a live M&amp;A integration (AIView) is genuinely narrow but not maximally simple.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a stricter reading might count Techno Sky, IDS AirNav and D-Flight/AIView as three separate businesses beyond the core ANS mandate, pushing toward a <span class="g gC">C</span> — Watson holds at <span class="g gB">B</span> because all three are structurally minor relative to the core regulated business (non-regulated revenue is only ~<strong>5%</strong> of the group) and do not materially complicate the investment thesis.</div></div>
+<p><strong>E7 RA3 — Zero headwinds? <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA3 answer: <span class="g gD">D</span></strong> <em><u>Multiple concurrent value-chain headwinds are present and observable — wage inflation, domestic/ITA terminal weakness, and Middle East overflight exposure — so this Required Attribute does not clear the "zero headwinds" bar Triaging sets.</u></em></div></div>
+<p><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ1 answer: <span class="g gD">D</span></strong> <span class="s-neg">At least three distinct value-chain headwinds are live simultaneously</span>: CCNL wage inflation (personnel +<strong>6.8%</strong> to EUR 632.6m, minimum salaries revalued <strong>2.5%</strong> in January 2026), domestic terminal weakness (ITA Airways -<strong>13.7%</strong> in early 2026 post-Lufthansa restructuring), and Middle East overflight exposure (~<strong>10%</strong> of volumes).<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>The wage-inflation headwind is contractually locked-in, not merely a risk:</strong> the 2026-28 CCNL union agreement fixes the cost trajectory, removing management's ability to negotiate it away even if traffic underdelivers.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>This is the same evidence base underlying Richard's own cost-overshoot thesis:</strong> the "zero headwinds" test fails for exactly the reason Richard's IR call flagged — consensus appears not to have fully modelled the wage and Group-cost trajectory these headwinds imply.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gD">D</span> because three concurrent, quantified, ongoing headwinds is a clear and unambiguous failure of a "zero headwinds" bar, regardless of the fact that each individual headwind is manageable.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a defender of the case would note none of these headwinds is severe enough to threaten the dividend or the balance sheet — Watson agrees on severity but this Core Question tests presence/absence of headwinds, not their severity, and on a strict reading the case fails it.</div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> <em><u>Three concurrent, non-trivial change-from-current items (CEO transition, ACC consolidation, drone M&amp;A integration) sit above the "2 or less" bar this Core Question sets, though each individually is well-defined and bounded.</u></em></div></div>
+<p><strong>E7 RA4 CQ1 — 2 or less change-from-current items or problems? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-neg">Three material change-from-current items are running concurrently</span>: (1) the CEO/Chairman transition (De Biasio/Pappalardo, effective May 2026), (2) the physical consolidation of Area Control Centers from four to two plus terminal-zone restructuring, and (3) the AIView Group acquisition integration into the new Drone-as-a-Service platform.<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>Each item individually is well-scoped and bounded, which is the mitigant:</strong> none of the three is open-ended in cost or timeline — the CEO transition has a defined board term (2026-2028), the ACC consolidation has a stated 2027 target, and AIView is a small, already-closed transaction (EUR 9.0m).</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>The union-relations dimension adds a fourth, less-controllable variable:</strong> the May 2026 eight-hour controller strike, occurring despite an already-signed 2026-28 labour agreement, suggests execution friction around exactly the ACC-consolidation change item.</div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because three-plus concurrent items exceeds the "2 or less" Triaging bar, but each is individually well-bounded rather than open-ended, preventing a lower grade.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> one could argue the CEO transition is not a "change-from-current" the company chose (it was politically imposed) and should not count against case simplicity in the same way as a strategic pivot — Watson disagrees: regardless of who initiated it, a CEO transition IS a change-from-current an investor must underwrite, irrespective of its origin.</div></div>
+<p><strong>E7 RA5 — Conservative investor relations? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> <em><u>Guidance posture is genuinely conservative — the beat-track record is real and multi-year — but Richard's own IR call flags a specific need for IR to be "more conservative" and "more forceful" going forward, suggesting the historically conservative posture has not been fully carried into 2026 guidance.</u></em></div></div>
+<p><strong>E7 RA5 CQ1 — Company confirms guidance is conservative? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">The historical guidance pattern is genuinely conservative and has been beaten multiple years running</span>: FY2025 net income of EUR 93.1m beat the initial EUR 64.0m target by <strong>45.5%</strong>, and FY2025 EBITDA landed at the upper end of the upgraded range.<div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>Richard's own IR call is the most current and most load-bearing evidence, and it complicates the conservative-guidance picture:</strong> IR itself acknowledged internally that "we need to do more conservative guiding and also more forceful guiding," a direct, first-hand signal that even Enav's own IR function sees room to tighten guidance discipline further.</div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>No formal FY2026 guidance has yet been issued at all:</strong> management deferred FY2026 targets to the August 2026 H1 results, citing Middle East volatility and summer-traffic uncertainty — an absence of guidance is not the same as conservative guidance, and Watson does not conflate the two.</div></div><div class="subfinding"><span class="subnum">14.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gB">B</span> for the strong historical pattern under the departing CEO; not <span class="g gA">A</span> because the current guidance vacuum (no FY2026 targets) and IR's own self-assessed need for more conservative posture introduce genuine uncertainty about whether the pattern continues under the new CEO.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>Counter-view considered (CQ1):</strong> a sceptic might argue the guidance vacuum itself signals management does not yet have confidence in the numbers, which should grade lower than <span class="g gB">B</span> — Watson considers this plausible but notes the vacuum has an explicit, credible external cause (Middle East volatility, genuinely outside management's control) rather than reflecting a credibility problem with the guidance process itself.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) Track whether FY2026 guidance, once issued in August 2026, embeds Richard's flagged cost overshoot or holds to the currently-thinner consensus; (2) Monitor the ACC-consolidation and union-relations friction (post the May 2026 strike) as a leading indicator of whether the "handful of change items" is being executed cleanly.</div></div>
+<p><strong>E7 Element rating: <span class="g gC">C</span></strong> — Narrow geographic/business-unit perimeter (RA2 <span class="g gB">B</span>) and a historically conservative guidance posture (RA5 <span class="g gB">B</span>) are genuine positives, but the presence of multiple concurrent value-chain headwinds (RA3 <span class="g gD">D</span>) and three simultaneous change-from-current items (RA4 <span class="g gC">C</span>) hold the Element to <span class="g gC">C</span> against the cohort. Held off <span class="g gB">B</span> by the RA3 zero-headwinds failure; held off <span class="g gD">D</span> because the perimeter and guidance discipline are too strong to grade below cohort median.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">25 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gC">C</span></strong> <span class="s-pos">Primary setup: Trough-on-trough turn in solid quality cyclical / margin-recovery-plus-dividend compounder (RA6: RP4 margin resetting off a FY25 trough, high-yield dividend underwritten by cash conversion).</span><ul><li><strong>Secondary setup:</strong> Big demand change-driven EPSU or EPT (RA2: non-regulated drone/UTM optionality), though this remains small and unproven at scale.</li><li><em><span class="s-neg">However: the FALSE FRIEND negative guardrail (RA8) surfaces two live candidates (COVID-balance cash recoveries masking margin compression; deliberate tech underinvestment) that qualify both setups and prevent a clean. <span class="g gB">B</span></span></em></li></ul></li></ul></div>
+<p><strong>E8 RA1 — Mis-modelled, high-quality EPS upgrader <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gD">D</span></strong> <em><u>This setup requires systematic sell-side modelling error being corrected upward; Enav shows the opposite pattern — sell-side conviction is being systematically REDUCED (Hold ratings <strong>18%</strong> to <strong>44%</strong>), the inverse of a mis-modelled-upgrader signature.</u></em></div></div>
+<p><strong>E8 RA1 CQ1 — Systematic modelling error being corrected? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gD">D</span></strong> <span class="s-neg">The multi-year rating-migration trend runs directly counter to this setup</span>: Hold ratings rose from <strong>18.18%</strong> (2022) to <strong>44.44%</strong> (2025), with three brokers (Equita, Intermonte, Kepler Cheuvreux) explicitly migrating Buy-to-Hold on RP4/tariff and staff-cost concerns — analysts progressively REDUCING conviction, not correcting an undervaluation.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Buy% at 29% (SSEM data) is a genuinely weak signal for this setup:</strong> a mis-modelled-upgrader case typically shows analysts scrambling to catch up to an under-modelled positive; here the direction of travel is toward more caution, not less.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>RA1 verdict:</strong> does not fit; the evidence points the opposite direction from what this setup requires.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (E8 RA1):</strong> Richard's own arithmetic suggests the CURRENT consensus may still be too optimistic on 2026 costs, which is technically a "modelling error" — but it is an error in the OPTIMISTIC direction (consensus too high, not too low), the inverse of what a mis-modelled EPS UPGRADER setup requires.</div></div>
+<p><strong>E8 RA2 — Big demand change-driven EPSU or EPT <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gD">D</span></strong> <em><u>Core regulated demand is inflecting positively (traffic +<strong>8.6%</strong> Q1 2026) but this is a modest, incremental change within a locked five-year regulatory framework, not a step-change demand shock; the genuine "big demand change" candidate (drone/UTM) remains commercially unproven.</u></em></div></div>
+<p><strong>E8 RA2 CQ1 — New product or new market opening a new demand category? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ1 answer: <span class="g gD">D</span></strong> <span class="s-neg">Core en-route/terminal ANS demand is not a new category; it is the same regulated business growing modestly faster than plan.</span><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>The genuine new-category candidate is drone/UTM via D-Flight and AIView, but adoption is early and small:</strong> non-regulated revenue of EUR 52.1m is targeted to reach EUR 106m by 2029, and former ENAV executives themselves express scepticism about near-term drone-traffic profitability.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>RA2 verdict:</strong> partial fit at best; a genuine new-category opportunity exists (drones) but is immaterial to group EPS today and unproven commercially.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E8 RA2):</strong> the +<strong>8.6%</strong> Q1 2026 en-route traffic growth is itself an above-plan demand surprise that could be characterised as a mini demand-change event — Watson does not accept this rises to "big demand change" because RP4's risk-sharing mechanism caps how much of that upside converts to EPS.</div></div>
+<p><strong>E8 RA3 — Strong corporate change driven EPSU / EPT <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> <em><u>A genuine, real corporate change event (CEO/Chairman transition, board overhaul) is underway, but it is negatively rather than positively change-oriented from an EPS perspective — the new leadership inherits a plan rather than authoring an accretive strategic pivot.</u></em></div></div>
+<p><strong>E8 RA3 CQ1 — New CEO / management team changing the company? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">A genuine C-suite change is underway: Igor De Biasio replaced Pasqualino Monti as CEO (14-May-26), with Sandro Pappalardo as new Chairman.</span><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>The change is externally/politically imposed, not internally strategic:</strong> the departing-CEO change "was catalyzed by the Italian Ministry proposing a new executive slate in April 2026" — a state-shareholder rotation, structurally different from a board recruiting a turnaround specialist.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>De Biasio's own stated priorities (per Richard's IR call) are organisational, not strategic:</strong> "building of the management team," "cohesive, fast flowing information," working closely with the board — process-oriented early priorities, not yet evidence of a value-accretive strategic redirection.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>RA3 verdict:</strong> partial fit; genuine leadership change is present but its EPS-accretive character (versus merely maintaining the existing plan) is unproven.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (E8 RA3):</strong> Richard's IR-call notes record that De Biasio "re-engaged" paused M&amp;A discussions, a genuinely proactive signal — Watson accepts this as a small positive data point but notes it is not yet evidence of a broader accretive corporate-change programme.</div></div>
+<p><strong>E8 RA4 — Change-from-current clearing in high-quality compounder <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> <em><u>Enav is a genuinely high-quality compounder on cash-generation and moat criteria, but the specific "change-from-current clearing" this setup requires (a resolved uncertainty unlocking re-rating) has not yet cleared — the CEO transition and cost-overshoot question are still live, not resolved.</u></em></div></div>
+<p><strong>E8 RA4 CQ1 — Is a change-from-current item clearing in an otherwise high-quality compounder? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">Enav qualifies as high-quality on the core compounder tests: statutory monopoly, <strong>104.3%</strong> cash conversion, <strong>0.5x</strong> leverage, rising dividend.</span><div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>The relevant change-from-current items (CEO handover, 2026 cost/guidance uncertainty) are NOT yet cleared, they are in progress:</strong> the August 2026 H1 results (when FY2026 guidance is finally issued) is the actual clearing event this setup would need, and it has not yet happened.</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>RA4 verdict:</strong> the underlying business qualifies as high quality; the "clearing" half of this setup is a live, unresolved catalyst rather than a completed one.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Counter-view considered (E8 RA4):</strong> the April 2026 governance re-rating (+<strong>5.7%</strong> cumulative on MEF's board-list filing) could be characterised as an already-cleared item — Watson accepts that specific uncertainty (WHO the CEO would be) is cleared, but the more financially material uncertainty (what the CEO's cost trajectory implies for 2026 EPS) remains open.</div></div>
+<p><strong>E8 RA5 — Huge change-from-current clearing event in solid quality <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA5 answer: <span class="g gD">D</span></strong> <em><u>No single huge, discrete clearing event characterises this case; the RP4 approval (the closest candidate) occurred in May 2025, more than a year before this memo, and its effects are already substantially priced.</u></em></div></div>
+<p><strong>E8 RA5 CQ1 — Is there a huge, discrete change-from-current clearing event? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>CQ1 answer: <span class="g gD">D</span></strong> <span class="s-neg">The RP4 Performance Plan approval (May 2025) was the closest candidate for a "huge clearing event" but it is now more than a year old and its terms are fully known and priced.</span><div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>No forthcoming binary catalyst of comparable scale is visible on the horizon:</strong> the next material date is the August 2026 H1 results (a guidance-issuance event, not a huge structural clearing event) and the new CEO's 1H 2027 strategic-plan refresh.</div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>RA5 verdict:</strong> does not fit; this is a steady-state regulated case, not a binary-catalyst case.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>Counter-view considered (E8 RA5):</strong> a government stake sale (per Richard's CEO-call notes, "2H plausible and maybe even probable," potentially ~<strong>50%</strong> of the government's <strong>53.28%</strong> holding worth ~EUR 1.6bn) could constitute a huge clearing event if it materialises — Watson flags this explicitly as a live, Richard-sourced possibility but does not let an unconfirmed, timing-uncertain event drive the current RA5 grade.</div></div>
+<p><strong>E8 RA6 — Trough-on-trough turn in solid quality cyclical <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>RA6 answer: <span class="g gB">B</span></strong> <em><u>This is the closest genuine fit: FY2025 EBIT margin (<strong>13.7%</strong>) is a trough relative to FY2024 (<strong>18.1%</strong>), the business is solid quality by every core-philosophy measure available at Triaging, and RP4's own five-year trajectory (targeting EUR 361m EBITDA by 2029 versus EUR 252.7m in FY2025) is a structured margin-recovery path.</u></em></div></div>
+<p><strong>E8 RA6 CQ1 — Genuine trough-to-trough margin/earnings turn in an otherwise solid-quality business? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">FY2025 marks a genuine margin trough within a company that clears every solid-quality bar available at Triaging: statutory monopoly, <strong>0.5x</strong> leverage, <strong>104.3%</strong> cash conversion.</span><div class="subfindings"><div class="subfinding"><span class="subnum">17.1</span><div class="subtext"><strong>The RP4 framework provides a structured, regulator-approved recovery path, not just a hoped-for one:</strong> the plan explicitly targets EUR 361m EBITDA and EUR 165m net income by 2029, versus EUR 252.7m and EUR 93.1m respectively in FY2025 — a regulator-sanctioned trajectory, unusual in a normal cyclical trough-turn setup.</div></div><div class="subfinding"><span class="subnum">17.2</span><div class="subtext"><strong>The specific risk to this setup is exactly Richard's cost-overshoot thesis:</strong> if consensus 2026 costs are indeed EUR 15-20m too low, the "trough" could deepen before it turns, delaying the setup's payoff.</div></div><div class="subfinding"><span class="subnum">17.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gB">B</span> because the trough-turn characteristics are genuinely present and regulator-underwritten, but the near-term cost risk (Richard's own flagged concern) prevents an <span class="g gA">A</span> on timing confidence.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Counter-view considered (E8 RA6):</strong> a purist might argue this is not a "cyclical" in the traditional sense (a regulated monopoly does not have a normal cyclical trough-to-peak amplitude) — Watson accepts the label is imperfect but the RA's substance (margin trough within solid quality, structured recovery path) fits better here than in any other setup.</div></div>
+<p><strong>E8 RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL] <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><strong>RA7 answer: <span class="g gC">C</span></strong> <em><u>No hard, disqualifying unacceptable-setup pattern (e.g., a melting ice cube, a serial value-destroyer, a fraud pattern) is present; the closest concern is regulatory-capped growth being mistaken for genuine compounding, a softer caution rather than a disqualifier.</u></em></div></div>
+<p><strong>E8 RA7 CQ1 — Does the case exhibit an unacceptable setup pattern? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">20.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">No evidence of fraud, going-concern risk, or serial value destruction was found in any of the four family reports; PwC issued a clean, unqualified audit opinion on the FY2025 accounts.</span><div class="subfindings"><div class="subfinding"><span class="subnum">20.1</span><div class="subtext"><strong>The main caution is a "regulatory ceiling mistaken for structural growth" pattern:</strong> an investor could over-extrapolate the FY2025-29 RP4 trajectory as organic growth when it is substantially a regulator-negotiated outcome, capped on both the downside and the upside.</div></div><div class="subfinding"><span class="subnum">20.2</span><div class="subtext"><strong>RA7 verdict:</strong> passes the negative guardrail; no unacceptable-setup disqualifier is present.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>Counter-view considered (E8 RA7):</strong> the related-party payables at <strong>33%</strong> of total payables and the EUR 415.54m balance receivables complexity could be read as an accounting red flag pattern — Watson notes these are flagged as a key audit matter but PwC's clean opinion and the mechanical, well-documented nature of the RP4 balance mechanism prevent this from rising to an unacceptable-setup disqualifier.</div></div>
+<p><strong>E8 RA8 — Fit with false friend case setups? [NEGATIVE GUARDRAIL] <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><strong>RA8 answer: <span class="g gD">D</span></strong> <em><u>Two live FALSE FRIEND candidates are explicitly identified in the Risks report itself, representing <strong>20%</strong> of all analysed risk scenarios — the highest false-friend density found in this case, and Watson does not soften this finding.</u></em></div></div>
+<p><strong>E8 RA8 CQ1 — Does the case exhibit a false friend pattern? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext"><strong>CQ1 answer: <span class="g gD">D</span></strong> <span class="s-neg">The Risks report's own ACH (Analysis of Competing Hypotheses) matrix ranks the FALSE FRIEND profile as carrying the HIGHEST risk density of the three scenarios analysed (3 hard contradictions versus 5 for the bear case and 6 for the bull case), with a 15-<strong>20%</strong> assessed likelihood.</span><div class="subfindings"><div class="subfinding"><span class="subnum">23.1</span><div class="subtext"><strong>False friend candidate 1 — balance-mechanism cash masking margin compression:</strong> record cash recoveries from 2020-2021 COVID-era balance reversals (EUR 415.54m in balance receivables) create an appearance of strong cash generation while the underlying RP4 tariff reset compresses reported margins.</div></div><div class="subfinding"><span class="subnum">23.2</span><div class="subtext"><strong>False friend candidate 2 — deliberate technology underinvestment inflating near-term EBITDA:</strong> 2025 cash capex (EUR 77.0m) running well below the RP4 pro-rata average (EUR 113.6m) could reflect delayed, not avoided, spending, flattering near-term cash flow while masking operational decay in the still-unresolved legacy-datalink problem.</div></div><div class="subfinding"><span class="subnum">23.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gD">D</span> because the Risks report's own load-bearing ACH analysis independently and explicitly identifies this as the single highest-density risk pattern in the entire case — Watson defers to this analysis (per the balanced RR-trust dial) rather than overriding it.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>Counter-view considered (E8 RA8):</strong> the Risks report itself also notes the ACH probabilities favour the FALSE FRIEND scenario LEAST (15-<strong>20%</strong> versus 40-<strong>50%</strong> for the bear case and 35-<strong>40%</strong> for the bull case) — Watson notes the false-friend scenario is not the MOST LIKELY outcome, but the RA8 guardrail tests for the PRESENCE of a false-friend pattern, not its probability, and a clearly-articulated, source-identified false-friend candidate is present regardless of its relative likelihood.</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) At Early-Stage Assessment, deepen RA6 (trough-on-trough turn) as the confirmed primary setup and RA2 (demand-change via drones) as the confirmed secondary setup, per the E8 carve-out rule; (2) explicitly re-test the RA8 false-friend guardrail against the August 2026 H1 results, since a genuine cost overshoot would validate false-friend candidate 1 (cash-flattering balance recoveries masking real margin decay).</div></div>
+<p><strong>E8 Element rating: <span class="g gC">C</span></strong> — RA6 (trough-on-trough turn, <span class="g gB">B</span>) is the clearest setup fit and RA2 (demand-change via drones, <span class="g gD">D</span> but flagged as the genuine secondary optionality) is the best available second candidate; however, the RA8 false-friend negative guardrail (<span class="g gD">D</span>, the highest risk-density pattern in the Risks report's own ACH analysis) qualifies both and holds the Element at <span class="g gC">C</span> rather than. <span class="g gB">B</span></p>
+<p>Group 2 rating: <span class="g gC">C</span> first pass — light. Narrow geographic perimeter (E7 RA2 <span class="g gB">B</span>) and a credible trough-on-trough setup fit (E8 RA6 <span class="g gB">B</span>) are offset by multiple live headwinds (E7 RA3 <span class="g gD">D</span>) and the highest-risk-density FALSE FRIEND guardrail hit in the case (E8 RA8 <span class="g gD">D</span>).</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">32 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gB">B</span></strong> <span class="s-pos">Value-chain dynamics are the strongest sub-case in the whole memo: an absolute, legally insurmountable demand-side moat with mechanically benign competitive dynamics.</span> At Triaging, E9 (Great operator), E10 (Advantaged business), E12 (Supportive industry structure) and E13 (High secular growth potential) are not applicable — they are first assessed at Early-Stage Assessment.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment. Watson flags for the ESA carry-forward that the CEO transition (Monti to De Biasio) makes this Element unusually load-bearing next stage — De Biasio has zero prior public-market operator track record.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment. Watson flags for ESA that ROIC (<strong>8.12%</strong>) and ROCE (<strong>8.35%</strong>) sit below both cited technology peers (Frequentis ~<strong>13.50%</strong>, Thales ~<strong>15.50%</strong>), a genuine tension with the "advantaged business" framing that ESA must resolve on a like-for-like basis.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">28 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E11 (Value-chain dynamics) verdict. <span class="g gB">B</span></strong> <span class="s-pos">An absolute, legally insurmountable statutory monopoly with near-zero switching costs, benign collaborative-oligopoly competitive dynamics, and a durable, diversified airline customer base</span> together make this the strongest sub-case in the memo, second-pass light depth at Triaging.</li></ul></div>
+<p><strong>E11 RA1 — Demand side strong / fragile? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> <em><u>Demand is structurally strong: airlines cannot substitute away from Italian airspace, and over <strong>80%</strong> of en-route traffic is international/overflight, diversifying demand across dozens of carriers rather than concentrating it in the domestic Italian market.</u></em></div></div>
+<p><strong>E11 RA1 CQ1 — Underlying demand strength? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">Demand is close to structurally guaranteed: "airlines flying through Italian airspace have zero alternatives," and traffic is inflecting positively (en-route SUs +<strong>5.9%</strong> FY25, accelerating to +<strong>8.6%</strong> Q1 2026).</span><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Customer concentration is moderate but not alarming:</strong> the top 10 airlines represent <strong>52.40%</strong> of en-route service units, with Ryanair the single largest at ~<strong>21%</strong> (growing +<strong>10.8%</strong> y/y) — a concentrated but diversified-enough base that no single airline's distress threatens group revenue.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Collection risk is structurally minimal:</strong> Eurocontrol centrally bills monthly at a <strong>99%</strong> average collection rate, eliminating the direct airline credit risk that a bilaterally-billed business would carry.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gB">B</span> because demand strength is genuinely structural, with the modest domestic/ITA-driven softness (addressed in CQ2) the only reason to hold short of. <span class="g gA">A</span></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>Counter-view considered (E11 RA1 CQ1):</strong> Ryanair's outsized <strong>21%</strong> share and rapid growth could be read as a concentration risk if Ryanair's own network strategy shifted materially — Watson notes this is a genuine tail risk but not current evidence of demand fragility.</div></div>
+<p><strong>E11 RA1 CQ2 — Demand fragility / substitution risk? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ2 answer: <span class="g gB">B</span></strong> <span class="s-pos">Substitution risk is close to zero for the core mandate — there is no alternative Italian air navigation service provider an airline could switch to.</span><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>The one genuine fragility is domestic terminal demand, not en-route demand:</strong> domestic service units fell <strong>2.1%</strong> in 2025, driven by ITA Airways' post-Lufthansa-takeover restructuring (ITA revenue -<strong>13.7%</strong> early 2026) and high-speed rail modal shift for short-haul domestic routes.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>CQ2 grade rationale:</strong> <span class="g gB">B</span> because the fragility that exists is narrow (domestic terminal, ~<strong>24%</strong> of regulated revenue) and does not threaten the dominant en-route revenue base.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (E11 RA1 CQ2):</strong> rail modal shift is a genuine secular trend across Europe, not an Italy-specific one-off — Watson flags this as worth tracking at ESA rather than dismissing, since sustained rail competition could compound beyond the current <strong>2.1%</strong> domestic decline.</div></div>
+<p><strong>E11 RA2 — Competitive supportiveness / aggression? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> <em><u>The competitive environment is genuinely benign and collaborative — national ANSPs behave as protected geographic monopolies with formal cooperation structures (A6 Alliance, COOPANS, SkyBridge), not as competitors.</u></em></div></div>
+<p><strong>E11 RA2 CQ1 — Competitive intensity within the core market? <span class="g gA">A</span></strong></p>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>CQ1 answer: <span class="g gA">A</span></strong> <span class="s-pos">Zero direct competition exists within Italian airspace by statutory design</span> — this is not a market-share contest, it is a legal monopoly.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E11 RA2 CQ2 — Competitive behaviour of adjacent/potential entrants? <span class="g gB">B</span></strong></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>CQ2 answer: <span class="g gB">B</span></strong> <span class="s-pos">Entry barriers are prohibitive by economics alone: a centralised ATC facility costs USD 200m-1bn plus EASA/national certification, deterring any credible new entrant.</span></div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E11 RA2 CQ3 — Collaborative versus adversarial industry norms? <span class="g gA">A</span></strong></div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>CQ3 answer: <span class="g gA">A</span></strong> <span class="s-pos">European ANSPs actively cooperate via the A6 Alliance, COOPANS and SkyBridge software cost-pooling — the top 15 European ANSPs manage ~<strong>80%</strong> of all flights in a non-aggressive, collaborative structure.</span></div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E11 RA2 CQ4 — Technology-supplier concentration risk? <span class="g gC">C</span></strong></div></div>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>CQ4 answer: <span class="g gC">C</span></strong> <span class="s-neg">Enav is architecturally locked in to a concentrated technology-supplier tier: Thales controls over <strong>40%</strong> of global civilian airspace via TopSky, and Frequentis holds <strong>30%</strong> of global voice-communication share</span> — a genuine dependency risk that tempers an otherwise benign competitive picture.</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E11 RA2 CQ5 — Vertical-integration competitive threat from adjacent players? <span class="g gB">B</span></strong></div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>CQ5 answer: <span class="g gB">B</span></strong> <span class="s-pos">Enav's own vertical integration (Techno Sky, IDS AirNav) is itself a competitive strength versus peers who outsource maintenance and software, rather than a threat Enav faces from others.</span><div class="subfindings"><div class="subfinding"><span class="subnum">15.1</span><div class="subtext"><strong>RA2 grade rationale:</strong> <span class="g gB">B</span> overall because four of five Core Questions are strongly positive; the technology-supplier concentration (CQ4) is the one genuine offsetting risk.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Counter-view considered (E11 RA2):</strong> the Thales/Frequentis duopoly dependency could, in a severe disruption scenario (e.g., a major Thales operational failure), stall Enav's own digital-tower rollout — Watson flags this as a tail risk worth monitoring rather than a present-day competitive threat.</div></div>
+<p><strong>E11 RA3 — Disruption forces? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> <em><u>Disruption risk to the CORE mandate is low (AI/automation cannot replace certified real-time air traffic control), but Enav's own legacy-technology gap (the proprietary datalink) is itself an internally-generated disruption/reliability risk.</u></em></div></div>
+<p><strong>E11 RA3 CQ1 — Genuine disruption threat to the core business model? <span class="g gC">C</span></strong></p>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext"><strong>CQ1 answer: <span class="g gC">C</span></strong> <span class="s-pos">No external disruptor threatens the statutory ANS mandate itself; satellite surveillance and remote digital towers are being adopted BY Enav as modernisation tools, not disruptive substitutes displacing it.</span><div class="subfindings"><div class="subfinding"><span class="subnum">18.1</span><div class="subtext"><strong>The genuine disruption risk is internally generated:</strong> the proprietary datalink, described by EUROCONTROL as "a major black hole," cuts sector capacity by <strong>11%</strong> — a self-inflicted technology gap the RP4 4-Flight rollout targets but has not yet resolved (Rome 2028, Milan 2030).</div></div><div class="subfinding"><span class="subnum">18.2</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gC">C</span> because external disruption risk is genuinely low, but the unresolved internal technology gap is a real, quantified operational fragility that prevents a <span class="g gB">B</span>/. <span class="g gA">A</span></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>Counter-view considered (E11 RA3 CQ1):</strong> UTM/drone traffic could eventually disrupt the low-altitude segment of ENAV's mandate if unmanned traffic scales dramatically — Watson notes Enav is positioning to own this via D-Flight/AIView rather than be disrupted by it, but the outcome is not yet proven either way.</div></div>
+<p><strong>E11 RA4 — Political / regulatory? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> <em><u>Regulatory structure is a genuine strength (RP4 lock-in through 2029), but political/governance risk via majority state ownership (<strong>53.28%</strong>) is a real, live fragility, evidenced concretely by the politically-imposed CEO transition.</u></em></div></div>
+<p><strong>E11 RA4 CQ1 — Regulatory stability and visibility? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">RP4 (2025-2029) is formally approved by the European Commission via Decision 2025/1058, providing five-year revenue and cost-recovery visibility few businesses enjoy.</span></div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext"><strong>E11 RA4 CQ2 — Political ownership / governance interference risk? <span class="g gD">D</span></strong></div></div>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext"><strong>CQ2 answer: <span class="g gD">D</span></strong> <span class="s-neg">MEF's <strong>53.28%</strong> controlling stake and six-of-nine board appointments make Enav directly subject to political cycles</span> — the April 2026 CEO rotation, explicitly triggered by a ministry-proposed executive slate, is concrete, current evidence of this risk crystallising, not a hypothetical.<div class="subfindings"><div class="subfinding"><span class="subnum">23.1</span><div class="subtext"><strong>RA4 grade rationale:</strong> <span class="g gC">C</span> netting a strong regulatory-visibility positive (CQ1 <span class="g gB">B</span>) against a concrete, already-crystallised political-governance risk (CQ2 <span class="g gD">D</span>).</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>Counter-view considered (E11 RA4):</strong> Richard's own CEO-call notes record that Monti "has worked with multiple governments of different political orientations throughout career" without apparent disruption to strategy — Watson accepts the historical pattern has been benign but notes the CURRENT transition is the first live test of that pattern's durability under a different set of ministers.</div></div>
+<p><strong>E11 RA5 — Supportive supplier side? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> <em><u>Supply chain is resilient and well-provisioned (zero conflict impact, back-up inventories), though genuinely concentrated in a small technology-supplier tier.</u></em></div></div>
+<p><strong>E11 RA5 CQ1 — Supplier reliability and concentration risk? <span class="g gB">B</span></strong></p>
+<div class="finding cq-level"><span class="fnum">26.</span><div class="ftext"><strong>CQ1 answer: <span class="g gB">B</span></strong> <span class="s-pos">The supply chain showed zero conflict-related impact and maintains back-up inventories, evidence of resilient procurement discipline.</span><div class="subfindings"><div class="subfinding"><span class="subnum">26.1</span><div class="subtext"><strong>Concentration in Thales/Leonardo remains the genuine offsetting risk</strong>, consistent with the RA2 CQ4 finding above — the same duopoly dependency appears on both the competitive and the supplier side of the value chain.</div></div><div class="subfinding"><span class="subnum">26.2</span><div class="subtext"><strong>CQ1 grade rationale:</strong> <span class="g gB">B</span> because operational resilience is demonstrated even though supplier concentration is real.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><strong>Counter-view considered (E11 RA5):</strong> the Leonardo alliance (a EUR 39.7m radar contract through 2032) could be read as a strategic partnership rather than a dependency — Watson accepts both framings are simultaneously true; the relationship is deep enough to be both an enabler and a lock-in risk.</div></div>
+<div class="finding cq-level"><span class="fnum">28.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) At Early-Stage Assessment, deepen the domestic/ITA terminal-demand fragility (RA1 CQ2) with post-Lufthansa ITA network-planning data as it becomes available; (2) explicitly track the Thales/Frequentis technology-supplier concentration (RA2 CQ4, RA5 CQ1) as a single unified risk thread carried into the Deep Dive value-chain work.</div></div>
+<p><strong>E11 Element rating: <span class="g gB">B</span></strong> — Absolute statutory monopoly (RA1 <span class="g gB">B</span>, RA2 [A/B] on multiple Core Questions) is the case's strongest evidence base; political/governance risk (RA4 CQ2 <span class="g gD">D</span>, concretely crystallised via the CEO transition) and technology-supplier concentration (RA2 CQ4, RA5 <span class="g gB">B</span> but flagged) are the offsetting negatives that hold the Element to <span class="g gB">B</span> rather than. <span class="g gA">A</span></p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment. Watson flags for ESA that the RA1 Sector strength ×4 quadruple-weight test will be highly material given the collaborative-oligopoly structure identified in E11 above.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment. Watson flags for ESA that mature European air-traffic growth (~<strong>3.0%</strong> CAGR to 2030) is materially below emerging-market growth (6.0-<strong>7.0%</strong>), a genuine ceiling on the secular-growth case that ESA must weigh against the non-regulated drone/software export optionality.</div></div>
+<p>Group 3 rating: <span class="g gB">B</span> first pass — light. E11 (Value-chain dynamics) is the only Element in scope and its <span class="g gB">B</span> grade — anchored in an absolute, legally insurmountable monopoly — drives the Group rating; E9, E10, E12, E13 remain not applicable until Early-Stage Assessment.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-nr" data-spy><span class="id">Grp 4</span> Case riskiness [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict [NR, light framing only].</strong> Risk Elements (E15-E19) are not yet in scope at Triaging. Watson's broad first-pass observation: the two risk threads most likely to matter at Deep Dive are (1) the CEO-transition/succession-planning gap and (2) the contractually-locked wage-inflation trajectory that underlies Richard's own cost-overshoot thesis — both are observable now and should be the starting point for the Deep Dive risk-Element work.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Framing note (100 words, per Triaging Group 4 requirement):</strong> the case's plain-sight risks are unusually well-documented for a Triaging-stage stock, because the Risks report's own ACH matrix already ranks the bear case (regulatory cost compression, wage inflation) at 40-<strong>50%</strong> likelihood versus a bull case at only 35-<strong>40%</strong> — an unusually bearish-leaning base rate for a stage where full risk analysis is not yet in scope. Watson treats this as an early flag rather than a full risk assessment: the 10 Invalidation thresholds (Section D.II) are not yet populated at Triaging, but Richard's own IR-call cost arithmetic maps directly onto Invalidation threshold 9 ("Sell-side earnings expectation invalidation — <strong>2%</strong>+ EPS cuts and share-price underperformance") as the single most-watched trigger into the August 2026 print.</div></div>
+<p>Group 4 rating: <span class="g gNR">NR</span> — first-pass light framing only; Elements E15-E19 first-rated at Deep Dive (E18/E19 first appear at Early-Stage Assessment).</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not yet in scope at Triaging; first written at Early-Stage Assessment. Watson flags two optionality threads for ESA: (1) the government's potential partial stake sale (per Richard's CEO-call notes, "2H plausible and maybe even probable," ~EUR 1.6bn at a <strong>50%</strong>-or-less tranche) as a genuine catalyst-optionality item; (2) the drone/UTM AIView platform as call-option-like optionality, small today but with a credibly large addressable market (Europe drone ecosystem estimated to exceed EUR 10bn by 2030).</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment. Watson notes for the ESA carry-forward that Invalidation threshold 9 (sell-side earnings expectation invalidation) is the single most load-bearing threshold to populate first, given Richard's own quantified cost-overshoot thesis maps directly onto it.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">4 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation. <span class="g gC">C</span></strong> <span class="s-pos">Progress to Early-Stage Assessment with LOW-TO-MEDIUM conviction</span> — the moat, cash-conversion and dividend-underwriting case clears Triaging's light bar, but <span class="s-neg">a specific, Richard-sourced, quantified near-term cost-overshoot risk and a live CEO-transition governance gap</span> mean ESA must resolve the case's central tension before conviction can rise.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment, LOW-TO-MEDIUM conviction.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing — next-stage actions:</strong> (1) Rebuild E2 (Required case outputs) and E3 (Sufficient TSR/valuation upside) using fresh, non-stale factset-valuation.json and factset-ssem.json data; (2) explicitly test Richard's IR-call cost-overshoot thesis (EUR 15-20m 2026 cost gap, ~5-<strong>8%</strong> EBITDA/EPS impact) against the August 2026 H1 results as the single highest-priority validation item; (3) deepen E9 (Great operator) on the new CEO De Biasio specifically, since he carries zero prior public-market operator track record and this is the largest genuine unknown in the case; (4) deepen E10 (Advantaged business) to resolve the ROIC/ROCE-versus-technology-peers tension (<strong>8.12%</strong>/<strong>8.35%</strong> versus Frequentis ~<strong>13.50%</strong>/Thales ~<strong>15.50%</strong>) on a like-for-like regulated-versus-unregulated basis; (5) confirm whether a formal CEO succession/contingency plan has since been published, closing the governance disclosure gap identified in E1 RA1 CQ2.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If parking — reassessment criteria:</strong> Not applicable; recommendation is to progress. Were Richard to prefer parking pending the August 2026 print, the reassessment trigger would be a clean H1 beat with FY2026 guidance holding at or above current consensus, which would remove the central overhang identified in this memo.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to build a standing tracker of the August 2026 H1 print against Richard's specific EUR 15-20m cost-overshoot arithmetic, reporting the outcome directly to Richard within 48 hours of release; (2) Watson to re-run the E1 RA2 CQ5 (trading multiple) and E3 (valuation upside, once written at ESA) calculations against fresh factset data, since both current valuation inputs (factset-valuation.json dated 2026-05-25 and factset-ssem.json dated 2026-05-06) are beyond the 14-day staleness threshold set in <code>06-RESEARCH-SOURCE-MAP.md</code> section 4c.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">23 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">13 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>41-Change Forces (CF) report [AS]:</strong> ENAV-IT; on disk (12,294 words, produced 11-Jun-26); primary source for E1 (all RAs and CQs), E7 (key-drivers synthesis), E8 (setup signature), E5 RA3 (Middle East overflight exposure); peer set cited within: Frequentis, Thales, NATS Holdings, DFS Deutsche Flugsicherung.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>42-Business Foundations (BF) report [AS]:</strong> ENAV-IT; on disk (14,891 words, produced 11-Jun-26, identity-confirmed two-signal); primary source for E11 (all RAs), value-chain map, customer concentration, industry structure, ROIC/ROCE benchmarking versus Frequentis/Thales.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>43-Leadership Foundations (LF) report [AS]:</strong> ENAV-IT; on disk (18,012 words, produced 11-Jun-26); primary source for E1 RA1 CQ2 (CEO transition detail), E8 RA3 (leadership-change analysis), board-equity-alignment red flag (8 of 9 directors hold zero shares), CEO animal-scale composite (~70/100).</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>44-Risks report [AS]:</strong> ENAV-IT; on disk (22,064 words, produced 22-Jun-26, identity-confirmed two-signal); primary source for E8 RA7/RA8 (negative guardrails), the FALSE FRIEND ACH matrix (highest risk density of the three scenarios, 15-<strong>20%</strong> likelihood), FX sensitivity (net-neutral, +/-<strong>0.97%</strong> EPS per <strong>10%</strong> USD move).</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>ENAV-IT-Triaging-ratings.json:</strong> Watson-generated metadata sidecar; all grades and rationales; used throughout for grade consistency.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Master-dashboard/data/prices.json:</strong> ENAV-IT entry; 2026-07-03 (fresh, same-day); price EUR 5.28; 200D EUR 4.65; 52W range EUR 3.43 to EUR 5.34; RS percentile 73rd overall, 99th vs sector: used for Section A and E4.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>Master-dashboard/data/factset-valuation.json:</strong> ENAV-IT entry; file dated 2026-05-25 (&gt;14 days stale versus this memo's 04-Jul-26 date); P/E <strong>20.9x</strong>; P/E percentile 65th: used for Section A and E1 RA2 CQ5 with an explicit staleness flag (see F.2).</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Master-dashboard/data/factset-ssem.json:</strong> ENAV-IT entry; file dated 2026-05-06 (&gt;14 days stale); EPS revisions L3M +9/L6M +7; buy% <strong>29%</strong>; buy-rating revisions L3M -21pp/L6M -21pp; momentum score 5: used for MR2 with an explicit staleness flag (see F.2).</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Universe.json (live, authoritative):</strong> <code>master-dashboard/data/universe.json</code>; confirms ENAV-IT sector = "D.1. Infrastructure - airports/trains", cohort = "10.215" (Mid-size European regulated airports and air navigation services); used for all cohort/sector peer identification per Phase 0.0.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Cohort peers identified (10.215):</strong> Athens International Airport (AIA-GR), Flughafen Wien (FLU-AT), Kobenhavns Lufthavne (KBHL-DK) — no Change Forces reports on disk for AIA-GR or KBHL-DK; FLU-AT has a raw-AS.md Change Forces report (no compact-watson.md digest) which was read directly and cross-fertilised into E5/E11/E1 (negative gearing -<strong>24.0%</strong>, ROE <strong>13.2%</strong>, zero concession-fee exposure — a materially different capital structure to Enav's regulated-utility ROIC).</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Sector peers identified (D.1, 9 total incl. Enav):</strong> Aeroports de Paris (ADP-FR), Aena (AENA-ES), Athens International Airport (AIA-GR), Flughafen Zurich (FHZN-CH), Flughafen Wien (FLU-AT), Fraport (FRA-DE), Getlink (GET-FR), Kobenhavns Lufthavne (KBHL-DK). Getlink's Change Forces digest (on disk, full compact-watson.md) was read in full and cross-fertilised into E7/E8 framing (concession-model governance and valuation-multiple comparators).</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Notion Stock Notes (Richard's own notes, read per Richard's 04-Jul-26 instruction):</strong> 48 linked notes found under the Enav Stocks-database page (page ID 25435e90-9b0b-804a-956b-eb6fde45c84f); highest-load-bearing notes read in full and cited: "[-/+] ENAV - Mixed (EPS cuts, solid momentum) - RB NTS from IR call @ 17-Jun-26" (source of the EUR 15-20m cost-overshoot thesis, government stake-sale optionality, CEO-transition colour); "ENAV - Notion notes from CEO call @ 22-Sep-25" (Monti interview; non-regulated growth ambition; government stake-sale signal); "[W] ENAV-IT - Any - Recent Developments Summariser...@ 11-Jun-26" (price-move attribution, sector-relative performance); "[W] ENAV - Monitoring - Technical Momentum...@ 20-Apr-26" (8/8 Minervini score history); "[W] ENAV - Triaging - Key Drivers...@ 03-May-26" (RP4 mechanics detail). RB properties on the Stocks-database page: RB knowledge level [RK] = "5. Deep dive"; RB interest level [RI] = "B. Desired (B / 1st quartile)"; Long-list qualified [LLQ] = "2. APM suggested shortlist/bench"; THEMATIC tag = "Risk-off bear market cycle" (NOT applied as a live overlay in this memo, per Richard's 04-Jul-26 instruction).</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Wisdom Library:</strong> searched under <code>memory/skills/</code> and <code>wisdom-library/</code>; a <code>wisdom-library</code> folder and a separate <code>PROJECTS/SA - Wisdom Library</code> project exist at the COWORK root but were not populated with a quickly-locatable per-model INDEX.json reachable within Phase 0.2's reasonable-search window; flagged as not consulted this session (see F.2).</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">10 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Sector/industry identity correction confirmed:</strong> the live, authoritative <code>master-dashboard/data/universe.json</code> correctly classifies ENAV-IT under "D. Infrastructure" / "D.1. Infrastructure - airports/trains", cohort "10.215" (Mid-size European regulated airports and air navigation services). A stale legacy file (<code>Files/stocks-universe-full-extract.json</code>) reportedly mis-tags Enav as telecoms; that file was NOT consulted for sector/cohort identity in this memo, per Richard's explicit instruction. Enav's real-world business is Italy's civil air navigation service provider (air traffic control monopoly) and every Element in this memo is written on that basis.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>No live thematic overlay applied (Richard's instruction, 04-Jul-26):</strong> Element E5 (Thematic fit) was assessed using stock-specific, first-principles reasoning only (genuine structural resilience/fragility in an economic downturn; genuine AI-disruption exposure or benefit; genuine geopolitical/oil-shock exposure). <code>memory/thematics/active.md</code> was NOT read or drawn upon at any point in this memo's construction. This is a deliberate, instructed departure from the Communicating SOP's default (which would otherwise pull live thematic context into MR3/E5) and from <code>02-THINKING-SOP.md</code>'s standard Element E5 sourcing note (which references the thematics layer) — flagged here per the SOP's conflict-resolution discipline of surfacing any genuine deviation explicitly.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Valuation and sell-side data flagged STALE:</strong> <code>factset-valuation.json</code> (file mtime 2026-05-25) and <code>factset-ssem.json</code> (file mtime 2026-05-06) are both more than 14 days old versus this memo's 04-Jul-26 date, breaching the staleness threshold in <code>06-RESEARCH-SOURCE-MAP.md</code> section 4c. Per that SOP, Watson used the data directionally (P/E <strong>20.9x</strong>, buy% <strong>29%</strong>, EPS revision counts) but flags every figure drawn from these two files as potentially stale; a WebSearch fallback was not run for these specific fields at Triaging depth, since the qualitative signal (deteriorating buy-rating trend) is corroborated independently by the Change Forces/Risks reports' own broker-migration narrative (Hold ratings <strong>18.18%</strong> to <strong>44.44%</strong>) and is unlikely to have reversed materially in the intervening weeks. ESA must refresh both files before writing E3.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Cohort peer coverage is thin — flagged explicitly:</strong> two of three cohort peers (AIA-GR, KBHL-DK) have no Change Forces or other family report on disk, and the third (FLU-AT) has only a raw AlphaSense report with no compact-watson.md digest. Per the D-BATCH-25 peer-fallback rule and the relevance/token-budget gate in <code>06-RESEARCH-SOURCE-MAP.md</code>, Watson read FLU-AT's raw-AS.md directly (its capital-structure and ROE data were genuinely relevant to E1/E11 grading) and substituted the Notion recent-developments summariser's sector-performance table (ADP, AENA, Fraport, FLU-AT, AIA-GR price-return comparison) as the best available cross-cohort/sector grading anchor where dedicated peer reports do not exist. This is a genuine coverage gap Watson flags rather than papers over; a fuller cohort comparison should be built at Early-Stage Assessment if AIA-GR/KBHL-DK reports become available.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Notion access succeeded; the "empty URL" flag in the universe extract was a false negative:</strong> Richard's brief noted Enav's Notion page URL was empty/missing in the universe extract and asked Watson to verify rather than assume absence. Notion search confirmed a live, populated Stocks-database page (25435e90-9b0b-804a-956b-eb6fde45c84f) with 48 linked Stock Notes, including a substantive direct-IR-call note from Richard dated 17-Jun-26. Watson reports this explicitly as a positive verification outcome, not a gap.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Richard's own IR-call arithmetic is the single most load-bearing qualitative input in this memo:</strong> the 17-Jun-26 note's cost-overshoot maths (EUR 15-20m understated 2026 cost base, implying ~<strong>5%</strong> EBITDA / ~<strong>8%</strong> EPS downside versus consensus) is cited repeatedly across E1, E7 and E8 because it is first-hand, specific, quantified, and not yet reflected in the stale SSEM data. Watson treats this per the balanced RR-trust dial: leaning on it as primary evidence while flagging every place it shapes a grade.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Wisdom Library not consulted this session:</strong> a <code>wisdom-library</code> folder and <code>PROJECTS/SA - Wisdom Library</code> project exist at the COWORK root, but Watson could not locate a quickly-navigable per-stock or per-model index within a reasonable Phase 0.2 search window and did not want to either fabricate applicable "models" or spend disproportionate time excavating an unfamiliar folder structure at Triaging depth. Flagged as a genuine process gap rather than skipped silently; recommend the Systems Architect confirm the correct Wisdom Library entry point for future IA sessions.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Legacy per-ticker stage folders on disk are empty stubs, not memos:</strong> <code>Files/ENAV-IT/Triaging/</code>, <code>Files/ENAV-IT/ESA/</code> and <code>Files/ENAV-IT/IG/</code> all contain only empty sub-folder stubs (e.g. <code>04-ET</code>, <code>05-ED</code>, <code>08-BM-Sector-Primer</code>) from an earlier research-production era, with no legacy A&amp;J memo content inside them. This confirms D-IA-4RR-15 applies cleanly: there is no prior-stage memo to carry forward, and this Triaging memo is built at full floor from scratch, not as a delta.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Self-initiated research queries run this session: zero.</strong> All four family reports were on disk, fresh, and identity-confirmed; Richard's own Notion notes supplied the load-bearing near-term catalyst (cost-overshoot thesis) that would otherwise have justified a self-initiated query; Watson judged the on-disk-plus-Notion evidence base sufficient for a Triaging-depth memo and did not need to run a Query 21/22 follow-up. This is within the 0-5 expected band and does not indicate a coverage gap.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Mid-flight consults: zero.</strong> No what-to-do decision arose during this memo that exceeded Investment Analyst authority; the one genuine judgement call (how hard to lean on Richard's own IR-call arithmetic versus the more cautious stale SSEM data) was resolved using the balanced RR-trust dial as instructed, not escalated.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see Section 7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/enav-it-triaging-self-review-debrief-2026-07-04.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"D","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"E1.RA1":{"grade":"C","label":"Change forces?"},"E1.RA2":{"grade":"C","label":"Robust base?"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"E5.RA1":{"grade":"C","label":"Suitability for bear market / economic downturn"},"E5.RA2":{"grade":"C","label":"Suitability for AI disruption"},"E5.RA3":{"grade":"C","label":"Suitability for geopolitical / oil-price-induced demand shocks"},"E5.RA4":{"grade":"C","label":"Paradigm fit from business perspective summary"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"}};</script>
+</body>
+</html>

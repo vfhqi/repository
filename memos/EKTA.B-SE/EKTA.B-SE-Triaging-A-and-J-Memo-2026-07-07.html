@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EKTA — Triaging A&amp;J Memo — OPUS TEST 14-May — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-company-and-financial-snapshot">Section A — Company and financial snapshot<span class="nav-fc">14</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary-and-master-ratings">Section B — Executive summary and Master Ratings<span class="nav-fc">12</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-investment-case-attributes">Section C — Investment case attributes<span class="nav-fc">159</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-1-pillar-i-case-change-elements">Section C.1 — Pillar I: Case change elements<span class="nav-fc">54</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-triaging-first-pass-x2-doubl">E1 — Required input change forces <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">54</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-are-strong-external-and-internal-change-forces-presen" data-element-id="e1-required-input-change-forces-triaging-first-pass-x2-doubl">E1 — RA1: Are strong external and internal change forces present?<span class="nav-rating-pill B">B</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-is-the-base-robust" data-element-id="e1-required-input-change-forces-triaging-first-pass-x2-doubl">E1 — RA2: Is the base robust?<span class="nav-rating-pill C">C</span><span class="nav-fc">36</span></span>
+</div>
+<span class="nav-item nav-subsection" data-anchor="section-c-2-pillar-ii-case-building-blocks">Section C.2 — Pillar II: Case building blocks<span class="nav-fc">105</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-first-pass-light">Group 1 — Case momentum<span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-triaging-second-pass-x2-double-weight">E5 — Thematic fit <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">24</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-first-pass-light">Group 2 — Case simplicity<span class="nav-fc">55</span></span>
+<span class="nav-item nav-element" data-anchor="e7-required-case-simplicity-guardrails-triaging-first-pass-x">E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span> <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">31</span></span>
+<span class="nav-item nav-element" data-anchor="e8-fit-with-acceptable-case-setups-triaging-three-bullet-car">E8 — Fit with acceptable case setups<span class="nav-fc">24</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-first-pass-light">Group 3 — Core philosophy<span class="nav-fc">26</span></span>
+<span class="nav-item nav-element" data-anchor="e11-value-chain-dynamics-triaging-second-pass-four-bullet-fl">E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">26</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-first-pass-light-no-elements-in-scope">Group 4 — Case riskiness</span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-not-in-scope-at-triaging">Group 5 — Case optionality</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and recommendation<span class="nav-fc">10</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-wisdom-library-models-applied-at-triaging">F.1 — Wisdom Library models applied at Triaging</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-research-sources-used-at-triaging">F.2 — Research sources used at Triaging<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-data-discrepancies-surfaced-during-the-research-read-fla">F.3 — Data discrepancies surfaced during the research read (flagged, not silently resolved)</span>
+<span class="nav-item nav-subsection" data-anchor="f-4-process-notes">F.4 — Process notes<span class="nav-fc">3</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">EKTA — Triaging A&amp;J Memo — OPUS TEST 14-May</div>
+      <div class="meta">Elekta AB (EKTA.B-SE) | Nasdaq Stockholm | Market cap ~SEK 21-22bn (~£1.6bn) | Share price ~SEK 57 (B-share) Stage: Triaging (Stage III — first analytical pass) Watson role: Invest</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">EKTA.B-SE</span> EKTA — Triaging A&amp;J Memo — OPUS TEST 14-May — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 07-Jul-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary-and-master-ratings" data-spy><span class="id">B</span> Executive summary and Master Ratings <span class="secn">12 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">First-pass Triaging summary. The Bottom Line Up Front leads; the six Master Ratings fold in immediately after. Master Ratings at Triaging are first-pass and light — preliminary calibrations informed by the underlying Element ratings but with Investment Analyst discretion retained. Section B is written last among the analytical sections, so it summarises what the analysis actually found, not what it expected to find.</div><div class="lead-prose">Loosely-derived qualitative summaries, informed by the underlying ratings but with Investment Analyst discretion retained. A-to-F on a relative bell-curve basis.</div></div>
+<p><strong>Page-level Bottom Line Up Front</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>[C-conditional] Watson verdict: a narrow, conditional Triaging pass. Elekta clears the Triaging test — there are large, concrete change forces — but it clears it narrowly, and the recommendation is CONDITIONAL PROGRESS to Early-Stage Assessment, gated on the Q4 FY2025/26 result (28 May 2026) clearing a defined three-part test.</strong> This is a real case with a real "but," and the memo has not skirted the "but."</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>[B-] The change forces are genuine and unusually concrete for a Triaging-stage case.</strong> A decisive new CEO (Jakob Just-Bomholt, eight months in seat); a SEK 500M structural cost programme that is over <strong>80%</strong> executed on the headcount action and worth roughly 280 basis points of EBIT margin; a real new product cycle in the FDA-cleared Evo linac (a ~<strong>30%</strong> price premium on unchanged cost of goods); and a China normalisation already visible in the order line. This is the strongest argument for the case and the reason it is "progress," not "park."</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>[C-/D+] But the base those change forces are landing on is not yet robust — and this is the heart of the case.</strong> Management has missed its own margin targets for roughly three consecutive fiscal years; the order book has been written down twice in six months (cumulatively ~SEK 7.1bn, ~<strong>39%</strong> of annual revenue); there is a structural foreign-exchange drag and a mechanical R&amp;D-accounting headwind to fight through; and the fundamental-delivery record is incongruent with the thesis. The new CEO breaking the pattern is, at Triaging, a hypothesis — not a demonstrated fact.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>[D+] The case is structurally complex and fails the case-simplicity guardrails on the two that matter most.</strong> It is not a focused bet — four interdependent drivers (margin execution, US recovery via Evo, China normalisation, order-book credibility) on a critical path, where the failure of any two cascades — and it does not have zero headwinds: a live battery of competitive, order-book, foreign-exchange and tariff headwinds is operating on the revenue line.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>[C-] The value-chain position is defensible but slowly squeezed.</strong> Elekta has real structural advantages — installed-base switching costs, a hard-to-replicate service network, an improving supplier-side picture — but the Varian/Siemens bundle moat is a structural competitive disadvantage that compounds at one-to-two points of share per year regardless of Evo's point-product quality, and the multi-year share trend is down (US new-sales share from above <strong>20%</strong> to below <strong>15%</strong>).</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>[Active CAUTION] The single most important risk flag is the false-friend caution.</strong> Multiple features of the case — the standout Q4 FY2024/25 margin quarter, the order-book "quality improvement" framing, the MRI-linac "monopoly" narrative, service-revenue resilience as a lagging indicator — look like recovery confirmation but may be 12-18 months ahead of genuine delivery. The protection is to gate the case on the actual prints, which is exactly what the Section E recommendation does.</div></div>
+<p><strong>Master Ratings — Triaging first pass (light)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Technical momentum: <span class="g gD">D</span></strong> — multi-year underperformance versus the competitor; a sell-side rating distribution skewed negative (roughly 41-<strong>47%</strong> Underweight or Sell); the easy roughly-<strong>35%</strong>-off-the-lows re-rating already banked. Not in substantive analytical scope at Triaging (E4 carries forward from Generation); rated light on the research-report backdrop.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Sell-side earnings momentum: <span class="g gD">D</span></strong> — consensus FY2025/26 EPS of roughly SEK 3.23 sits well below normalised levels, and both Morgan Stanley and DNB Carnegie had been trimming estimates. Not in scope at Triaging (E6 is first written at Deep Dive); rated light on the backdrop.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Thematic fit: <span class="g gC">C</span></strong> — net neutral to a mild headwind, consistent with the live Portfolio Impact Matrix score (T1: C, T2: C, T3: C-). Genuine essential-healthcare and recurring-revenue positives; offset by capital-equipment cyclicality, EMEA government-budget sensitivity, AI-enabler absence, and a mild Iran/oil budget-displacement headwind. Analytically neutral — no thematic action.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Pillar I — Case change elements: <span class="g gC">C</span></strong> — real, concrete change forces (Required Attribute 1, [B-]) landing on a base that is not yet robust (Required Attribute 2, [C-]). The x2 double-weight Element where the honest finding is "genuine change, unproven base."</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Pillar II — Case building blocks: [C-]</strong> — Group 1 case momentum [D+], Group 2 case simplicity [D+], Group 3 core philosophy [C-], Group 4 case riskiness [D+]. The building blocks are the weaker Pillar: a complex, momentum-against, slowly-squeezed case whose one clear positive (thematic fit) is merely neutral. Pillar II pulls the overall case down.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Pillar III — Investment case components: not applicable at this stage</strong> — zero content at Triaging; first appears at Early-Stage Assessment.</div></div>
+<div class="memo-closing">Section B closing note. The Triaging Master Ratings are preliminary calibrations and will sharpen materially at Early-Stage Assessment as the operator-quality (E9), competitive-advantage (E10), case-output (E2) and valuation-upside (E3) work is added, and as Section D first appears. The single most important external datapoint for the case is the Q4 FY2025/26 full-year result on 28 May 2026 — it is the event that begins to test whether the [B-] change forces can actually convert on the [C-] base. The recommendation is to progress to Early-Stage Assessment conditional on that result clearing the three-part gate defined in Section E.</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-investment-case-attributes" data-spy><span class="id">C</span> Investment case attributes <span class="secn">159 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Section C holds the Triaging-stage analytical content at first-pass depth. Pillar I (Section C.1) covers Element 1. Pillar II (Section C.2) covers Elements 5, 7, 8 and 11, plus the four Group ratings in scope. The communication discipline throughout is judgement-first: each block leads with the conclusion, supports it with analysis, and underpins it with the information. Ratings use the A-to-F scale on a relative, bell-curve basis — A is roughly top-decile against the relevant comparison set, B top-quartile, C the middle, D and F the bottom — not absolute thresholds.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-1-pillar-i-case-change-elements" data-spy><span class="id">C</span> 1 — Pillar I: Case change elements <span class="secn">54 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-triaging-first-pass-x2-doubl" data-spy><span class="id">E1</span> Required input change forces <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">54 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E1 is the only Pillar I Element in scope at Triaging, and it carries a x2 double-weight, so the bullet floor doubles to six minimum per Required Attribute and per Core Question. E1 tests two things in sequence. Required Attribute 1 asks whether a genuine, strong body of external and internal change forces is operating on the company. Required Attribute 2 asks whether the company has a robust enough base — absence of disqualifying headwinds, a well-invested platform, a delivery record congruent with the thesis, a large enough change-from-current, and a low enough trading multiple — for those change forces to actually convert into shareholder return.</div></div>
+<p><strong>E1 element rating: <span class="g gC">C</span> — the change forces are real and unusually concrete for a Triaging-stage case, but Required Attribute 2 is where the case is genuinely strained: a three-year record of margin under-delivery, two backlog write-downs in six months, a structural foreign-exchange drag, and a mechanical R&amp;D-accounting headwind together mean the base is not yet robust, and the change-from-current is bounded rather than large.</strong></p>
+<p>The honest read at Triaging is that E1 splits cleanly: Required Attribute 1 is a [B-] — there is a genuine, identifiable, partly-quantified body of change forces, which is more than many Triaging candidates can show. Required Attribute 2 is a [C-/D+] — the disqualifying-headwind battery is load-bearing, not marginal, and the "robust base" test is the part of E1 that the bull case most wants to skip past. Blending the two, with the analytical weight that the x2 multiplier demands placed on not skirting Required Attribute 2, the Element resolves to. <span class="g gC">C</span> This is a case with real change but a base that has to be proven, not assumed.</p>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-are-strong-external-and-internal-change-forces-presen" data-spy><span class="id">E1</span> RA1: Are strong external and internal change forces present? <span class="g gB">B</span> <span class="secn">18 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Required Attribute 1 summary — is there a genuine body of change forces, external and internal, that could plausibly drive a material improvement in earnings?</div><div class="lead-prose">Is there a genuine body of external tailwinds that could drive material EPS improvement?</div><div class="lead-prose">Is there a genuine body of company-controlled change forces that could drive material EPS improvement?</div></div>
+<p><strong>[B-] RA1 summary: yes — there is a real, identifiable, partly-quantified body of change forces, and it is more concrete than the typical Triaging candidate. The internal forces (a decisive new CEO, a substantially-executed structural cost programme, a genuine new product cycle in the Evo linac) are the stronger leg; the external forces (secular oncology demand, the clinical shift to adaptive radiotherapy, China normalising) are real but slower-acting and partly offset by an intensifying competitive set.</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The internal change forces are the part of the case that has actually moved. A new CEO arrived in September 2025 and within two quarters replaced three of his direct reports, delayered the organisation from nine management levels to six, launched a roughly 450-role reduction, and committed to at least SEK 500M of annualised cost savings — of which over <strong>80%</strong> of the headcount action was complete by Q3 FY2025/26. This is not a slideware programme; it is largely in the P&amp;L already.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The cost programme is quantifiable and material against the base. SEK 500M on a roughly SEK 18bn revenue base is approximately 280 basis points of potential EBIT-margin improvement, split roughly <strong>70%</strong> operating expenses and <strong>30%</strong> cost of goods sold per management disclosure. Sell-side estimates (DNB Carnegie) put the net effect at close to 3 percentage points of EBIT margin "all else equal." The full run-rate lands in Q1 FY2026/27.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The Evo product cycle is a specific, time-bounded internal change force rather than a vague "innovation" claim. FDA 510(k) clearance came in January 2026 — the first new Elekta linac cleared in the US in over a decade. Evo carries a roughly <strong>30%</strong> price premium over Versa HD on broadly unchanged cost of goods sold, so each Evo placement is structurally gross-margin-accretive; the AI-imaging software content (the "Iris" capability) is the premium, and software gross margins sit near <strong>80%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The external change forces are real but slower and more diffuse. Global cancer incidence is rising at roughly 1.5-<strong>2%</strong> per annum; radiation therapy is standard of care in around half of cancer cases; the global radiation-oncology market is growing at a high-single-digit rate. This is genuine secular demand — but it is the backdrop the company has had for years, not a new force.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The clinical shift to adaptive radiotherapy — re-optimising the treatment plan in real time as the patient's anatomy changes — is the most genuine external "technology cycle" force, and Elekta is positioned on it through both Unity (MRI-guided) and Evo (CT-guided). This is a real upgrade-cycle driver. But adoption is gradual and reimbursement-gated, and the competitor (Varian/Siemens) is positioned on the same trend with more scale.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">China normalising is a real but qualified external force. After roughly two years of disruption from the government anti-corruption campaign, China returned to positive order and revenue growth in Q3 FY2025/26, with a book-to-bill above <strong>1.1x</strong> and management guiding to roughly <strong>10%</strong> order and revenue growth in the second half; sell-side estimates have total Chinese linac unit sales recovering from roughly 180 units at the trough to 240-260 in 2026. The qualification: two of the largest backlog write-down tranches were concentrated in China and emerging-market orders, so the prior "China backlog" was partly illusory, and UIH is taking share aggressively.</div></div>
+<p><strong><span class="g gB">B</span> RA1-CQ1 — Are there strong external change forces / tailwinds? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The secular demand driver is genuine and durable. Cancer incidence rising at 1.5-<strong>2%</strong> per annum, radiation therapy used in roughly half of cancer treatments, and a global radiation-oncology market growing at a high-single-digit rate (the research reports variously cite ~7-<strong>11%</strong> for the broad market including software and services, with the hardware sub-segment growing slower at low-single-digits). For a Triaging "are there change forces" test this clears the bar — but it is a tailwind the company has always had, so it is context more than catalyst.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The clinical shift to adaptive radiotherapy is the strongest single external force, because it drives an equipment-upgrade cycle rather than just capacity expansion. Adaptive and image-guided radiotherapy is cited as growing at a low-double-digit rate against a low-single-digit base linac market. Elekta is positioned on this with two products. This is a real "change force" in the sense the Element means it — a reason the installed base turns over faster than pure demographics would imply.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">China normalising post anti-corruption campaign is a real external force with observable confirmation: positive Chinese orders and revenue in Q3 FY2025/26 for the first time in two years, book-to-bill above <strong>1.1x</strong>, and an industry forecast of 240-260 Chinese linac units in 2026 against roughly 180 at the trough. The structural under-penetration argument (China at roughly 1.8 linacs per million inhabitants against roughly 12 in the US) gives the recovery a long runway.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">US installed-base age is an external tailwind specific to Elekta's position: over <strong>60%</strong> of the existing US linac base is more than eight years old and replacement-eligible. With Evo now FDA-cleared, this is a pent-up-demand pool that can be addressed — the early evidence is that US order intake "turned sharply positive" after the January 2026 clearance.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Government healthcare-infrastructure spending is a periodic external tailwind in Europe — UK, France and Poland tender activity is cited as supporting EMEA orders, with EMEA the strongest-growing region at +<strong>8%</strong> constant-currency in Q3 FY2025/26. This is real but lumpy and budget-cycle-dependent.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">The honest counter-weight: the external forces are partly offset by external headwinds operating on the same value chain — an intensifying competitor set (Varian's scale, UIH's aggression), US tariffs (a <strong>100bps</strong> gross-margin drag in Q3 FY2025/26), and government-budget displacement risk. The external picture is net-positive but not clean. Rated <span class="g gB">B</span> because the demand and adaptive-therapy forces are genuine and durable, but a clean <span class="g gA">A</span> would require the external set to be one-directional, which it is not.</div></div>
+<p><strong><span class="g gB">B</span> RA1-CQ2 — Are there strong internal change forces? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The CEO change is the keystone internal force. Jakob Just-Bomholt took office September 2025 and acted with unusual speed: three of his direct reports replaced within the first two months, a nine-to-six management delayering, a roughly 450-role reduction, and a full zero-based review of the order book. Decisiveness of this kind in the first six months is itself a change force — it shifts the question from "will this management do anything" to "will what they have already done deliver."</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The SEK 500M-plus cost programme is the most quantifiable internal force. Over <strong>80%</strong> of the headcount action complete by Q3 FY2025/26; full run-rate from Q1 FY2026/27; roughly 280 basis points of potential EBIT-margin improvement on the current revenue base; sell-side estimates put the net effect near 3 percentage points. The programme is described by Jefferies as flowing from a structural redesign of the operating model rather than arbitrary cost-cutting — which, if accurate, makes it more durable.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The shift to a decentralised, regional profit-and-loss operating model is a genuine structural internal change, not just a cost line. It pushes accountability to regional leaders and is intended to raise commercial velocity — directly relevant to the US "must-win battle." It is also the highest-execution-risk piece, because reorganisations of this kind can disrupt as much as they unlock.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The Evo product cycle is an internal change force the company controls the timing of: FDA clearance achieved January 2026, European CE mark since September 2024 (giving Europe a head-start — roughly two-thirds of new European systems are now Evo-related), a structural ~<strong>30%</strong> price premium, and an upgrade path into the aging installed base. This is a concrete, time-bounded earnings lever.</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext">The R&amp;D-accounting normalisation is an internal change force that is positive for earnings quality but negative for reported earnings in the near term: management is intentionally cutting the R&amp;D capitalisation rate from roughly <strong>60%</strong> toward <strong>40%</strong> to align capitalisation with amortisation. It improves the underlying quality of the P&amp;L and forces convergence between reported and cash EBIT — a genuine internal change — but it is a mechanical reported-margin drag for two-to-three years (analysed in RA2-CQ2 and the Wisdom Library "R&amp;D capitalisation policy unwinding" model).</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext">The software mix shift — Elekta ONE, the move toward software-as-a-service, ~<strong>80%</strong> software gross margins, rising attachment rates on Evo placements — is a genuine internal change force on margin mix. It is real and directionally right, but it is slow-acting and Elekta is behind peers on recurring-revenue penetration. Rated <span class="g gB">B</span> overall for RA1-CQ2 because the internal forces are concrete, quantified and substantially in motion — stronger than the external set — but a clean <span class="g gA">A</span> would require the delivery record to corroborate them, and at Triaging it does not yet.</div></div>
+<p><strong>RA1 rating: [B-]</strong> — a genuine, concrete, partly-quantified body of change forces, internal more than external. The reason it is [B-] and not <span class="g gB">B</span> or higher: at Triaging the change forces are necessary but the Element also asks whether they are <em>strong</em> — and the honest answer is that their transmission to earnings is unconfirmed, the company has argued versions of this recovery before, and the external set is partly offset by an intensifying competitive environment. Strong views, weakly held: this is a real change-force body, rated one notch below the middle of the top quartile because it has not yet been corroborated by delivery.</p>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-is-the-base-robust" data-spy><span class="id">E1</span> RA2: Is the base robust? <span class="g gC">C</span> <span class="secn">36 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Required Attribute 2 summary — is there a robust enough base for the change forces to convert into shareholder return? This Required Attribute tests five things: absence of disqualifying external headwinds, a well-invested base, congruence between past and present fundamental delivery and the thesis, a large enough change-from-current, and a low enough trading multiple.</div><div class="lead-prose">Are the disqualifying external and structural headwinds absent — or are they load-bearing?</div><div class="lead-prose">Is the company operating from a well-invested platform that the change forces can build on?</div><div class="lead-prose">Does the company's actual delivery record support the thesis, or contradict it?</div><div class="lead-prose">Is the gap between the current situation and the thesis case large enough to be worth the risk?</div><div class="lead-prose">Is the entry multiple low enough to provide a margin of safety and asymmetric upside?</div></div>
+<p><strong>[C-] RA2 summary: this is where the Elekta case is genuinely strained. The base is not yet robust. There is a load-bearing battery of headwinds — a structural foreign-exchange mismatch, a mechanical R&amp;D-accounting drag, and a backlog whose quality has had to be written down twice in six months — and the fundamental-delivery record is the single most damaging fact in the case: management has missed its own margin targets for roughly three consecutive fiscal years. The change-from-current is real but bounded, and the trading multiple already reflects a meaningful part of the recovery. None of this disqualifies the case, but it means the "robust base" precondition is not met at Triaging, and the case must be sized and gated accordingly.</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext">The disqualifying-headwind question is the heart of RA2, and the headwind battery here is material rather than marginal: foreign-exchange structural mismatch, the R&amp;D capitalisation/amortisation drag, and backlog-quality deterioration are each individually capable of absorbing a meaningful share of the cost-programme benefit. They are analysed in CQ1 below.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The "well-invested base" question is genuinely mixed. On one hand, Elekta has a real, hard-to-replicate asset base: over 7,500 installed devices, a sole-provider position in high-field MRI-guided radiotherapy, roughly <strong>97%</strong> share in Gamma Knife radiosurgery, roughly <strong>65%</strong> in brachytherapy, and a service network with deep clinical relationships. On the other, the FY2024/25 SEK 1,064M impairment of an abandoned internally-developed cloud software platform is direct evidence that part of the recent investment was misallocated, and management's own decision to move to a third-party platform is a tacit admission. The base is well-invested in hardware and installed-base terms, under-invested and partly mis-invested in software-platform terms.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The fundamental-delivery congruency question produces the most damaging finding in E1: the past and present record is <em>not</em> congruent with the thesis. The thesis is "this management will deliver <strong>14%</strong>-plus EBIT margins." The record is roughly three consecutive fiscal years of missed margin targets, a FY2024/25 adjusted EBIT margin of <strong>11.6%</strong> that actually declined 20 basis points year-on-year, and a reported net income down <strong>82%</strong> on an impairment. The new CEO is the variable that is meant to break the pattern — but he is the new variable, by definition unproven in this seat.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The change-from-current question: there is a real change-from-current — a credible path from <strong>11.6%</strong> toward <strong>14%</strong> EBIT margin is roughly 240 basis points, which on an SEK 18bn base is a material absolute number and would drive a <strong>20%</strong>-plus uplift in operating profit. But it is bounded: it is a margin-recovery story to a previously-held level, not a step-change to a new structural high, and the revenue line underneath it is roughly flat. A truly large change-from-current would have both a margin and a revenue leg; here the revenue leg is, at Triaging, a recovery-to-flat-to-modest-growth story.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The trading-multiple question: the stock has already re-rated. It rallied roughly <strong>35%</strong> from its November 2025 lows as the market began to price the cost programme and the Evo clearance. On the research reports' figures it trades at roughly <strong>10.8x</strong> enterprise value to next-twelve-months EBIT (Jefferies) and roughly <strong>11.5x</strong> EV/EBITA on 2026 estimates adjusting for capitalised R&amp;D (DNB Carnegie), or roughly 15-<strong>17x</strong> calendar-2026 price-to-earnings. That is not expensive against confirmed-delivery medtech peers, but it is not the deep-value entry point that would make the "robust base" question less important — a meaningful slice of the recovery is in the price.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Net: RA2 is a [C-]. The base has genuine strengths (installed base, niche monopolies, service annuity) but the disqualifying-headwind battery is real, the delivery record is incongruent with the thesis, and the multiple is not cheap enough to compensate. The honest Triaging read is that the change forces from RA1 are landing on a base that has to be proven robust, not assumed robust — and that proof is exactly what the imminent Q4 FY2025/26 result will start to provide.</div></div>
+<p><strong>[D+] RA2-CQ1 — Is there an absence of external headwinds? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">They are load-bearing, not absent. <strong>The foreign-exchange structural mismatch is the largest.</strong> Elekta reports in Swedish krona but earns the large majority of revenue in other currencies (US dollar, euro, Chinese yuan, sterling) while carrying a cost base that is partly sterling-heavy (UK manufacturing) and euro-heavy (Netherlands). In Q3 FY2025/26 alone, foreign-exchange translation stripped roughly SEK 548M from reported net sales — a 12-percentage-point wedge between reported (-<strong>10%</strong>) and constant-currency (+<strong>2%</strong>) revenue — and contributed 130 basis points of the 230-basis-point combined FX-and-tariff gross-margin drag that quarter. This is structural and not fully hedgeable without moving manufacturing.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>US tariffs are a second, active external headwind.</strong> Elekta manufactures hardware in Europe (UK and Netherlands) and ships into the US, so US import tariffs land directly on cross-border hardware sales — a 100-basis-point gross-margin drag in Q3 FY2025/26, and the research notes the exposure is <em>rising</em> as the US sales mix rises. This is not a tail risk; it is in the run-rate.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>The competitive environment is an intensifying external headwind, not a benign one.</strong> Varian/Siemens has out-grown Elekta roughly <strong>10%</strong> to <strong>3%</strong> organically over three years and is reported to have captured roughly 10 percentage points of share since the 2021 acquisition; a new Varian platform (a TrueBeam replacement) is scheduled for roughly September/October 2026. UIH is taking Chinese share aggressively and expanding overseas. The competitive set is getting harder, not easier.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Government healthcare-budget pressure is a real external headwind in the EMEA region</strong>, Elekta's largest at roughly 35-<strong>40%</strong> of sales. The research is mixed — EMEA is currently the strongest-growing region on tender activity — but the structural risk (NATO defence-spending commitments competing with healthcare capital budgets, chronic public-hospital capital shortfalls) is identified in the thematic overlay as a genuine second-order drag.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">The one external headwind that is genuinely <em>absent</em> is a demand-destruction or terminal-decline risk: the end market is growing, radiation therapy is not being disrupted as a modality, and Elekta's niche monopolies (Gamma Knife, brachytherapy, high-field MRI-linac) are not under near-term structural threat. So this is not a "the whole market is collapsing" situation.</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext">Net: CQ1 is a [D+]. The disqualifying-headwind question is meant to test whether the change forces can land cleanly, and here they cannot — FX, tariffs and an intensifying competitor set are each a real drag, and they are concurrent. It is not an <span class="g gF">F</span> because the headwinds are identifiable, partly quantified and partly manageable (the cost programme is explicitly sized to fight through them), and because the worst external headwind — end-market decline — is absent. But "absence of headwinds" is not a description that fits Elekta, and the memo should not pretend otherwise.</div></div>
+<p><strong><span class="g gC">C</span> RA2-CQ2 — Is the base well-invested? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The hardware and installed-base platform is genuinely well-invested and hard to replicate: over 7,500 installed devices generating a multi-decade service annuity, with service revenue (roughly 42-<strong>43%</strong> of net sales) renewing at high rates. An installed base of this scale is the single most durable asset in the case and is not in question.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The niche-monopoly positions are well-invested and defensible: roughly <strong>97%</strong> share in Gamma Knife radiosurgery (an installed base of ~360 systems, the gold-standard platform, far more published clinical evidence than competitors), roughly <strong>65%</strong> in brachytherapy, and the sole commercialised high-field MRI-linac after ViewRay's exit. These are real, paid-for competitive positions.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The Evo platform is freshly invested and is the clearest evidence the company can still produce a competitive core product: FDA-cleared, CE-marked, AI-imaging content, a structural price premium. The investment in Evo is recent and is converting (two-thirds of new European systems are Evo-related).</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Against that, the FY2024/25 SEK 1,064M impairment is hard evidence of <em>mis</em>-investment: an internally-developed cloud software platform was abandoned and written off, and management chose to move to a third-party platform. This is the single clearest signal that part of the recent investment programme did not earn its keep, and it raises a fair question about forward R&amp;D capital allocation.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The software platform more broadly is under-invested relative to the competitor: the research reports note Varian's substantially larger software R&amp;D budget and larger software installed base, and the "Windows 95" characterisation of legacy MOSAIQ from expert calls (referenced in the forward-stage research) points to a platform that needed the Elekta ONE refresh precisely because it had fallen behind. Elekta ONE is the catch-up investment; it is early.</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext">Net: CQ2 is a. <span class="g gC">C</span> The base is well-invested where it is hard to replace (hardware, installed base, niche monopolies, service network) and under-invested or mis-invested where the competitive frontier is now moving fastest (software platform). For a Triaging "can the change forces build on this base" test, the answer is a genuine mixed middle — the platform is solid enough to build on but is not uniformly well-invested, and the impairment is a real mark against management's prior capital allocation.</div></div>
+<p><strong><span class="g gD">D</span> RA2-CQ3 — Is past and present fundamental delivery congruent with the thesis? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">This is the most damaging Core Question in E1, and the honest answer is that the record is <em>incongruent</em> with the thesis. The thesis is "this management delivers a margin recovery to <strong>14%</strong>-plus." The record is roughly three consecutive fiscal years of missed margin targets — the research reports are explicit that the equity market has been "reluctant to price in Elekta's savings targets due to past execution inconsistencies."</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The most recent full-year datapoint is itself incongruent: FY2024/25 adjusted EBIT margin was <strong>11.6%</strong>, which <em>declined</em> 20 basis points year-on-year against management's own implicit guidance of stable-to-improving. A company on a credible margin-recovery path would normally show the inflection in the full-year number; instead the inflection is being asserted off one strong quarter (Q4 FY2024/25 at <strong>16.3%</strong> adjusted EBIT, Q3 FY2025/26 at <strong>11.9%</strong>).</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The reported net income collapse — down <strong>82%</strong> to SEK 237M on the SEK 1,064M impairment — is a delivery fact that, while one-off and non-cash, is incongruent with a "quality compounder recovering" narrative. Quality compounders that get temporarily disrupted do not usually have to impair abandoned internally-built platforms.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">The order book is a second incongruent delivery fact: a company with a credible forward order book does not normally have to write it down twice in six months (SEK 4.9bn then SEK 2.2bn). The management framing — "firmer interpretation of order criteria" — is internally coherent, but two consecutive write-downs is a pattern, and patterns are delivery evidence.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The genuinely congruent parts of the record: the cost programme is being delivered ahead of pace (over <strong>80%</strong> of headcount action complete, prior cost programme delivered SEK 279M against a SEK 250M target — a beat), and Q3 FY2025/26 produced a real order beat (SEK 5,418M, ~<strong>10%</strong> above consensus) and a real gross-margin expansion (<strong>38.3%</strong> from <strong>37.1%</strong>) despite the FX-and-tariff drag. So the record is not uniformly bad — the cost line and the order line are tracking.</div></div>
+<div class="finding cq-level"><span class="fnum">24.</span><div class="ftext">Net: CQ3 is a. <span class="g gD">D</span> The cost-execution sub-record is congruent and that matters — but the <em>margin</em> delivery record, which is the actual thesis, is three years incongruent, and the new CEO breaking that pattern is a hypothesis at Triaging, not a demonstrated fact. The Wisdom Library "operator validation horizon" model is directly on point: cost execution is visible at roughly six months, but the full operator-quality verdict needs 12-18 months, and Just-Bomholt is roughly eight months in. The delivery record does not yet support the thesis; it is the single biggest reason the Element does not rate above. <span class="g gC">C</span></div></div>
+<p><strong><span class="g gC">C</span> RA2-CQ4 — Is there a large change-from-current / mispricing? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">There is a real change-from-current, and it is quantifiable: a credible path from <strong>11.6%</strong> to <strong>14%</strong> adjusted EBIT margin is roughly 240 basis points, which on a roughly SEK 18bn revenue base is approximately SEK 430M of incremental operating profit and a <strong>20%</strong>-plus uplift in EBIT — before any revenue growth. That is a material change, not a trivial one.</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">The change-from-current has more than one lever, which strengthens it: the SEK 500M cost programme (~<strong>280bps</strong>), the Evo price-premium mix benefit, the software-mix shift toward ~<strong>80%</strong>-margin recurring revenue, and operating leverage on any revenue recovery. A multi-lever change-from-current is more robust than a single-lever one — though, as Section C.2 notes under E7, it is also more <em>complex</em>.</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Against that, the change-from-current is <em>bounded</em> rather than large in the fullest sense. It is a recovery to a previously-held margin level (Elekta ran low-to-mid teens EBIT margins historically), not a step-change to a new structural high. And the revenue line underneath is roughly flat — FY2024/25 organic revenue was -<strong>0.6%</strong>, and consensus for FY2025/26 is only low-single-digit growth. A genuinely large change-from-current would have a margin leg <em>and</em> a revenue-acceleration leg; here the revenue leg is, at Triaging, modest.</div></div>
+<div class="finding cq-level"><span class="fnum">28.</span><div class="ftext">The mispricing question is the weaker half of CQ4. The stock has already re-rated roughly <strong>35%</strong> off its November 2025 lows, and on the research figures trades at roughly 10.8-<strong>11.5x</strong> forward EV/EBIT(A) and roughly 15-<strong>17x</strong> calendar-2026 earnings. That is not expensive — but it is the valuation of a stock where the market has already started to price the recovery, not one where the recovery is free.</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">The bull framing of the change-from-current, fairly stated: the sell-side (DNB Carnegie, Jefferies) argues the FY2025/26 consensus EPS of roughly SEK 3.23 sits well below a normalised earnings level, that the investor debate has shifted from "can Elekta survive" to "what is the right entry point," and that a synchronised US-and-China recovery could push organic growth above consensus. If that framing is right, the change-from-current is larger than the bounded version above.</div></div>
+<div class="finding cq-level"><span class="fnum">30.</span><div class="ftext">Net: CQ4 is a. <span class="g gC">C</span> There is a real, quantified, multi-lever change-from-current — that earns the middle of the scale rather than the bottom. But it is bounded by a roughly flat revenue line and partly pre-priced by the re-rating that has already happened, which is why it does not rate into the top quartile. The size of the prize is adequate, not compelling.</div></div>
+<p><strong>[C+] RA2-CQ5 — Is the trading multiple low? (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">The headline multiples are moderate, not stretched. On the research reports' figures Elekta trades at roughly <strong>10.8x</strong> next-twelve-months EV/EBIT (Jefferies) and roughly <strong>11.5x</strong> EV/EBITA on 2026 estimates adjusting for capitalised R&amp;D (DNB Carnegie), and roughly 15-<strong>17x</strong> calendar-2026 price-to-earnings. For a number-two player in a structurally attractive duopoly, these are not demanding multiples.</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">Against confirmed-delivery medtech peers the multiple is a discount: the research notes Siemens Healthineers trades materially higher on price-to-earnings, and the broader medtech peer set sits higher than Elekta on most measures. Elekta's discount is "appropriate for a low-growth, execution-uncertain medtech" — but a discount it is, and if the execution uncertainty resolves favourably the discount is the upside.</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The multiple has, however, already compressed the easy part of the opportunity. The stock re-rated roughly <strong>35%</strong> from its November 2025 lows. The deep-value entry point — when the market was pricing failure — has passed. What is left is a "fair multiple on uncertain delivery," not a "cheap multiple on a sure thing."</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">The bear anchor on the multiple is real and should be stated: Morgan Stanley's downside case applies a low-double-digit EV/EBIT multiple to a stagnant low-teens margin and gets to a share price materially below spot. That scenario is arithmetically coherent — it is what the multiple does if the margin recovery does not come.</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">The R&amp;D-accounting point cuts in the company's favour on the multiple: because reported EBIT is being mechanically depressed by the capitalisation-to-amortisation shift, the <em>reported</em> multiple overstates how expensive the stock is on a cash-EBIT basis. DNB Carnegie's adjusted ~<strong>11.5x</strong> EV/EBITA is the more honest number, and it is genuinely undemanding.</div></div>
+<div class="finding cq-level"><span class="fnum">36.</span><div class="ftext">Net: CQ5 is a [C+]. The multiple is the most supportive single fact in RA2 — it is moderate, it is a discount to confirmed-delivery peers, and it is undemanding on a cash-EBIT basis. It is not a <span class="g gB">B</span> because the easy re-rating has already happened and the multiple is "fair," not "cheap" — there is no large margin-of-safety cushion if the delivery disappoints. It earns a notch above the middle because, of the five RA2 tests, valuation is the one that does not actively argue against the case.</div></div>
+<p><strong>RA2 rating: [C-]</strong> — the base is not yet robust. The headwind battery (CQ1) is load-bearing and concurrent; the well-invested-base test (CQ2) is a genuine mixed middle with a real mis-investment mark against it; the fundamental-delivery record (CQ3) is incongruent with the thesis and is the single most damaging fact in E1; the change-from-current (CQ4) is real but bounded; only the trading multiple (CQ5) actively supports the case, and even there the easy re-rating has passed. RA2 resolves to [C-]: the change forces from RA1 are real, but they are landing on a base that has to be proven, not assumed.</p>
+<p><strong>E1 overall element rating: <span class="g gC">C</span></strong> — blending a [B-] Required Attribute 1 with a [C-] Required Attribute 2. The x2 double-weight means the analytical instruction is to <em>not skirt</em> the harder Required Attribute, and RA2 is the harder one: the honest Triaging finding is that Elekta has a genuine, concrete body of change forces operating on a base that is not yet robust enough to convert them with confidence. That is a <span class="g gC">C</span> — a real case with a real "but," where the "but" is exactly what the imminent Q4 FY2025/26 result begins to test.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-2-pillar-ii-case-building-blocks" data-spy><span class="id">C</span> 2 — Pillar II: Case building blocks <span class="secn">105 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Section C.2 covers the four Pillar II Elements in scope at Triaging — E5 Thematic fit (x2 double-weight), E7 Required case simplicity guardrails (x2 double-weight), E8 Fit with acceptable case setups (three-bullet carve-out across all six setups plus two negative guardrails), and E11 Value-chain dynamics (four-bullet floor) — together with the four Group ratings in scope. Elements E4, E6, E9, E10, E12, E13, E15, E16, E17, E18, E19 and E20 are not in scope at Triaging and are explicitly noted as such at their Group headings.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-first-pass-light" data-spy><span class="id">Grp 1</span> Case momentum <span class="secn">24 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 1 covers technical momentum (E4), thematic fit (E5) and sell-side earnings momentum (E6). At Triaging, only E5 is in analytical scope. E4 carries forward from the Generation stage with no new content. E6 is not in scope until Deep Dive.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-triaging-second-pass-x2-double-weight" data-spy><span class="id">E5</span> Thematic fit <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">24 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E5 tests whether the current active thematics reinforce or undermine the Elekta investment case. The three active thematics, per <code>memory/thematics/active.md</code> (effective Q2 2026), are: Thematic 1 — Bear Market / Top of Bull Market; Thematic 2 — AI Disruption / Opportunities; Thematic 3 — Iran War + Oil Price / Value Chain. The x2 double-weight applies, so the bullet floor doubles to six minimum per Required Attribute. The Required Attributes below are authored against the three active thematics, with a fourth Required Attribute summarising the paradigm fit from the business perspective. EKTA already carries a thematic score in the live Portfolio Impact Matrix (T1: C, T2: C, T3: C-, net neutral-to-mild-headwind, scored at ESA depth 13-May-26) — this Triaging-stage assessment is consistent with that score and reaches the same place by an independent route.</div><div class="lead-prose">Does Elekta fit the Bear-Market thematic's beneficiary profile — pricing power, recurring non-cyclical revenue, fortress balance sheet — or its at-risk profile?</div><div class="lead-prose">Does Elekta fit the AI Disruption thematic's beneficiary profile (AI enabler), its adopter profile, or its at-risk profile?</div><div class="lead-prose">Does Elekta fit the Iran/Oil thematic's beneficiary profile, or its at-risk profile?</div><div class="lead-prose">Stepping back from the three named thematics: does Elekta's business model fit the current macro paradigm, or sit against it?</div></div>
+<p><strong>E5 element rating: <span class="g gC">C</span> — net neutral to a mild headwind. Elekta has genuine essential-healthcare and recurring-revenue characteristics that qualify it for partial Bear-Market beneficiary status, and it is a credible AI <em>adopter</em> in its clinical workflow — but it is not an AI <em>enabler</em>, its capital-equipment cyclicality and EMEA government-budget sensitivity prevent a clean defensive classification, and the Iran/oil thematic is a mild second-order headwind via budget displacement and tariffs. The thematic profile neither adds conviction nor triggers a concern requiring action — it is a genuine middle.</strong></p>
+<p><strong><span class="g gC">C</span> E5 — RA1: Suitability for bear market / economic downturn (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The strongest beneficiary characteristic is genuine essential-healthcare demand. Radiation therapy is standard of care in roughly half of cancer cases; cancer incidence rises regardless of the economic cycle; hospitals do not stop treating cancer in a downturn. This is real inelastic end-demand and it qualifies Elekta for <em>partial</em> Bear-Market beneficiary status — it matches the thematic's "inelastic demand for essential services" and "secular tailwinds (healthcare)" beneficiary attributes.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The recurring-revenue base is a second genuine beneficiary characteristic: service contracts at roughly 42-<strong>43%</strong> of net sales, renewing at high rates over 10-to-15-year equipment lifecycles, with software increasingly on a subscription basis at ~<strong>80%</strong> gross margin. This is the "recurring, contracted revenues" beneficiary attribute — the service annuity is a real floor under the case in a downturn.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Pricing power in the premium segments is a third partial beneficiary characteristic: the Evo carries a structural ~<strong>30%</strong> price premium, Gamma Knife and high-field MRI-linac command premium pricing in academic centres, and the research confirms price increases have been a real margin lever. This matches the thematic's pricing-power requirement, at least in the premium tier.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">But the disqualifying characteristic is capital-equipment cyclicality, and it is material. The Solutions segment — roughly 57-<strong>58%</strong> of net sales — is hospital capital-expenditure-driven. When public hospital capital budgets tighten or procurement is deferred, Elekta's equipment line compresses directly. This is the mechanism behind the multi-year order-book write-downs. It maps to the thematic's "cyclical demand (capex)" <em>at-risk</em> attribute, which the thematic rates as a critical negative.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">A second disqualifying characteristic is EMEA government-budget sensitivity. The EMEA region is roughly 35-<strong>40%</strong> of sales — Elekta's largest single geographic concentration — and is exposed to public-hospital capital-budget pressure and the risk of NATO defence-spending commitments displacing healthcare capital budgets. This is real at-risk exposure, not hypothetical.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">The balance sheet is "acceptable, not fortress." Net debt / EBITDA at roughly <strong>3.0x</strong> on the FY2024/25 <span class="g gC">C</span> research basis (or nearer 1.3-<strong>1.5x</strong> on other sources — see Section F) is not the sub-<strong>2.5x</strong>, strong-FCF profile that defines a Bear-Market defensive compounder, and the dividend payout against the impaired FY2024/25 earnings is high. Net: RA1 is a <span class="g gC">C</span> — the essential-healthcare demand and the service annuity are real partial-beneficiary positives, but capital-equipment cyclicality, EMEA budget sensitivity and a non-fortress balance sheet prevent the clean defensive classification. Elekta is a mixed case under Thematic 1, not a clear winner.</div></div>
+<p><strong><span class="g gC">C</span> E5 — RA2: Suitability for AI disruption (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Elekta is a credible AI <em>adopter</em> in its clinical workflow, and that is a genuine positive for the commercial narrative. The shift to adaptive radiotherapy — Elekta's core commercial story — is fundamentally AI-enabled: deep-learning auto-contouring collapses physician planning time from tens of minutes to seconds, and the Evo's "Iris" imaging capability is explicitly AI-enhanced. AI is embedded in the product, and that is real.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">AI is also a genuine service-margin lever: Elekta's predictive-maintenance capability is connected to a large share of the installed base, and the Elekta ONE planning suite's AI auto-contouring (via the GE HealthCare MIM Software partnership) drives software attach rates and average-revenue-per-user. This is AI as a monetised feature, not just a buzzword.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">But Elekta is decisively <em>not</em> an AI enabler in the thematic's sense. The thematic's enabler profile requires explicit, quantifiable AI-specific revenue, pricing power tied to AI-infrastructure criticality, and multi-year hyperscaler-style contract visibility. Elekta has none of these. Its AI content is table-stakes for a 2026 medtech company — necessary to stay competitive, not a source of differentiated incremental revenue. It does not match the enabler attributes at all.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">There is a genuine AI-driven <em>competitive</em> risk on the software side. The research reports note Varian's substantially larger software R&amp;D budget and larger software installed base — and in an AI-intensive environment, a larger installed base means more training data, which compounds into better auto-contouring and plan-quality models over a multi-year horizon. Elekta's smaller software base is a structural AI disadvantage, not an advantage. This is mild at-risk exposure.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Elekta does <em>not</em> fit the thematic's acute at-risk profile, however — it is not a labour-arbitrage business, a staffing intermediary, or a commoditised SaaS vendor facing disintermediation. Its core product (a physical linac with embedded software and a service annuity) is not the kind of business AI agents disintermediate. The downside AI exposure is "slow competitive erosion on the software layer," not "business-model disruption."</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Net: RA2 is a. <span class="g gC">C</span> Elekta is a solid AI adopter — that is a real positive for the clinical narrative and a mild support for service margins — but it generates no AI-enabler revenue and faces a slow AI-driven competitive disadvantage on the software layer because its installed base is smaller than the competitor's. The two roughly offset. This is a genuine neutral, consistent with the live Portfolio Impact Matrix score of C.</div></div>
+<p><strong>[C-] E5 — RA3: Suitability for Iran war / oil-price-induced inflation or demand deterioration (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Elekta is not a direct Iran/oil casualty. It manufactures precision electronic systems, not energy-intensive commodities — the thematic's "energy-intensive manufacturing at-risk" and "high naphtha/oil feedstock" attributes do not apply. Its cost structure is labour, components and quality assurance. The direct first-order oil shock passes it by.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Nor is Elekta a beneficiary. It has no upstream oil/gas exposure, no defence order intake, no shipping-rate leverage, and no cable/infrastructure exposure — none of the thematic's beneficiary attributes apply. So Elekta is neither a clear winner nor a clear loser on the direct mechanism.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The mild headwind is the second-order budget-displacement channel. The thematic explicitly identifies NATO defence-spending commitments (the move toward higher GDP shares for defence) displacing healthcare capital budgets in Germany, France and Poland — and that is directly relevant to Elekta's largest region, EMEA, at roughly 35-<strong>40%</strong> of sales. This is a compounding drag on top of the existing EMEA capital-budget sensitivity noted under RA1.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The second mild headwind is the tariff and trade-environment channel, which is Iran/oil-thematic-adjacent. US tariffs are already a 100-basis-point gross-margin drag in Q3 FY2025/26, and the exposure is rising with the US sales mix. A more disrupted global trade environment makes that worse, not better.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">There is no currency offset working in Elekta's favour here either — unlike the thematic's beneficiaries (oil majors with USD revenues), Elekta's currency exposure (the krona-reporting, multi-currency-earning, sterling-and-euro-cost mismatch) is a drag, not a hedge, in a risk-off environment.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Net: RA3 is a [C-] — a mild headwind. Elekta is not a direct Iran/oil casualty and not a beneficiary, but the second-order budget-displacement channel hits its largest region and the tariff channel is already in the run-rate. This is consistent with the live Portfolio Impact Matrix T3 score of C-. It is a mild negative, not a concern requiring action.</div></div>
+<p><strong><span class="g gC">C</span> E5 — RA4: Paradigm fit from the business perspective — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">The current paradigm, per the active-thematics file and Richard's stated market posture, is risk-off, late-cycle, with a targeting bias toward recurring non-cyclical revenue, domestic-EU footprint, and healthcare. Elekta partially fits this — it <em>is</em> a healthcare company with a recurring service annuity, and that is exactly the kind of business the current posture favours.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">But Elekta fits the paradigm <em>partially</em>, not cleanly, because the half of the business that is capital-equipment sales is precisely the cyclical, budget-sensitive, deferral-prone profile the risk-off posture is trying to avoid. The company is half "what the paradigm wants" (essential-healthcare service annuity) and half "what the paradigm is cautious about" (hospital capital-equipment cycle).</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The paradigm's emphasis on pricing power and balance-sheet strength is a partial fit: Elekta has pricing power in its premium segments, but its balance sheet is acceptable rather than fortress, and its FX-exposed, multi-currency P&amp;L is more fragile in a risk-off, strong-safe-haven-currency environment than a domestically-funded peer would be.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">The paradigm's caution on "stocks dependent on multiple expansion" is a partial concern: Elekta has <em>already</em> re-rated roughly <strong>35%</strong> off its lows on the recovery narrative, so a meaningful slice of the case now does depend on the recovery being delivered to justify the multiple — which is the kind of dependency the late-cycle thematic flags.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The genuinely paradigm-fitting feature is that Elekta is <em>not</em> a consumer-discretionary, luxury, chemicals or highly-leveraged-small-cap name — the categories the Bear-Market thematic explicitly flags as acute at-risk. Whatever Elekta's issues, they are company-specific execution issues, not "the macro paradigm is actively destroying this business model."</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Net: RA4 is a. <span class="g gC">C</span> From the business perspective Elekta is a genuine paradigm middle — half-aligned (healthcare, recurring annuity, niche monopolies) and half-exposed (capital-equipment cyclicality, FX fragility, a multiple that has already moved). It is not a paradigm beneficiary to lean into, and not a paradigm casualty to avoid. The thematic overlay, on an independent Triaging pass, says the same thing the live Portfolio Impact Matrix says: no thematic action required.</div></div>
+<p><strong>E5 element rating: <span class="g gC">C</span></strong> — net neutral to a mild headwind, consistent with the live Portfolio Impact Matrix (T1: C, T2: C, T3: C-). The essential-healthcare demand and recurring service annuity are real partial positives; the capital-equipment cyclicality, EMEA government-budget sensitivity, AI-enabler absence and mild Iran/oil budget-displacement headwind are real partial negatives. They net to a genuine middle. The x2 double-weight has been applied: E5 has been analysed at full depth against each active thematic rather than skirted, and the conclusion is that thematic fit neither strengthens nor materially weakens the Elekta case — it is analytically neutral, and the memo should not manufacture a thematic angle that is not there.</p>
+<p><strong>Element E4 — Technical momentum:</strong> not in scope at Triaging as a new analytical write-up; carries forward from the Generation stage. For Triaging-level context only, the research reports describe a stock that re-rated roughly <strong>35%</strong> from its November 2025 lows but against a multi-year backdrop of underperformance versus the competitor and a sell-side rating distribution skewed negative (roughly 41-<strong>47%</strong> Underweight or Sell). E4 is first given a substantive Investment Analyst write-up at Early-Stage Assessment.</p>
+<p><strong>Element E6 — Sell-side earnings momentum:</strong> not in scope at Triaging; first written at Deep Dive. For context only, consensus FY2025/26 EPS sits at roughly SEK 3.23, well below normalised levels, and the research notes both Morgan Stanley and DNB Carnegie had been trimming estimates — a negative momentum backdrop that will be assessed properly at Deep Dive.</p>
+<p><strong>Group 1 rating: [D+]</strong> — first pass, light. The one in-scope Element (E5 Thematic fit) is a. <span class="g gC">C</span> But the Group is "Case momentum," and the two context Elements both point the wrong way: the technical-momentum backdrop is weak (multi-year underperformance, negative sell-side skew, the easy re-rating already banked) and the sell-side earnings-momentum backdrop is negative (consensus EPS well below normalised, estimates being trimmed). Taking the Group as a whole at light first-pass depth, case momentum is a [D+] — the thematic-fit Element is neutral, but momentum in the technical and earnings-revision sense is genuinely against the case at Triaging. This is a real mark against the case and the memo should carry it forward honestly.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-first-pass-light" data-spy><span class="id">Grp 2</span> Case simplicity <span class="secn">55 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 2 covers the required case-simplicity guardrails (E7, x2 double-weight) and fit with acceptable case setups (E8, three-bullet carve-out at Triaging). A simple, predictable, monitorable case is worth more than a complex one of equal expected return, because complexity is itself a risk — it widens the distribution of outcomes and makes invalidation harder to spot.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-required-case-simplicity-guardrails-triaging-first-pass-x" data-spy><span class="id">E7</span> Required case simplicity guardrails <span class="g gD">D</span> <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">31 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 tests whether the investment case is simple enough to be predictable, monitorable and executable. The x2 double-weight applies, so the bullet floor doubles to six minimum per Required Attribute and per Core Question. The five guardrails test: a focused bet (few fulcrum and key drivers), a narrow perimeter (few geographies and business units), zero headwinds (no value-chain headwind risks to revenue), a handful of change-from-current items (few problems to clear), and conservative investor relations (management confirms guidance is conservative).</div><div class="lead-prose">Is the case a focused bet on a small number of drivers, or a diffuse bet on many?</div><div class="lead-prose">Does the case have a narrow enough perimeter — few geographies, few business units — to be tractable?</div><div class="lead-prose">Are there zero value-chain headwind risks to revenue — or is there a live battery of them?</div><div class="lead-prose">Are there only a handful of change-from-current items or problems to clear — or a long list?</div><div class="lead-prose">Does the company confirm its guidance is conservative — or has its investor-relations posture turned vague and defensive?</div></div>
+<p><strong>E7 element rating: [D+] — Elekta fails the case-simplicity test on the two guardrails that matter most. It is not a focused bet: the case requires four interdependent drivers to execute roughly in parallel, and the failure of any one cascades into the others. And it does not have zero headwinds: there is a live battery of value-chain headwind risks to revenue. The perimeter is moderately wide, the change-from-current item count is high, and management's investor-relations posture has turned deliberately vague. This is a valid case, but it is a structurally <em>complex</em> one, and that complexity is a genuine mark against it that position sizing would have to respect.</strong></p>
+<p><strong><span class="g gD">D</span> E7 — RA1: Focused bet? — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The case is not focused. The Triaging-stage research consistently frames Elekta as a multi-variable recovery: the Key Drivers research identifies five-to-seven share-price drivers, and the central four are EBIT-margin expansion (the cost programme plus mix), order-intake stabilisation and order-book credibility, US recovery via Evo, and China normalisation — with software mix and free-cash-flow conversion as further drivers behind those.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The drivers are interdependent, which is the deeper problem. Margin expansion needs a stable revenue base; the revenue base needs Evo working in the US and China converting cleanly; order-book credibility underpins the visibility on all of it. The Key Drivers research is explicit that "failure of any single driver" has cascading consequences and that "failure of any two drivers" takes the case down materially. Interdependence multiplies complexity.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">A focused bet, in Richard's framework, has one or two fulcrum drivers and a small number of key drivers. Elekta has, on the research's own framing, three fulcrum drivers (margin execution, US recovery, China stabilisation) plus a fourth gating condition (order-book quality). That is roughly double the count a "focused bet" guardrail would tolerate.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The bull counter is that the drivers, while many, all point in the same direction and are all part of one coherent "operational turnaround" story — so it is arguably one bet expressed four ways rather than four separate bets. There is something to this. But the guardrail is about <em>predictability and monitorability</em>, and four interdependent levers are harder to predict and monitor than one, regardless of whether they share a narrative.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The honest framing: this is the kind of case where the thesis sentence has to name three mechanisms and three disconfirming conditions — and a thesis sentence that needs three "buts" is, definitionally, not a focused bet.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 — RA1-CQ1: Two or fewer fulcrum drivers AND four or fewer key drivers? (six-bullet floor)</strong> — No, the case fails this Core Question. There are roughly three fulcrum drivers plus a gating condition, and the full key-driver count from the research is five-to-seven. The case is over the simplicity threshold on both halves of the test. Rated <span class="g gD">D</span> — not <span class="g gF">F</span>, because the drivers are at least clearly <em>identified</em> and individually monitorable (the research lays out specific monitoring metrics for each), so the complexity is mapped rather than hidden. But a mapped four-driver interdependent case is still a complex case, and RA1 is a. <span class="g gD">D</span></div></div>
+<p><strong><span class="g gC">C</span> E7 — RA2: Narrow perimeter? — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The geographic perimeter is moderately wide but not extreme: three major regions (EMEA at roughly 35-<strong>40%</strong>, APAC at roughly 34-<strong>35%</strong> anchored on China, Americas at roughly 26-<strong>31%</strong> anchored on the US). Three regions, each with distinct dynamics (EMEA tender-driven and currently strongest, APAC China-recovery-driven, Americas Evo-recovery-driven), is a manageable but real spread.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The business-unit perimeter is moderately wide: linear accelerators (the core, split across Versa HD and Evo), Unity MRI-linac, Gamma Knife radiosurgery, brachytherapy, and the Elekta ONE software suite. Five product lines, of which the linac line itself has a legacy-platform and a new-platform sub-story. This is more than a single-product company but well short of a sprawling conglomerate.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The perimeter passes the literal guardrail test — the Triaging procedure's Core Question asks for ten or fewer geographies and/or business units, and Elekta has roughly three regions and five product lines, comfortably inside that count.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">But the perimeter is wider in <em>effective</em> complexity than the raw count suggests, because the case requires three of the regions to do different things at once (EMEA hold, US recover, China normalise) — so the geographic perimeter interacts with the focused-bet failure in RA1.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">The mitigation is that the product perimeter is genuinely coherent: every product line is a radiation-oncology system or its software, sold to the same customer (hospitals and cancer centres) through the same channel. There is no unrelated diversification, no off-strategy business unit. The perimeter is wide-ish but it is all one industry.</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E7 — RA2-CQ1: Ten or fewer geographies and/or business units? (six-bullet floor)</strong> — Yes, the case passes this Core Question on the literal count: roughly three regions plus five product lines is inside the ten threshold, and the perimeter is industry-coherent with no off-strategy units. Rated <span class="g gC">C</span> — it passes, but only to the middle, because the effective complexity (three regions each needing a different outcome) is higher than the raw count implies. RA2 is a genuine pass-to-the-middle, not a strength.</div></div>
+<p><strong><span class="g gD">D</span> E7 — RA3: Zero headwinds? — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">There is a live battery of value-chain headwind risks to revenue, so the case fails this guardrail. The guardrail asks for <em>zero</em> — and Elekta has several concurrent ones.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The competitive headwind is the most material: Varian/Siemens out-growing Elekta roughly <strong>10%</strong> to <strong>3%</strong> organically over three years, roughly 10 points of share captured since 2021, a bundling advantage Elekta cannot match, and a new Varian platform due roughly September/October 2026 that the research explicitly flags as a headwind to Elekta's US recovery window. UIH is a second competitive headwind, taking Chinese share aggressively.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The order-book headwind is real and recent: two write-downs in six months (SEK 4.9bn then SEK 2.2bn) is direct evidence that the revenue pipeline had quality problems, and the Key Drivers research assigns a meaningful probability to a further write-down. A revenue pipeline that has needed two corrections is a headwind risk by definition.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The foreign-exchange headwind is a structural revenue-line drag: SEK 548M stripped from Q3 FY2025/26 reported net sales, a 12-point reported-versus-constant-currency wedge. It is a translation effect rather than a demand effect, but it is a real headwind to the reported revenue line that the recovery has to fight through.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The US-tariff headwind hits the revenue-to-margin bridge directly — 100 basis points of gross margin in Q3 FY2025/26 — and the research notes it is rising with the US sales mix.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The one genuine mitigant: the headwinds are predominantly <em>external and identifiable</em> rather than hidden, and the end market itself is growing — so this is not "zero headwinds" but it is also not "the value chain is collapsing." The headwinds are mapped, which makes them monitorable.</div></div>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>E7 — RA3-CQ1: Zero value-chain headwind risks to revenue? (six-bullet floor)</strong> — No, the case clearly fails this Core Question. There is a concurrent set — competitive (Varian bundling and the autumn 2026 platform, UIH in China), order-book quality, foreign exchange, and tariffs. Rated <span class="g gD">D</span> — not <span class="g gF">F</span>, because the headwinds are identifiable and the end market is growing, so they are risks to <em>manage</em> rather than evidence of terminal decline. But "zero headwinds" is the test, and Elekta is a long way from zero. RA3 is a. <span class="g gD">D</span></div></div>
+<p><strong>[C-] E7 — RA4: Handful of change-from-current items? — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The change-from-current list is longer than a "handful." To get to the thesis case, Elekta needs to: deliver the SEK 500M cost programme to run-rate, convert Evo into US revenue, convert China orders into clean revenue, stop writing the order book down, fight through the FX drag, absorb the R&amp;D-amortisation headwind, and shift the software mix. That is roughly seven distinct items to clear.</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Several of the items are problems-to-fix rather than opportunities-to-capture, which is the more demanding kind of change-from-current: the order-book quality problem, the US share-loss problem (share down from above <strong>20%</strong> to below <strong>15%</strong>), the margin-under-delivery problem, the legacy-software problem. Fixing problems is harder to predict than capturing opportunities.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">The items are also sequential and interdependent — the cost programme has to hold while the revenue recovery is still uncertain; the order book has to stabilise before revenue visibility improves — which means they cannot all be worked in parallel and the change-from-current has a critical path.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The mitigating point: the largest single change-from-current item, the cost programme, is the one most under management's own control and is already roughly <strong>80%</strong> executed on the headcount action. So the highest-weight item is also the most de-risked — the change-from-current list is long but front-loaded with its most controllable piece.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">A second mitigant: none of the change-from-current items is existential. There is no balance-sheet rescue needed, no going-concern question, no fraud to unwind. The list is long but it is a list of operational improvements, not survival actions.</div></div>
+<div class="finding cq-level"><span class="fnum">25.</span><div class="ftext"><strong>E7 — RA4-CQ1: Two or fewer change-from-current items or problems? (six-bullet floor)</strong> — No, the case fails this Core Question on the count: roughly seven change-from-current items, several of them problems-to-fix rather than opportunities-to-capture, on a sequential critical path. Rated [C-] — it fails the count, but it rates above a <span class="g gD">D</span> because the highest-weight item (the cost programme) is the most controllable and most de-risked, and because none of the items is existential. RA4 is a fail-but-not-badly.</div></div>
+<p><strong>[D+] E7 — RA5: Conservative investor relations? — summary (six-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">The investor-relations posture has turned deliberately vague, which is the opposite of the conservative-and-specific posture this guardrail wants to see. The Earnings Trends research is explicit that Elekta's guidance language "has become increasingly vague" — FY2025/26 guidance is "net sales expected to grow year-over-year" with no growth rate, and margin guidance is "expected to expand" with no number.</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">The research reads this vagueness as a low-confidence signal: "management is de-committing from specific targets, suggesting confidence is low and guidance risk is high." A management team confident in its numbers usually gives numbers.</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">The medium-term <strong>14%</strong>-plus EBIT-margin target is reiterated, but it is a "beyond the current fiscal year" target with no committed bridge — and the Capital Markets Day on 17 June 2026 is being set up by the sell-side as the event where management is <em>expected</em> to finally provide that bridge. Needing a Capital Markets Day to make the target concrete is itself a sign the target is not yet conservatively underpinned.</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Against that, there is a genuine positive: the cost programme <em>was</em> conservatively guided and over-delivered — the prior programme delivered SEK 279M against a SEK 250M target. So on the one piece of guidance that is specific and recent, the company was conservative and beat. That is real and it should be credited.</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">And the order-book write-downs, while damaging to the delivery record, can be read as a <em>move toward</em> conservatism — management applying "firmer interpretation of order criteria" is, prospectively, a more conservative posture even if it is an admission about the past.</div></div>
+<div class="finding cq-level"><span class="fnum">31.</span><div class="ftext"><strong>E7 — RA5-CQ1: Company confirms guidance is conservative? (six-bullet floor)</strong> — Partially, and weakly. The company does not currently <em>confirm</em> conservative guidance — it has gone vague on the headline numbers, which the research reads as low confidence. But the one specific, recent piece of guidance (the cost programme) was conservative and beaten, and the order-book clean-up is a move toward prospective conservatism. Rated [D+] — the headline posture is vague-and-defensive, which fails the guardrail, but the cost-programme track record and the order-book clean-up keep it off the floor. RA5 is a [D+].</div></div>
+<p><strong>E7 element rating: [D+]</strong> — Elekta fails the case-simplicity test. It is not a focused bet (RA1, <span class="g gD">D</span>): four interdependent drivers on a critical path. It does not have zero headwinds (RA3, <span class="g gD">D</span>): a live battery of competitive, order-book, FX and tariff headwinds. The change-from-current list is long (RA4, [C-]), and the investor-relations posture has turned vague (RA5, [D+]). Only the perimeter (RA2, <span class="g gC">C</span>) is a genuine pass, and only to the middle. The x2 double-weight has been applied: E7 has been analysed at full depth across all five guardrails, and the honest finding is that this is a structurally complex case. That does not disqualify it — complex cases can still be good investments — but it means the case must be sized conservatively and monitored tightly, and E7 is one of the two lowest-rated Elements in this memo for a real reason, not a presentational one.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-with-acceptable-case-setups-triaging-three-bullet-car" data-spy><span class="id">E8</span> Fit with acceptable case setups <span class="secn">24 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E8 assesses Elekta's fit against each of the six acceptable investment-case setups and the two negative guardrails. At Triaging, each setup gets a three-bullet-minimum carve-out summary; the one or two setups identified here as the best fit will be the ones deepened at Early-Stage Assessment, while the others carry forward at three-bullet depth. The setup names below are Richard's framework setups; the analytical task is to test, honestly, which patterns Elekta actually fits.</div></div>
+<p><strong>E8 element rating: <span class="g gC">C</span> — Elekta's best fit is a "transformation play / operational recovery in a structurally solid business" pattern, rated at the middle of the scale because the transformation structure is genuinely present (defined plan, credible-on-paper CEO, verifiable milestones) but the "quality business" precondition is only partially met and the recovery is one quarter into being evidenced. The negative guardrails are the more important E8 finding at Triaging: there is no unacceptable setup (no fraud, no terminal decline), but there is a real "false friend" caution — multiple features of the case look like recovery confirmation but are 12-18 months ahead of genuine delivery, and that caution is the single most important risk-management flag E8 produces.</strong></p>
+<p><strong>RA1 — Setup 1 fit: Mis-modelled, high-quality EPS upgrader (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Elekta is not a clean fit for the mis-modelled high-quality EPS upgrader. That setup requires a genuinely high-quality business whose earnings power the market has simply mis-modelled — and Elekta's issue is not that the market has mis-modelled a high-quality business, it is that the business has under-delivered for three years and the market has reasonably priced that.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">There is a <em>partial</em> mis-modelling angle, fairly stated: the research reports note that consensus FY2025/26 EPS of roughly SEK 3.23 sits well below a normalised level, and that the R&amp;D-amortisation drag is depressing reported earnings in a way some consensus models may not fully separate from underlying performance. So there is a "reported earnings understate cash earnings" sub-argument.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">But that is an earnings-<em>quality</em> nuance, not a "high-quality business mis-modelled" setup. Rated <span class="g gD">D</span> for RA1 — the high-quality precondition is not met (three years of margin under-delivery, a structural FX drag, a software platform that had to be impaired), so even though there is a minor mis-modelling angle on reported-versus-cash EBIT, this is not the setup that fits.</div></div>
+<p><strong>RA2 — Setup 2 fit: Big demand-change-driven EPS upgrade or earnings-power transformation (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Elekta is a weak fit for the big-demand-change setup. That setup requires a large, identifiable <em>demand</em> inflection driving the earnings change — and Elekta's demand line is, at Triaging, roughly flat: FY2024/25 organic revenue was -<strong>0.6%</strong>, and consensus FY2025/26 growth is only low-single-digit.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">There are demand-recovery <em>components</em> — China returning to growth, the US installed-base replacement pool unlocked by Evo clearance, EMEA tender strength — but these are <em>recoveries toward normal</em>, not a step-change in the demand level. A big-demand-change setup looks like a new structural demand wave; Elekta looks like a cyclical normalisation.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">The earnings change in the Elekta case is driven primarily by <em>cost and margin</em> action, not by a demand surge. Rated <span class="g gD">D</span> for RA2 — the demand-change setup does not fit, because the earnings story is a margin story sitting on a roughly flat revenue line, not a demand-inflection story. The five demand-related Core Questions under this setup (the scale, durability, visibility, breadth and pricing of the demand change) would each resolve weak; the setup is noted as not-fit and carried forward.</div></div>
+<p><strong>RA3 — Setup 3 fit: Strong corporate-change-driven EPS upgrade or earnings-power transformation (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">This is one of the two best-fitting setups for Elekta. The corporate-change-driven setup requires a defined change programme, a credible operator, a realistic timeline, and verifiable milestones — and Elekta has the structure of all four: the four "Must-Win Battles" and the SEK 500M cost programme (defined plan), Jakob Just-Bomholt (the operator), a roughly two-year path to the <strong>14%</strong>-plus margin (the timeline), and concrete milestones (headcount action, FDA clearance, cost run-rate dates) that are verifiable.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The corporate change is genuinely the <em>engine</em> of the earnings story here — the EBIT-margin bridge from <strong>11.6%</strong> toward <strong>14%</strong> is driven by the cost programme, the operating-model redesign, and the mix shift, all of which are corporate-change actions. This matches the setup's core logic: the earnings change is largely within management control, which makes it more forecastable than a demand-driven change.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The qualification — and it is the reason this is a [C+] fit rather than an <span class="g gA">A</span> fit — is the operator. The setup's strength depends heavily on the operator being genuinely credible, and Just-Bomholt is roughly eight months into the seat with a relevant-but-not-identical prior record (3Shape, a software/dental scale-up; prior Getinge association) and zero direct radiation-oncology experience. The Wisdom Library "operator validation horizon" model says the operator-quality verdict cannot be reliably reached before 12-18 months. Rated [C+] for RA3 — the corporate-change <em>structure</em> is a strong fit, but the operator leg is unproven, so the setup fits well as a pattern but not yet at high conviction. This is the primary fit setup.</div></div>
+<p><strong>RA4 — Setup 4 fit: Change-from-current clearing in a high-quality compounder (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Elekta is a partial fit for the change-from-current-clearing-in-a-compounder setup. That setup requires a high-quality compounder that has a specific change-from-current item to clear, after which the compounding resumes — and Elekta has a real change-from-current list to clear (the cost programme, the order-book quality, the US share loss).</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">But the "high-quality compounder" precondition is the weak leg, the same weakness as RA1. Elekta <em>was</em> closer to a quality compounder pre-2019 (low-to-mid-teens EBIT margins, mid-40s gross margins, stronger FCF), but the last five years have been a margin and delivery deterioration, not a temporary disruption to a compounding base. The compounding history is not in the recent record.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">There is a genuine forward argument that the <em>post</em>-recovery Elekta could resemble a compounder — software mix at ~<strong>80%</strong> gross margin growing faster than hardware, a recovered cost base, a service annuity. But that is the bull case for what Elekta <em>becomes</em>, not a description of what it <em>is</em>. Rated [D+] for RA4 — the change-from-current is real but the compounder precondition is not met in the recent record, so this setup fits only as a forward aspiration, not a present pattern. Carried forward at three-bullet depth.</div></div>
+<p><strong>RA5 — Setup 5 fit: Huge change-from-current clearing event in a solid-quality business (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Elekta is a moderate fit for this setup, and it is the closest of the "change-from-current clearing" family. The setup requires a solid-quality (not necessarily top-quality) business with a large, identifiable change-from-current event to clear — and Elekta's profile is genuinely "solid quality" (a real number-two duopoly position, niche monopolies, a durable installed base and service annuity) with a large change-from-current to clear (the operational reset).</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The "solid quality" framing is more honest for Elekta than the "high quality" framing of RA1 and RA4. Elekta is not a top-decile quality business — but it is a structurally solid one: it is not going away, it has defensible niches, and its problems are operational-execution problems rather than structural-demand or balance-sheet problems.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The change-from-current "event" is arguably more of a "programme" than a single event — the operational reset is a multi-quarter sequence, not one binary catalyst — which makes the fit moderate rather than clean. Rated <span class="g gC">C</span> for RA5 — a genuine moderate fit: the "solid quality plus large change-from-current" shape is right, but the change-from-current is a programme rather than a single clearing event. This is the secondary fit setup, behind RA3.</div></div>
+<p><strong>RA6 — Setup 6 fit: Trough-on-trough turn in a solid-quality cyclical (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">Elekta is a partial fit for the trough-on-trough cyclical turn. The setup requires a solid-quality cyclical business turning up from a genuine trough — and parts of Elekta's business are cyclical (the capital-equipment line) and parts are arguably at or near a trough (China after the anti-corruption disruption, the US after the pre-Evo-clearance air-pocket, the margin after three years of decline).</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The trough evidence is genuinely early, though. The research describes "first evidence" of a trough — one strong order quarter (Q3 FY2025/26's SEK 5,418M beat), China's first positive quarter in two years, Q3 gross margin at <strong>38.3%</strong> — but "first evidence" at one quarter is not a confirmed trough. A trough-on-trough turn setup is most reliable once the <em>second</em> up-quarter confirms the first.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The fit is also blurred because Elekta is only <em>partly</em> a cyclical — roughly 42-<strong>43%</strong> of revenue is the non-cyclical service annuity. A pure trough-on-trough cyclical turn applies to a more wholly-cyclical business. Rated [C-] for RA6 — there is a real "turning from a trough" component, but the trough is only one quarter evidenced and the business is only half-cyclical, so this fits as a contributing pattern rather than the primary one. Carried forward at three-bullet depth.</div></div>
+<p><strong>RA7 — Negative guardrail: Is there an unacceptable setup present (fraud, governance failure, terminal structural decline)? (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">No unacceptable setup is present. There are no fraud allegations, no activist short reports, and the auditors have issued clean opinions; the order-book write-downs are material but they were <em>disclosed by management</em> as a deliberate clean-up, which is the opposite of concealment.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The governance structure has a real feature worth noting — the Leksell family controls roughly <strong>30%</strong> of votes from a low-single-digit economic stake via the dual-class structure, and Laurent Leksell chairs the board — but this is a permanent, disclosed, widely-understood discount feature of the stock, not a governance <em>failure</em>. It is a "price it in" issue, not a "walk away" issue.</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Terminal structural decline is not present: the global radiation-oncology market is growing, radiation therapy is not being disrupted as a treatment modality, and Elekta's niche monopolies (Gamma Knife, brachytherapy, high-field MRI-linac) are not under near-term structural threat. The competitive pressures (Varian's scale, UIH's aggression) are real five-to-ten-year share-erosion risks, not a twelve-to-twenty-four-month terminal-decline risk. <strong>RA7 negative guardrail: CLEAR — no unacceptable setup present.</strong></div></div>
+<p><strong>RA8 — Negative guardrail: Is there a false-friend setup present (apparent recovery that masks structural deterioration)? (three-bullet minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">This is the more important E8 finding, and the honest answer is: yes, there is a real false-friend caution, and it should be the single most prominent risk flag E8 produces. The Wisdom Library "false friends" model defines the danger as a setup where the transmission mechanism from company action to EPS is unclear — and several features of the Elekta case have exactly that "looks like recovery, but is it really converting?" quality.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The specific false-friend features the research surfaces: (1) the Q4 FY2024/25 adjusted EBIT margin of <strong>16.3%</strong> looks like margin recovery confirmed, but it was a single quarter, cost-action-driven, and the <em>full-year</em> margin actually declined; (2) the order-book write-downs are framed as "quality improvement," but two write-downs in six months can equally be read as demand destruction being relabelled as housekeeping; (3) the post-ViewRay "monopoly in high-field MRI-linac" narrative sounds powerful but obscures how small the MRI-linac total addressable market actually is; (4) service-revenue resilience looks like stability but is a <em>lagging</em> indicator — it stays stable for years even while the hardware installed base that feeds it is being eroded.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">The false friends do not <em>disqualify</em> the case — they are not evidence the case is fake. What they do is define the monitoring discipline and the sizing discipline: if Elekta is bought on a narrative of "recovery confirmed," the buyer may be 12-18 months ahead of the genuine delivery, and the protection against that is to gate the case on the actual Q4 FY2025/26 and subsequent prints rather than on the narrative. <strong>RA8 negative guardrail: CAUTION — multiple false-friend features are present and active. This is the most important risk-management flag in E8 and it carries directly into the Section E recommendation.</strong></div></div>
+<p><strong>E8 overall assessment.</strong> The two best-fitting setups, to be deepened at Early-Stage Assessment, are: <strong>primary — RA3, the strong-corporate-change-driven setup [C+]</strong> (the corporate-change structure is genuinely present and is the engine of the earnings story; the operator leg is the unproven part); and <strong>secondary — RA5, the huge-change-from-current clearing in a solid-quality business <span class="g gC">C</span></strong> (the "solid quality plus large change-from-current" shape is the most honest description of what Elekta actually is). RA6, the trough-on-trough cyclical turn [C-], is a contributing pattern carried forward. RA1, RA2 and RA4 are not-fit and carry forward at three-bullet depth. The negative guardrails are the more consequential finding: RA7 is CLEAR (no fraud, no terminal decline), but RA8 is a genuine CAUTION — the false-friend features are real and they are the reason the Section E recommendation is conditional rather than clean.</p>
+<p><strong>E8 element rating: <span class="g gC">C</span></strong> — the best-fitting setup (strong corporate change) is a [C+] fit and the secondary (large change-from-current in a solid-quality business) is a <span class="g gC">C</span>; the negative guardrails produce a CLEAR on unacceptable setups but a CAUTION on false friends. Blended, E8 is a: <span class="g gC">C</span> Elekta genuinely fits a recognised, acceptable setup pattern — that is real and it earns the middle of the scale — but it fits at moderate conviction, not high, and it comes with an active false-friend caution that the rest of the memo has to respect.</p>
+<p><strong>Group 2 rating: [D+]</strong> — first pass, light. The two in-scope Elements pull in slightly different directions: E7 case simplicity is a [D+] (a structurally complex, four-driver, headwind-laden case), and E8 setup fit is a <span class="g gC">C</span> (a genuine moderate fit to the corporate-change setup, with a false-friend caution). The Group is "Case simplicity," and the dominant finding of the Group is E7's — this is not a simple case. Weighting E7 (the simplicity guardrails themselves) slightly above E8 (which is a fit-assessment rather than a simplicity test), Group 2 resolves to [D+]: the case is valid and fits a real setup, but it is complex, and complexity is the Group-level verdict.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-first-pass-light" data-spy><span class="id">Grp 3</span> Core philosophy <span class="secn">26 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 3 covers great operator (E9), advantaged business and widening competitive advantage (E10), value-chain dynamics (E11), supportive industry structure (E12) and high secular growth potential (E13). At Triaging, only E11 is in analytical scope — and at Triaging E11 is a second pass (it was first written, lightly, at the Filtering Out stage), carried at a four-bullet floor. E9, E10, E12 and E13 are not in scope at Triaging and are first written at Early-Stage Assessment.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-value-chain-dynamics-triaging-second-pass-four-bullet-fl" data-spy><span class="id">E11</span> Value-chain dynamics <span class="g gC">C</span> <span class="secn">26 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E11 tests whether Elekta sits in a structurally advantaged or disadvantaged position within its value chain — relative to suppliers, customers, competitors, disruption forces, and the political/regulatory environment. The four-bullet floor applies per Required Attribute and per Core Question; no multiplier.</div></div>
+<p><strong>E11 element rating: [C-] — Elekta occupies a defensible-but-squeezed position in the value chain. It has genuine structural advantages — high switching costs in the installed software layer, a hard-to-replicate service network, real supplier-side progress through dual-sourcing — but it is squeezed from above by a structurally larger, bundling competitor and by budget-constrained hospital customers, and from below by an aggressive Chinese commodity competitor. The single most damaging finding is competitive: the Varian/Siemens bundle moat is a structural disadvantage that compounds at one-to-two points of share per year, and the Wisdom Library "bundle moats in fragmented med-tech" model is directly on point.</strong></p>
+<p><strong>[C+] E11 — RA1: Demand side — strong or fragile? (four-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The demand side is structurally durable but cyclically fragile, which nets to a genuine middle. The structural durability is real: radiation therapy is standard of care in roughly half of cancer cases, cancer incidence rises with demographics regardless of the cycle, and the end market grows at a high-single-digit rate. The end demand is not in question.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The cyclical fragility is equally real: roughly 57-<strong>58%</strong> of revenue is hospital capital-equipment spending, which is deferrable, budget-cycle-dependent, and was the mechanism behind the multi-year order-book write-downs. Hospitals can and do push linac replacement cycles out when budgets tighten.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The customer base is concentrated and sophisticated — large hospital systems and academic centres running multi-year procurement processes — which gives customers real negotiating power and the ability to defer. This is a "strong customer, patient buyer" dynamic that limits Elekta's demand-side control.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 — RA1-CQ1: Is demand growing and durable? (four-bullet floor)</strong> — Yes on durability and growth at the <em>end-demand</em> level (cancer incidence, radiation-therapy penetration, high-single-digit market growth), but with a real cyclical-timing overlay at the <em>equipment-order</em> level. Rated [C+] — durable underlying demand, cyclical order timing.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 — RA1-CQ2: Is demand concentrated or diversified? (four-bullet floor)</strong> — Diversified geographically (three roughly comparable regions) but concentrated by <em>customer type</em> (large hospital systems and academic centres) and by <em>modality</em> (radiation oncology only — no diversification into adjacent treatment modalities). Net: moderately diversified, rated. <span class="g gC">C</span> RA1 overall is a [C+].</div></div>
+<p><strong><span class="g gC">C</span> E11 — RA2: Competitive supportiveness or aggression? (four-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">This is the most damaging Required Attribute in E11. The competitive environment is aggressive, not supportive, and it is getting more so. Varian/Siemens out-grew Elekta roughly <strong>10%</strong> to <strong>3%</strong> organically over three years and is reported to have captured roughly 10 points of share since the 2021 acquisition.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The structural problem is the bundle moat. The Wisdom Library "bundle moats in fragmented med-tech" model — itself derived partly from prior Elekta work — describes exactly this: in a two-to-three-player med-tech sub-sector, the player with multi-product bundling capability (Varian = linac plus diagnostic imaging plus the ARIA oncology information system, all inside the Siemens Healthineers franchise) progressively wins share against the point-product specialist, <em>regardless of point-product quality</em>, at one-to-two points per year. Elekta's Evo can be technically competitive and still lose the tender, because Evo competes at the point-product level while the Varian equivalent plugs into the Siemens imaging-and-informatics bundle.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The second competitive aggressor is UIH in China — taking share in lower-tier hospital segments on price, spending over <strong>20%</strong> of revenue on R&amp;D, and explicitly targeting overseas expansion. Elekta's defence (the "local-for-local" model) is holding its Chinese share in the high-30s for now, but the competitive pressure is structural.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E11 — RA2-CQ1: Is the competitive structure concentrated or fragmented? (four-bullet floor)</strong> — Concentrated (a duopoly controlling roughly <strong>90%</strong> of new linac installations), which would normally be supportive — but the concentration is <em>asymmetric</em>: the larger player is structurally advantaged by the bundle. Rated. <span class="g gC">C</span></div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E11 — RA2-CQ2: Are competitors behaving rationally or aggressively? (four-bullet floor)</strong> — Aggressively. Varian is bundling and out-growing; UIH is price-competing; a new Varian platform is due autumn 2026. Rated [D+].</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E11 — RA2-CQ3: Is Elekta's relative competitive position improving or deteriorating? (four-bullet floor)</strong> — Deteriorating on the multi-year trend (US share from above <strong>20%</strong> to below <strong>15%</strong>; three-year organic growth gap to Varian), with a possible <em>near-term</em> stabilisation from Evo. The trend is down; the inflection is unproven. Rated [D+].</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E11 — RA2-CQ4: Are there structural barriers protecting Elekta? (four-bullet floor)</strong> — Yes, real ones: massive capital requirements, long clinical-validation cycles, deeply embedded software ecosystems, and a large installed base. These barriers protect Elekta's <em>existence</em> and its niche monopolies — they just do not protect its <em>share</em> against a bundling competitor. Rated [C+].</div></div>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E11 — RA2-CQ5: Is pricing discipline holding? (four-bullet floor)</strong> — Yes, on the evidence: price increases have been a genuine, confirmed margin lever across recent quarters, and the Evo premium is holding. Pricing discipline is one of the more supportive competitive facts. Rated [C+]. RA2 overall is a <span class="g gC">C</span> — concentrated structure and real barriers and holding pricing, offset by an aggressive competitor set and a deteriorating share trend.</div></div>
+<p><strong>[D+] E11 — RA3: Disruption forces? (four-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The disruption picture is mixed-to-mildly-negative. The biggest structural disruption question is the long-term competitive one already covered — the bundle moat — which is less "disruption" than "structural competitive disadvantage." Beyond that, there are two genuine disruption vectors.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Proton therapy is a long-horizon modality-disruption risk: it grows faster than photon linac therapy (a low-double-digit versus low-single-digit rate in the research) and is clinically superior for certain indications. Elekta's proton presence is small and non-core. This is a five-to-ten-year structural risk, not a Triaging-horizon one, but it is real.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">AI is a disruption force that cuts both ways for Elekta — it enables adaptive radiotherapy (a positive, covered under E5) but it also compounds the competitor's software advantage (a negative, because Varian's larger software installed base means more training data). On balance the AI vector is a mild competitive negative on the software layer.</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>E11 — RA3-CQ1: Are there modality, technology or business-model disruption forces, and how exposed is Elekta? (four-bullet floor)</strong> — Yes — proton therapy (long-horizon modality risk, low exposure near-term but real long-term), AI (compounds the competitor's software edge), and the structural bundle dynamic. Elekta is moderately exposed; none of it is a Triaging-horizon case-killer, but the direction is negative. Rated [D+]. RA3 overall is a [D+].</div></div>
+<p><strong><span class="g gC">C</span> E11 — RA4: Political / regulatory? (four-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The political/regulatory picture is genuinely mixed. The most material recent regulatory event is <em>positive</em>: the FDA 510(k) clearance of Evo in January 2026, which unlocked the US installed-base replacement opportunity. Regulatory approval was a gating constraint and it has been cleared.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Against that, two political/regulatory headwinds: US tariffs (a live 100-basis-point gross-margin drag, rising with the US mix), and government healthcare-budget pressure in the EMEA region (chronic public-hospital capital constraints, plus the risk of defence spending displacing healthcare budgets).</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The Chinese regulatory environment is a third factor — the anti-corruption campaign that disrupted Chinese procurement is now normalising, which is a tailwind, but Chinese government procurement increasingly favours domestic brands, which is a structural headwind for a foreign vendor.</div></div>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext"><strong>E11 — RA4-CQ1: Is the regulatory environment supportive or hostile? (four-bullet floor)</strong> — Mixed. Supportive on product approval (Evo cleared), hostile on tariffs and EMEA budgets, double-edged in China. Rated. <span class="g gC">C</span></div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext"><strong>E11 — RA4-CQ2: Is reimbursement supportive? (four-bullet floor)</strong> — Broadly supportive — adaptive-radiotherapy reimbursement codes are established and hospitals can charge premium for advanced treatments, which underpins the premium-equipment purchase case. Rated [C+]. RA4 overall is a. <span class="g gC">C</span></div></div>
+<p><strong>[C+] E11 — RA5: Supportive supplier side? (four-bullet floor)</strong></p>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The supplier side is the most genuinely supportive part of E11, and it is improving. Elekta's bill of materials is roughly two-thirds sourced components, which is a real supplier-concentration exposure — but the "Continuous COGS Reduction" must-win battle is directly addressing it through dual-sourcing, lower-cost vendor alternatives, and long-term contracts, and roughly <strong>30%</strong> of the SEK 500M cost programme is COGS-related.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">The one genuine supplier-concentration risk worth flagging is the superconducting-magnet supply for the Unity MRI-linac — a specialised market with very few viable sources — which is structurally harder to dual-source than the standard linac chain. But Unity is a smaller part of the business.</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">The supplier side is therefore a moderate-and-improving picture: a real sourced-component dependency, being actively and quantifiably reduced, with one narrow concentration point (Unity magnets).</div></div>
+<div class="finding cq-level"><span class="fnum">26.</span><div class="ftext"><strong>E11 — RA5-CQ1: Is the supplier base supportive, and is supplier power rising or falling? (four-bullet floor)</strong> — Supportive and improving: supplier power over Elekta is moderate and <em>declining</em> as the dual-sourcing initiative executes, with the Unity-magnet concentration as the one exception. Rated [C+]. RA5 overall is a [C+] — the most supportive Required Attribute in E11.</div></div>
+<p><strong>E11 element rating: [C-]</strong> — Elekta's value-chain position is defensible but squeezed. The supplier side (RA5, [C+]) is genuinely supportive and improving; the demand side (RA1, [C+]) is durable underneath with cyclical timing on top; the regulatory picture (RA4, <span class="g gC">C</span>) is a real mixed bag with the Evo clearance as a recent positive. But the competitive Required Attribute (RA2, <span class="g gC">C</span>) and the disruption Required Attribute (RA3, [D+]) are where the structural problem sits: the Varian/Siemens bundle moat is a real, compounding, structural competitive disadvantage, and the multi-year share trend is down. Blending these — and weighting the competitive and disruption findings as the more case-relevant — E11 resolves to [C-]. Elekta is not in a <em>bad</em> value-chain position; it is in a defensible position that is being slowly squeezed, and the bundle-moat dynamic is the single most important structural fact the memo carries into Early-Stage Assessment.</p>
+<p><strong>Elements E9, E10, E12, E13:</strong> not in scope at Triaging. Each is first written at Early-Stage Assessment — E9 (great operator) and E10 (advantaged business and widening competitive advantage) will be the most consequential additions, given that the operator-quality verdict and the bundle-moat competitive-advantage question are both load-bearing for this specific case.</p>
+<p><strong>Group 3 rating: [C-]</strong> — first pass, light. The one in-scope Element (E11 Value-chain dynamics) is a [C-], and at light first-pass depth the Group inherits it: Elekta's core-philosophy position — its place in the value chain and the structural quality of its competitive setting — is defensible but squeezed, with the bundle-moat competitive disadvantage as the dominant finding. The Group rating is explicitly provisional: E9 and E10, written at Early-Stage Assessment, will materially shape the final Group 3 picture.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-first-pass-light-no-elements-in-scope" data-spy><span class="id">Grp 4</span> Case riskiness</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 4 covers the invalidating attributes (E15), strenuously-seek-to-avoid attributes (E16), capital-constraining attributes (E17), clear transmission mechanism (E18) and monitorable transmission mechanism (E19). None of these Elements is in scope at Triaging — the risk Elements are first rated at Deep Dive (E15, E16, E17) or first written at Early-Stage Assessment (E18, E19). The Triaging procedure calls for a short framing of Group 4 case riskiness at this stage, with broad observations only and no Element-level work.</div></div>
+<p><strong>Group 4 framing (broad observations only).</strong> On a broad first read, Elekta's case riskiness is elevated but not extreme. The genuine risk concentrations are visible already from the Triaging-scope research: a structural foreign-exchange drag that is not fully hedgeable, a backlog whose quality has needed two corrections in six months (with the research assigning a meaningful probability to a further write-down), a competitive setting with a structurally larger bundling rival and an autumn 2026 Varian platform launch, an unproven operator eight months into the seat, and a multi-driver interdependent case where the failure of any two drivers cascades. The Wisdom Library "binary trigger conjunction risk" model — also derived partly from prior Elekta work — flags the specific danger: the case-killer is not usually one trigger but the <em>conjunction</em> of two correlated triggers (for example, a further backlog write-down coinciding with the Varian platform launch undercutting the US recovery), and because both correlate to "European mid-cap med-tech under pressure," the conjunction probability is higher than an independence assumption would imply. None of this is rated at Triaging — the ten Invalidation thresholds live at Section D.II, which is not in scope until Early-Stage Assessment — but the broad observation is that case riskiness is a real, identifiable concern that the risk Elements will need to work hard at Deep Dive.</p>
+<p><strong>Group 4 rating: [D+]</strong> — first pass, light, with the explicit note that the risk Elements (E15, E16, E17) are first rated at Deep Dive and E18/E19 first written at Early-Stage Assessment. The [D+] reflects the broad observation that case riskiness is elevated — a structural FX drag, a twice-corrected backlog, an intensifying competitor set, an unproven operator, and a conjunction-risk profile — without yet doing the Element-level work that could either confirm or soften that read.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-not-in-scope-at-triaging" data-spy><span class="id">Grp 5</span> Case optionality</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 5 covers nice-to-have attributes (E20) and is not in scope at Triaging. It is first written at Early-Stage Assessment. No content and no rating at this stage.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Zero content at Triaging. Pillar III — the position-management playbook, the monitoring plan with the ten Invalidation thresholds, and the upstream and downstream key-driver tables — first appears at Early-Stage Assessment at light depth. There is no Section D analytical content in a Triaging memo by design; it is noted here only so the absence is explicit and intentional rather than an omission.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and recommendation <span class="secn">10 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The stage-gate decision is Richard's to make at the Friday weekly review meeting. The Investment Analyst recommends; Richard decides. This recommendation is offered as the Investment Analyst's calibrated view, with the conviction level and the conditionality stated honestly.</div></div>
+<p><strong>Triaging stage-gate recommendation</strong></p>
+<p><strong>Watson recommendation: CONDITIONAL PROGRESS to Early-Stage Assessment — conditional on the Q4 FY2025/26 full-year result (due 28 May 2026) clearing a defined three-part gate.</strong></p>
+<p><strong>The Triaging verdict, stated plainly</strong></p>
+<p>Elekta passes the Triaging qualitative test — "does the case have large amounts of positive change forces?" — but it passes it <em>narrowly</em>, and the pass is conditional. The change forces are genuinely present and unusually concrete for a Triaging-stage case: a decisive new CEO, a substantially-executed SEK 500M structural cost programme, a real new product cycle in the FDA-cleared Evo linac, and a China normalisation that is already showing in the order line. That is a real body of change, and it is why the recommendation is "progress" rather than "park."</p>
+<p>But the case has a genuine, load-bearing "but," and the memo has not skirted it. The base on which those change forces are landing is not yet robust: management has missed its own margin targets for roughly three consecutive fiscal years (E1 RA2-CQ3, rated <span class="g gD">D</span>); the order book has been written down twice in six months; there is a structural foreign-exchange drag and a mechanical R&amp;D-accounting headwind to fight through; the case is structurally complex, failing the case-simplicity guardrails on the two that matter most (E7, rated [D+]); the value-chain position is being slowly squeezed by a structurally larger bundling competitor (E11, rated [C-]); and case momentum — technical and sell-side earnings revisions — is currently against the case (Group 1, rated [D+]). Most importantly, the E8 false-friend guardrail produced an active CAUTION: several features of the case look like recovery confirmation but may be 12-18 months ahead of genuine delivery.</p>
+<p>The honest synthesis: this is a real case with a real "but." It is not a clean progress and it is not a park. It is a <em>conditional</em> progress, and the condition is the imminent Q4 FY2025/26 result — which is not a reason to delay the recommendation, but is a reason to gate the Early-Stage Assessment research spend on it.</p>
+<p><strong>Reasons to progress</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The change forces are real, concrete and partly quantified — the strongest single argument for the case (E1 RA1, rated [B-]).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The cost programme is substantially executed (over <strong>80%</strong> of the headcount action complete) and is the highest-weight, most-controllable, most-de-risked item on the change-from-current list.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The Evo FDA clearance is a specific, time-bounded, observable catalyst, and the early evidence (US order intake turning sharply positive post-clearance) is a genuine confirmation signal.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext">The valuation is moderate and undemanding on a cash-EBIT basis (E1 RA2-CQ5, rated [C+]) — a discount to confirmed-delivery medtech peers.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The case fits a recognised, acceptable setup pattern — strong corporate change in a solid-quality business (E8, rated <span class="g gC">C</span>) — so it is not an off-framework idea.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">No unacceptable setup is present: no fraud, no governance failure, no terminal structural decline (E8 RA7, CLEAR).</div></div>
+<p><strong>Reasons to gate the progression on Q4 FY2025/26</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The fundamental-delivery record is incongruent with the thesis — three years of margin under-delivery — and the new CEO breaking that pattern is, at Triaging, a hypothesis, not a demonstrated fact.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">The false-friend caution (E8 RA8) is active: the case can be bought on a recovery narrative that is ahead of the delivery, and the protection is to gate on the actual prints.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">The case is structurally complex (E7, [D+]) and the binary-trigger conjunction risk is real — a further backlog write-down coinciding with the autumn 2026 Varian platform launch is a correlated, case-destructive conjunction.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The Q4 FY2025/26 result on 28 May 2026 is an imminent, near-binary event that will either confirm the recovery narrative or reveal a further deterioration — making Early-Stage Assessment research either clearly warranted or clearly premature, and there is no analytical cost to waiting two weeks for it.</div></div>
+<p><strong>The Q4 FY2025/26 gate — three conditions</strong></p>
+<p>Before committing Early-Stage Assessment research budget, the Investment Analyst recommends the Q4 FY2025/26 full-year result (28 May 2026) be assessed against three conditions, all three required:</p>
+<p>1. <strong>No further order-book write-down</strong> — including any tacit re-provisioning for specific cohorts. A third write-down would confirm the order-book quality problem is structural rather than a completed clean-up. 2. <strong>Full-year adjusted EBIT margin holding the corridor</strong> — broadly in line with or above the roughly 11.6-<strong>11.9%</strong> recent run-rate, with no margin reversal. This is confirmation the cost programme is reaching the P&amp;L and not being fully absorbed by the headwind battery. 3. <strong>Americas / US order intake growth positive year-on-year</strong> — confirmation that the post-Evo-clearance order momentum is a genuine demand release and not a one-quarter pull-forward.</p>
+<p>A single failure means the case parks pending reassessment after Q1 FY2026/27. All three clearing means Early-Stage Assessment proceeds.</p>
+<p><strong>Actions from this Triaging memo</strong></p>
+<p><strong>Action 1 (Richard — immediate).</strong> At the Friday weekly review, decide the stage gate: accept the conditional-progress recommendation, or override to clean-progress or park. The Investment Analyst's recommendation is conditional progress.</p>
+<p><strong>Action 2 (Richard — 28 May 2026).</strong> Read the Q4 FY2025/26 full-year result against the three-part gate above. Green-light or park the Early-Stage Assessment research programme on the outcome.</p>
+<p><strong>Action 3 (Watson, contingent on the gate clearing).</strong> Author the Early-Stage Assessment A&amp;J memo. The cumulative-delta discipline applies: carry this Triaging analysis forward unchanged and add the Early-Stage Assessment deltas. The highest-priority new analytical work at Early-Stage Assessment, on the evidence of this memo, is: E9 great operator (the operator-quality verdict is load-bearing and is the unproven leg of the primary setup); E10 advantaged business and widening competitive advantage (the bundle-moat dynamic needs the full E10 treatment); E2 required case outputs and E3 valuation upside (to size the change-from-current properly); and the first Section D content, including the ten Invalidation thresholds, where the binary-trigger conjunction risk should be named explicitly.</p>
+<p><strong>Action 4 (Watson).</strong> Confirm the EKTA thematic score in the live Portfolio Impact Matrix is consistent with this memo's E5 finding. It is — this Triaging pass independently reached T1: C, T2: C, T3: C-, net neutral-to-mild-headwind, matching the existing score. No update required; no thematic escalation.</p>
+<p><strong>Action 5 (Watson).</strong> Note in <code>Files/EKTA/index.json</code> that this OPUS TEST 14-May Triaging memo exists, clearly tagged as a model-test artefact distinct from the 13-May Triaging memo, so the index does not confuse the two.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">8 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Section F is excluded from the memo word-count floor. It records sources, process notes, and the data discrepancies surfaced during the research read.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-wisdom-library-models-applied-at-triaging" data-spy><span class="id">F.1</span> Wisdom Library models applied at Triaging</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Model</th><th>Tier</th><th>Application in this memo</th></tr></thead><tbody><tr><td>Bundle moats in fragmented med-tech sub-sectors</td><td>Bronze</td><td>The structural spine of E11 RA2 and the Group 3 verdict. The model — itself derived partly from prior Elekta work — explains why Varian/Siemens progressively wins share regardless of Evo's point-product quality. The single most important structural fact carried into Early-Stage Assessment.</td></tr><tr><td>R&amp;D capitalisation policy unwinding</td><td>Silver</td><td>Underpins E1 RA2-CQ1 and the Section A note on reported-versus-cash EBIT. Elekta's shift from roughly 60% to 40% R&amp;D capitalisation is a mechanical 100-200bps reported-margin drag for two-to-three years that is real, non-cash, and a genuine earnings-quality improvement — three layers the memo keeps separate.</td></tr><tr><td>Corporate change EPSU/EPT — operator validation horizon</td><td>Bronze</td><td>The spine of the E8 RA3 qualification and E1 RA2-CQ3. Just-Bomholt is roughly eight months in seat; cost execution is visible at six months but the full operator-quality verdict needs 12-18 months. Caps the operator leg of the primary setup at moderate conviction.</td></tr><tr><td>Binary trigger conjunction risk</td><td>Bronze</td><td>The Group 4 framing. The case-killer is the conjunction of correlated triggers — a further backlog write-down coinciding with the autumn 2026 Varian platform launch — both correlating to "European mid-cap med-tech under pressure," so the conjunction probability exceeds the independence-implied product.</td></tr><tr><td>Transformation play (Q-Turn)</td><td>Silver</td><td>Tested in E8 RA3/RA4 — Elekta has the <em>structure</em> of a Q-Turn but the "quality company" precondition is only partially met, so it fits the corporate-change setup better than the pure Q-Turn pattern.</td></tr><tr><td>Massive corporate change plan</td><td>Gold</td><td>The four-question test (defined plan / credible CEO / realistic timeline / verifiable milestones) applied in E8 RA3 — Elekta has the structure of all four, with the operator the partial leg.</td></tr><tr><td>Turnarounds take longer than you think</td><td>Silver</td><td>Calibrates E7 RA4 and the Section E timeline — the ~30% base rate for successful turnarounds and the 2-3-year minimum duration argue for conservative sizing and 6-month milestone gating.</td></tr><tr><td>Operator quality (three dimensions)</td><td>Gold</td><td>Frames the operator assessment deferred to E9 at Early-Stage Assessment — right direction / right resources / right record, of which Just-Bomholt has direction and partial resources but an unproven record in this seat.</td></tr><tr><td>False friends</td><td>Gold</td><td>The spine of E8 RA8 — the defining characteristic is an unclear transmission mechanism from company action to EPS, and several Elekta features (the Q4 FY2024/25 16.3% margin, the order-book "quality" framing, the MRI-linac "monopoly," service-revenue resilience as a lagging indicator) have exactly that quality.</td></tr><tr><td>Peer and base-rate anchoring</td><td>Gold</td><td>The communication discipline applied throughout — every quantitative claim placed against a peer or base-rate comparison, and the A-F ratings applied on a relative bell-curve basis rather than absolute thresholds.</td></tr><tr><td>Fragility assessment</td><td>Gold</td><td>Informs the Group 4 framing — revenue fragility (cyclical equipment line, twice-corrected backlog), margin fragility (FX, tariffs, R&amp;D-amortisation drag), financial fragility (the leverage-figure discrepancy), market-structure fragility (negative sell-side skew).</td></tr></tbody></table>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-research-sources-used-at-triaging" data-spy><span class="id">F.2</span> Research sources used at Triaging <span class="secn">5 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>IG stage:</strong> Q1 Business Description [AS]; Q2 Change Forces <span class="g gC">C</span> and [AS].</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Triaging stage:</strong> Q4 Earnings Trends / Peer Comparative <span class="g gC">C</span> and [AS]; Q5 Earnings Delivery <span class="g gC">C</span> and [AS]; Q6 Sell-Side Commentary [AS]; Q7 Key Drivers Assessment <span class="g gC">C</span> and [AS].</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Active thematics:</strong> <code>memory/thematics/active.md</code> (effective Q2 2026; three thematics; existing EKTA Portfolio Impact Matrix score).</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Forward-stage research (on disk, NOT cited substantively — out of Triaging scope):</strong> Early-Stage Assessment Q8-Q13, Deep Dive Q15-Q19, the Deep Dive IAJA synthesis. These were noted as present but were deliberately not used as analytical inputs, to keep this a genuine first-pass Triaging memo.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Self-initiated research (Investment Analyst, per the Execution Discipline SOP §3):</strong> none. The Triaging-scope research base was complete and no analytical gap arose that required closing with a follow-up query. This is recorded honestly: zero self-initiated queries was the expected outcome stated in the back-brief, and it held.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-data-discrepancies-surfaced-during-the-research-read-fla" data-spy><span class="id">F.3</span> Data discrepancies surfaced during the research read (flagged, not silently resolved)</div>
+<p>The Triaging-scope research reports were authored across a roughly two-month window and the underlying figures firmed up materially over that period. The memo has used the most current source in each case and flags the discrepancies here rather than silently picking a number:</p>
+<p>1. <strong>Revenue and write-down figures.</strong> The IG Change Forces <span class="g gC">C</span> report (the earliest) uses an older data vintage — roughly SEK 16.3bn revenue, a SEK 4.9bn single order-cancellation figure, and a "US Medicare reimbursement cut" framing. The later Triaging Earnings Delivery <span class="g gC">C</span> and the [AS] reports use the firmer FY2024/25 figures: SEK 18,016M revenue, and a cumulative roughly SEK 7.1bn of write-downs across two tranches (SEK 4.9bn in Q1 FY2025/26 plus SEK 2.2bn in Q2 FY2025/26). The memo uses the later, firmer figures throughout. 2. <strong>CEO identity.</strong> The Triaging Key Drivers <span class="g gC">C</span> report contains a stale passage identifying Gustaf Salford as the current CEO and references a roughly SEK 250-270 share price. The IG Business Description [AS] and the other Triaging reports correctly identify Jakob Just-Bomholt (in seat September 2025) and a B-share price near SEK 57. The memo uses the corrected facts — Just-Bomholt as CEO, B-share near SEK 57. 3. <strong>Leverage.</strong> The Triaging Earnings Trends <span class="g gC">C</span> report puts net debt / adjusted EBITDA at roughly <strong>3.0x</strong> on the FY2024/25 basis; other sources and the broader research imply a figure nearer 1.3-<strong>1.5x</strong>. The memo flags both and does not resolve the discrepancy — leverage is a genuine open data point that the Early-Stage Assessment research should pin down, because it materially affects the fragility assessment and the dividend-sustainability question. 4. <strong>"Medicare cut" framing.</strong> The earliest <span class="g gC">C</span> report frames a US demand headwind around a "Medicare advanced-radiotherapy reimbursement cut." The later and [AS] reports do not carry this framing forward with the same prominence; the dominant US-demand narrative in the firmer research is the pre-Evo-clearance customer wait, now resolving. The memo uses the later framing and treats the Medicare-cut point as an unconfirmed earlier-vintage claim.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-4-process-notes" data-spy><span class="id">F.4</span> Process notes <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">[W] Watson — Investment Analyst. Triaging A&amp;J Memo, EKTA (EKTA.B-SE), OPUS TEST 14-May, 14 May 2026.</div><div class="lead-prose">Sources: EKTA Triaging-scope research reports (COWORK/Files/EKTA/ — IG Q1-Q2, Triaging Q4-Q7, <span class="g gC">C</span> and [AS]). Active thematics (memory/thematics/active.md). Wisdom Library — 11 models per Appendix F.1.</div><div class="lead-prose">This memo does not supersede <code>triaging-memo-2026-05-13.md</code>; it is an independent model-test artefact for side-by-side comparison.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Memo identity.</strong> This is the "OPUS TEST 14-May" memo — a model/process test. A separate Triaging A&amp;J memo dated 13-May-26 (<code>triaging-memo-2026-05-13.md</code>) exists for EKTA and was neither read as a source nor edited; this memo is an independent first-pass analysis written from the research base for side-by-side comparison. No existing EKTA file was overwritten.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Scope discipline.</strong> Triaging Procedure 1 was walked top to bottom. In-scope Elements: E1 (x2), E5 (x2), E7 (x2), E8 (three-bullet carve-out), E11 (four-bullet floor), plus Group ratings G1-G4. Section D carries zero content by design. All out-of-scope Elements are explicitly noted at their Group headings.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Conviction posture.</strong> The memo states strong views weakly held — every Element has a conclusion and a rating, and the ratings are calibrated honestly on the A-F bell curve. Where the analysis is thin or contested, that is flagged rather than papered over (see the companion self-review debrief for the conviction-tier breakdown).</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"E1":{"grade":"C","label":"RA2: Is the base robust?"},"E7":{"grade":"D","label":"Required case simplicity guardrails (Triaging first pass; x2 double-weight)"},"E11":{"grade":"C","label":"Value-chain dynamics (Triaging second pass; four-bullet floor)"}};</script>
+</body>
+</html>

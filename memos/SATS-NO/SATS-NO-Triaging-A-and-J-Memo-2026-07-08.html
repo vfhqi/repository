@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[W] SATS-NO — Triaging — A&amp;J Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="b-i-1-bluf">B.I.1 — BLUF<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="b-i-2-top-line-judgement">B.I.2 — Top-line judgement</span>
+<span class="nav-item nav-section" data-anchor="b-i-3-headline-conviction-rating">B.I.3 — Headline conviction &amp; rating</span>
+<span class="nav-item nav-section" data-anchor="a-i-fy25-actuals-fy26-cmd-targets">A.I — FY25 actuals &amp; FY26 / CMD targets</span>
+<span class="nav-item nav-section" data-anchor="a-ii-peer-base-rate-context-gym-trio-comp-table">A.II — Peer/base-rate context (GYM-TRIO comp-table)</span>
+<span class="nav-item nav-section" data-anchor="a-iii-cmd-pathway-sats-s-structural-setup">A.III — CMD pathway (SATS&#x27;s structural setup)</span>
+<span class="nav-item nav-section" data-anchor="a-iv-bear-case-quantification-esa-short-sellers-cross-read">A.IV — Bear-case quantification (ESA Short-Sellers cross-read)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-1-pillar-1-technical-strength-target-600w">C.II.1 — Pillar 1: Technical Strength (TARGET 600w)<span class="nav-fc">9</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm">C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 2,100w; 70% effort)<span class="nav-fc">17</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-3-pillar-2-fit-for-market-paradigm-target-600w-flat-sha">C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 600w; flat shape)<span class="nav-fc">12</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-4-pillar-5-ss-earnings-momentum-target-300w-5-3-matrix">C.II.4 — Pillar 5: SS Earnings Momentum<span class="nav-fc">8</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-flat-shap">C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w; flat shape)<span class="nav-fc">12</span></span>
+<span class="nav-item nav-section" data-anchor="d-i-risk-decomposition">D.I — Risk decomposition<span class="nav-fc">2</span></span>
+<span class="nav-item nav-section" data-anchor="d-ii-1-10-invalidation-achs-cohort-r4-exempt">D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</span>
+<span class="nav-item nav-section" data-anchor="d-ii-2-confidence-gaps">D.II.2 — Confidence / gaps<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="d-ii-3-negative-should-be-expected-developments">D.II.3 — Negative-should-be-expected developments<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="e-i-summary-judgement">E.I — Summary judgement<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="e-ii-next-stage-actions-esa-workplan">E.II — Next-stage actions (ESA workplan)</span>
+<span class="nav-item nav-section" data-anchor="e-iii-n-a-recommendation-is-progress">E.III — N/A (recommendation is PROGRESS)</span>
+<span class="nav-item nav-section" data-anchor="f-i-audit-trail">F.I — Audit trail<span class="nav-fc">2</span></span>
+<span class="nav-item nav-section" data-anchor="f-ii-coverage-gap-notes">F.II — Coverage gap notes<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="f-iii-cross-references">F.III — Cross-references<span class="nav-fc">2</span></span>
+<span class="nav-item nav-section" data-anchor="qc-footer">QC FOOTER<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">[W] SATS-NO — Triaging — A&amp;J Memo</div>
+      <div class="meta">Ticker: SATS-NO | Stage: Triaging | Date: 03-May-26 Author: Watson (APM role) | SOP: APM A&amp;amp;J SOP v2.2 | Model: Opus Scope: Triaging+ (full ESA-stage research consulted; Triagin</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">SATS-NO</span> [W] SATS-NO — Triaging — A&amp;J Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 08-Jul-26 12:30</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<p><em>SATS is the most underestimated case of the gym trio. Comp-table v1 marked it borderline-park on saturation thesis; FactSet SSEM data shows it as the trio's SS-momentum LEADER (13/15 vs BFIT 7, GYM 1). Combined with FCF +<strong>25%</strong> YoY to NOK 506m, leverage <strong>1.1x</strong>, first dividend in listed history, ARPM +<strong>5%</strong> pricing power, and Capital 11/11 technical setup with 12-month rising MA200, <strong>SATS is a clean PROGRESS to ESA — comparable quality to GYM but with momentum and yield.</strong> Case-level rating [B/A].</em> #J</p>
+<p><em>The bear case (Treningshelse competition + saturation + NOK FX risk) is real but mild. The bull case (ARPM compounding 5-<strong>6%</strong> + Sweden margin expansion + AI health coach moat + dividend yield <strong>3.1%</strong> + multiple re-rating to peer median) is concrete and currently mispriced because investors stop reading at "Norway gym, saturated market." <strong>The most interesting question on this stock: why does FactSet show momentum 13/15 on a "saturated" market?</strong> Answer: because the market isn't saturated — it's premium-budget where SATS owns the cluster.</em> #J</p>
+<table><thead><tr><th>Pillar</th><th>Triaging draft rating</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td>🚩 <strong>A</strong> (Capital 11/11, 12-month MA200 rising — longest of trio; 0.64% above 50D = compressed entry)</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B/C</strong> (Norway oil-economy resilient = good fit; ❌ NOK FX -12% YTD vs GBP = sterling-investor headwind)</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>A</strong> (NOK 1.1bn CMD credible; ARPM compounding 5%; AI health coach differentiation; Sweden margin recovery)</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B/A</strong> (BB#1/3/4/5/6/8 strong; BB#7 Treningshelse competitive watch)</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td>🚩 <strong>A</strong> (FactSet momentum 13/15 — strongest of trio; positive revisions across all 4 windows)</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>B</strong> (2.07x EV/EBITDA absolute = top-decile cheap; -2.5% TP "downside" reflects price already at TP not bear case; dividend yield 3.1% support)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td></tr></tbody></table>
+<div class="memo-note">Case-level rating is <strong>APM RECOMMENDATION</strong> at Triaging. Decision belongs to Richard at STAGE PROGRESSION Step 4 (Friday review). The CLEAN flag means no conditional ESA gates needed.</div>
+<table><thead><tr><th>Metric</th><th>FY24</th><th>FY25</th><th>FY26 / CMD</th><th>YoY %</th></tr></thead><tbody><tr><td>Revenue (NOK m)</td><td>5,054</td><td><strong>5,509</strong></td><td>~6,000 implied (10% growth)</td><td>+9%</td></tr><tr><td>EBITDA pre-IFRS 16 (NOK m)</td><td>738</td><td><strong>871</strong></td><td>path to 1,100 by FY27</td><td>+18%</td></tr><tr><td>EBITDA margin pre-IFRS 16</td><td>14.6%</td><td><strong>15.8%</strong></td><td>toward 18%+</td><td>+120bps</td></tr><tr><td>EBIT pre-IFRS 16 (NOK m)</td><td>526</td><td><strong>652</strong></td><td>rising</td><td>+24%</td></tr><tr><td>Net profit (NOK m)</td><td>327</td><td><strong>474</strong></td><td>rising</td><td>+45%</td></tr><tr><td>FCF (NOK m)</td><td>405</td><td><strong>506</strong></td><td>~600 estimated</td><td>+25%</td></tr><tr><td>FCF / EBITDA conversion</td><td>55%</td><td><strong>58%</strong></td><td>55% CMD already exceeded</td><td>+300bps</td></tr><tr><td>Net debt (NOK m)</td><td>1,250</td><td><strong>967</strong></td><td>declining</td><td>-£283m</td></tr><tr><td>Net debt / EBITDA (pre IFRS 16)</td><td>1.4x</td><td><strong>1.1x</strong></td><td>&lt;1.0x</td><td>-30bps</td></tr><tr><td>Members ('000)</td><td>733</td><td><strong>755</strong></td><td>~775</td><td>+3%</td></tr><tr><td>Clubs</td><td>~270</td><td><strong>274</strong></td><td>282-286</td><td>+1%</td></tr><tr><td>ARPM (NOK / month)</td><td>600</td><td><strong>630 (Q4)</strong></td><td>~660</td><td>+5%</td></tr><tr><td>Dividend (NOK / share)</td><td>0</td><td><strong>0.67 (H2)</strong></td><td>full-year 1.34 implied</td><td>NEW</td></tr><tr><td>Buybacks (% share capital)</td><td>0</td><td><strong>3.8%</strong></td><td>continuing</td><td>NEW</td></tr></tbody></table>
+<p>🚩 <strong>RARE: First dividend in listed history + 3.8% buyback in same year</strong> — capital return inflection. _Of European mid-caps post-pandemic, fewer than <strong>10%</strong> have initiated dividend with simultaneous material buyback._ #J</p>
+<p>🚩 <strong>RARE: FCF +25% YoY to NOK 506m on revenue +9%</strong> — operating leverage at top decile of European consumer-services. #J</p>
+<table><thead><tr><th>Metric</th><th>SATS-NO</th><th>BFIT-NL</th><th>GYM-GB</th><th>Sector base rate</th></tr></thead><tbody><tr><td>EBITDA margin (pre-IFRS16)</td><td>15.8%</td><td>24.5%</td><td>23.2%</td><td>HVLP median 20-25%; premium-budget median 15-18%</td></tr><tr><td>Mature site ROIC</td><td>~15-20%</td><td>31-34%</td><td>27-30%</td><td>premium-budget median 12-15%</td></tr><tr><td>FCF / EBITDA conversion</td><td>🚩 <strong>58%</strong></td><td>50%</td><td>68%</td><td>HVLP median 50%</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td><strong>1.1x</strong></td><td>2.7-3.0x</td><td>1.0x</td><td>HVLP median 1.5x</td></tr><tr><td>Forward EV/EBITDA</td><td>🚩 <strong>2.07x absolute</strong></td><td>4.65x</td><td>3.74x</td><td>HVLP median 7-8x</td></tr><tr><td>FactSet momentum score</td><td>🚩 <strong>13/15</strong></td><td>7/15</td><td>1/15</td><td>sector median 6-8/15</td></tr><tr><td>FactSet EPS revisions L1M</td><td>🚩 <strong>+1%</strong></td><td>-6%</td><td>-7%</td><td>sector median +1-2%</td></tr><tr><td>Dividend yield</td><td><strong>~3.1%</strong></td><td>0%</td><td>0%</td><td>UK consumer median 2-3%</td></tr><tr><td>Buy % (FactSet)</td><td>75%</td><td>70%</td><td>100%</td><td>sector median 60-70%</td></tr></tbody></table>
+<p>🚩 <strong>RARE: SATS is the only trio member with positive EPS revisions across ALL 4 FactSet windows (L1M +1%, L3M +4%, L6M +4%, L12M +10%).</strong> _Of the trio, the only name where SS sentiment is strengthening rather than weakening._ #J</p>
+<p>🚩 <strong>RARE: 2.07x forward EV/EBITDA on positive momentum + dividend</strong> — top-decile cheap even after sector adjustment. #A</p>
+<p>*SATS NOK 1.1bn EBITDA CMD target requires <strong>26%</strong> incremental from FY25 NOK 871m. Path: ARPM compounding 5-<strong>6%</strong>/yr × member growth flat-to-positive × Sweden margin expansion (currently <strong>18%</strong> vs Norway implicit <strong>20%</strong>+) × operating leverage on fixed-cost base. <strong>Math is mechanical, not heroic.</strong>_ #A</p>
+<p><strong><span class="g gA">A</span> FCF +25% YoY</strong> at SATS = top-decile vs HVLP and premium-budget peers. _Confirms operating leverage thesis._ #J</p>
+<p>❌ <strong><span class="g gC">C</span> Treningshelse Holding (93+ locations, 115k+ members)</strong> — credible Norwegian challenger. _Not yet existential; acquisition-led rollout warrants monitoring. ESA gate to assess catchment overlap._ #J</p>
+<p>❌ <strong><span class="g gC">C</span> NOK FX -12% YTD vs GBP</strong> — sterling-investor headwind. _Risk-off mode mismatch; partial offset via NOK appreciation potential if oil price firms. ESA gate to assess hedging mechanics._ #J</p>
+<p>❌ <strong><span class="g gC">C</span> AI-driven app substitution risk</strong> — premium-budget more exposed to digital substitution than HVLP because price gap is smaller. _Bear-case research flags this; Watson's view: low probability but worth monitoring._ #J</p>
+<p><strong>No formal short-seller report exists</strong> — bear case is fundamental (saturation, FX, competition), not fraud or accounting. Bear credibility "Green-Yellow" per AS report. _Cleanest bear-case posture of the trio (no fraud/accounting concerns)._ #J</p>
+<p><strong>Rating: A</strong> — Capital 11/11; 12-month MA200 rising (longest of trio); <strong>0.64%</strong> above 50D = compressed entry. #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<p><strong>(b) RS excess return analysis</strong></p>
+<p><strong>(c) MA structure</strong></p>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<p><strong>(e) Volume patterns</strong></p>
+<p><strong>(f) Synthesis</strong></p>
+<p><strong>Rating: A overall.</strong> _NOK 1.1bn CMD credible; ARPM compounding; Sweden recovery; AI health coach differentiation; clean balance sheet._ #J</p>
+<p><strong>IC#1 — Required financial outputs</strong></p>
+<p><strong>IC#2 — Simplicity / required guardrails</strong></p>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation)</strong></p>
+<p><strong>BB#1-8 — Investment Case Building Blocks (cohort summary)</strong></p>
+<p><strong>Rating: B/C</strong> — Norway domestic + premium-budget defensible = good me-state fit; ❌ NOK FX -<strong>12%</strong> YTD vs GBP = sterling-investor headwind partially offsets. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<p><strong>(f) Synthesis</strong></p>
+<p><strong>Rating: A</strong> — FactSet momentum 13/15 — strongest of trio. Positive revisions across ALL four windows. CMD credibility growing in SS narrative. #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM data — pulled 03-May-26)</strong></p>
+<p><strong>(b) Estimate dispersion</strong></p>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<p><strong>(e) Momentum scoring (5×3 matrix; FactSet data)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>+1%</td><td>0%</td><td>0%</td></tr><tr><td>L3M</td><td>+4%</td><td>+1%</td><td>+1%</td></tr><tr><td>L6M</td><td>+4%</td><td>+2%</td><td>+1%</td></tr><tr><td>L12M</td><td>🚩 +10%</td><td>+3%</td><td>+4%</td></tr></tbody></table>
+<p><strong>Momentum composite score: 13/15</strong> (FactSet computed) — _strongest of the trio (BFIT 7, GYM 1). Earnings momentum is the strongest pillar of the case alongside P1._ #J</p>
+<p><strong>(f) Synthesis</strong></p>
+<p><strong>Rating: B</strong> — <strong>2.07x</strong> EV/EBITDA absolute = top-decile cheap; -<strong>2.5%</strong> FactSet TP "downside" reflects price already at TP not bear case; dividend yield <strong>3.1%</strong> = downside support. #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<p><strong>(b) Percentile positioning</strong></p>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<p><strong>(d) Scenario anchoring</strong></p>
+<p><strong>(e) Synthesis</strong></p>
+<table><thead><tr><th>#</th><th>ACH</th><th>SATS-NO Triaging status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>_CLEAN — FY25 record results; Q4-25 EBITDA +28%._</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>❌ <strong>TRIPPED-MONITOR — NOK -12% YTD vs GBP</strong> (within 15% but trending).</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>_Norway oil-cycle mid-monitor; not actively negative._</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>_N/A — atomistic membership base._</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>_CLEAN — 1.1x leverage._</td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>_Sondre Gravir stable._</td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>❌ <strong>TRIPPED-MONITOR — Treningshelse 93+ locations + acquisition-led rollout.</strong></td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>_Norwegian wellness policy supportive._</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>_CLEAN — first dividend + buyback + reinvest + deleverage._</td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>_Saturation thesis = potential break, but evidence currently supports the bull case._</td></tr></tbody></table>
+<p><strong>Two ACHs at TRIPPED-MONITOR (FX + Treningshelse).</strong> Neither at TRIPPED-INVALIDATE. _Both recoverable; ESA-stage workstreams._ #J</p>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>🚩 A</td><td>High</td><td>Capital 11/11; 12M MA200 rising; compressed entry</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B/C</td><td>Medium</td><td>Norway resilient + premium-budget; ❌ NOK FX -12% YTD</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>A</td><td>High</td><td>NOK 1.1bn CMD credible; ARPM 5%; AI moat; Sweden recovery</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B/A</td><td>Medium-High</td><td>BB#1/3/4/5/6/8 strong; BB#7 Treningshelse mild</td></tr><tr><td>P5 SS Earnings Momentum</td><td>🚩 A</td><td>High</td><td>FactSet momentum 13/15; positive ALL 4 windows</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>B</td><td>High</td><td>Top-decile cheap absolute; +17% total return expected (incl. yield)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td><td><strong>High</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net: SATS is a comparable-quality case to GYM but with momentum and yield. Comp-table v1's borderline-park framing was overcautious. Material reframing in comp-table v2.</em> #J</p>
+<p><strong>PROGRESS to ESA — CLEAN.</strong> No conditional gates. The operational evidence (FY25 record results, FCF +<strong>25%</strong>, first dividend, FactSet momentum 13/15 best-in-trio) is the strongest of the trio. ESA work is needed to test (a) Treningshelse competitive intensity, (b) FX hedging mechanics for sterling investor, (c) Q1-26 print detail. #J</p>
+<p>1. <strong>Q1-26 print integration (30-Apr-26 result)</strong> — read print + post-result commentary; verify member softness was offset by ARPM. _Owner: APM ESA Phase 1._ #T 2. <strong>Treningshelse channel check</strong> — interview 3-5 Treningshelse / Sporty operators or former employees on Norwegian rollout pace. _Owner: RESEARCHER expert calls._ #T 3. <strong>NOK FX hedging mechanics analysis</strong> — compute hedging cost for 1-<strong>2%</strong> sterling portfolio sizing; assess hedge-overlay alternatives. _Owner: APM + COS._ #T 4. <strong>Sweden margin convergence path</strong> — model FY26-28 Sweden EBITDA margin trajectory toward Norwegian implicit <strong>20%</strong>. _Owner: APM ESA Phase 2._ #T 5. <strong>AI health coach product traction</strong> — request product KPIs (member usage, churn impact, NPS) from IR. _Owner: COS schedules IR; APM attends._ #T 6. <strong>Track-record-by-stock cross-check</strong> — pull cluster-moat domestic operator + ARPM compounding archetypes. _Owner: APM ESA Phase 1._ #T</p>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~<strong>92%</strong> of metric bullets with comparison ✓ Principle #2 (A-F grading):              34/34 gradeable findings graded ✓ Principle #3 (invert markers ❌):         5 D/F findings marked (Treningshelse; NOK FX; AI substitution risk; volume decline; ACH#2; ACH#7) Principle #4 (🚩 RARE outlier markers):  9 RARE markers (first dividend + <strong>3.8%</strong> buyback combination; FCF +<strong>25%</strong> YoY; momentum 13/15; positive revisions ALL 4 windows; AI health coach <strong>85%</strong> churn prediction; 12M MA200 rising; <strong>2.07x</strong> EV/EBITDA; full-spectrum capital allocation; <strong>58%</strong> FCF conversion exceeds <strong>55%</strong> CMD) QC PILLAR DEFAULT: A / B-C / A / B-A / A / B QC CASE-LEVEL: B/A — PROGRESS to ESA (CLEAN — no conditional gates) SCOPE NOTE: Triaging+ — ESA-stage research consulted; Triaging decision logic SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: factset-ssem.json (03-May-26 build); SATS-NO/* research (02-May-26); GYM-TRIO comp-table-skeleton-v1 DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio; Q1-26 print not yet integrated VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+<div class="memo-note">[W] SATS-NO Triaging A&amp;J memo v1 authored 03-May-26 by Watson (APM role). Source corpus: 73,831 words SATS-NO research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~5,200 words.</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="b-i-1-bluf" data-spy>B.I.1 — BLUF <span class="g gNR" title="PROGRESS">PROG</span></div>
+<p><em>SATS is the most underestimated case of the gym trio. Comp-table v1 marked it borderline-park on saturation thesis; FactSet SSEM data shows it as the trio's SS-momentum LEADER (13/15 vs BFIT 7, GYM 1). Combined with FCF +<strong>25%</strong> YoY to NOK 506m, leverage <strong>1.1x</strong>, first dividend in listed history, ARPM +<strong>5%</strong> pricing power, and Capital 11/11 technical setup with 12-month rising MA200, <strong>SATS is a clean PROGRESS to ESA — comparable quality to GYM but with momentum and yield.</strong> Case-level rating [B/A].</em> #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="b-i-2-top-line-judgement" data-spy>B.I.2 — Top-line judgement</div>
+<p><em>The bear case (Treningshelse competition + saturation + NOK FX risk) is real but mild. The bull case (ARPM compounding 5-<strong>6%</strong> + Sweden margin expansion + AI health coach moat + dividend yield <strong>3.1%</strong> + multiple re-rating to peer median) is concrete and currently mispriced because investors stop reading at "Norway gym, saturated market." <strong>The most interesting question on this stock: why does FactSet show momentum 13/15 on a "saturated" market?</strong> Answer: because the market isn't saturated — it's premium-budget where SATS owns the cluster.</em> #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="b-i-3-headline-conviction-rating" data-spy>B.I.3 — Headline conviction &amp; rating</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Case-level rating is <strong>APM RECOMMENDATION</strong> at Triaging. Decision belongs to Richard at STAGE PROGRESSION Step 4 (Friday review). The CLEAN flag means no conditional ESA gates needed.</div></div>
+<table><thead><tr><th>Pillar</th><th>Triaging draft rating</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td>🚩 <strong>A</strong> (Capital 11/11, 12-month MA200 rising — longest of trio; 0.64% above 50D = compressed entry)</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B/C</strong> (Norway oil-economy resilient = good fit; ❌ NOK FX -12% YTD vs GBP = sterling-investor headwind)</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>A</strong> (NOK 1.1bn CMD credible; ARPM compounding 5%; AI health coach differentiation; Sweden margin recovery)</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B/A</strong> (BB#1/3/4/5/6/8 strong; BB#7 Treningshelse competitive watch)</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td>🚩 <strong>A</strong> (FactSet momentum 13/15 — strongest of trio; positive revisions across all 4 windows)</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>B</strong> (2.07x EV/EBITDA absolute = top-decile cheap; -2.5% TP "downside" reflects price already at TP not bear case; dividend yield 3.1% support)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td></tr></tbody></table>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="a-i-fy25-actuals-fy26-cmd-targets" data-spy>A.I — FY25 actuals &amp; FY26 / CMD targets</div>
+<table><thead><tr><th>Metric</th><th>FY24</th><th>FY25</th><th>FY26 / CMD</th><th>YoY %</th></tr></thead><tbody><tr><td>Revenue (NOK m)</td><td>5,054</td><td><strong>5,509</strong></td><td>~6,000 implied (10% growth)</td><td>+9%</td></tr><tr><td>EBITDA pre-IFRS 16 (NOK m)</td><td>738</td><td><strong>871</strong></td><td>path to 1,100 by FY27</td><td>+18%</td></tr><tr><td>EBITDA margin pre-IFRS 16</td><td>14.6%</td><td><strong>15.8%</strong></td><td>toward 18%+</td><td>+120bps</td></tr><tr><td>EBIT pre-IFRS 16 (NOK m)</td><td>526</td><td><strong>652</strong></td><td>rising</td><td>+24%</td></tr><tr><td>Net profit (NOK m)</td><td>327</td><td><strong>474</strong></td><td>rising</td><td>+45%</td></tr><tr><td>FCF (NOK m)</td><td>405</td><td><strong>506</strong></td><td>~600 estimated</td><td>+25%</td></tr><tr><td>FCF / EBITDA conversion</td><td>55%</td><td><strong>58%</strong></td><td>55% CMD already exceeded</td><td>+300bps</td></tr><tr><td>Net debt (NOK m)</td><td>1,250</td><td><strong>967</strong></td><td>declining</td><td>-£283m</td></tr><tr><td>Net debt / EBITDA (pre IFRS 16)</td><td>1.4x</td><td><strong>1.1x</strong></td><td>&lt;1.0x</td><td>-30bps</td></tr><tr><td>Members ('000)</td><td>733</td><td><strong>755</strong></td><td>~775</td><td>+3%</td></tr><tr><td>Clubs</td><td>~270</td><td><strong>274</strong></td><td>282-286</td><td>+1%</td></tr><tr><td>ARPM (NOK / month)</td><td>600</td><td><strong>630 (Q4)</strong></td><td>~660</td><td>+5%</td></tr><tr><td>Dividend (NOK / share)</td><td>0</td><td><strong>0.67 (H2)</strong></td><td>full-year 1.34 implied</td><td>NEW</td></tr><tr><td>Buybacks (% share capital)</td><td>0</td><td><strong>3.8%</strong></td><td>continuing</td><td>NEW</td></tr></tbody></table>
+<p>🚩 <strong>RARE: First dividend in listed history + 3.8% buyback in same year</strong> — capital return inflection. _Of European mid-caps post-pandemic, fewer than <strong>10%</strong> have initiated dividend with simultaneous material buyback._ #J</p>
+<p>🚩 <strong>RARE: FCF +25% YoY to NOK 506m on revenue +9%</strong> — operating leverage at top decile of European consumer-services. #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="a-ii-peer-base-rate-context-gym-trio-comp-table" data-spy>A.II — Peer/base-rate context (GYM-TRIO comp-table)</div>
+<table><thead><tr><th>Metric</th><th>SATS-NO</th><th>BFIT-NL</th><th>GYM-GB</th><th>Sector base rate</th></tr></thead><tbody><tr><td>EBITDA margin (pre-IFRS16)</td><td>15.8%</td><td>24.5%</td><td>23.2%</td><td>HVLP median 20-25%; premium-budget median 15-18%</td></tr><tr><td>Mature site ROIC</td><td>~15-20%</td><td>31-34%</td><td>27-30%</td><td>premium-budget median 12-15%</td></tr><tr><td>FCF / EBITDA conversion</td><td>🚩 <strong>58%</strong></td><td>50%</td><td>68%</td><td>HVLP median 50%</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td><strong>1.1x</strong></td><td>2.7-3.0x</td><td>1.0x</td><td>HVLP median 1.5x</td></tr><tr><td>Forward EV/EBITDA</td><td>🚩 <strong>2.07x absolute</strong></td><td>4.65x</td><td>3.74x</td><td>HVLP median 7-8x</td></tr><tr><td>FactSet momentum score</td><td>🚩 <strong>13/15</strong></td><td>7/15</td><td>1/15</td><td>sector median 6-8/15</td></tr><tr><td>FactSet EPS revisions L1M</td><td>🚩 <strong>+1%</strong></td><td>-6%</td><td>-7%</td><td>sector median +1-2%</td></tr><tr><td>Dividend yield</td><td><strong>~3.1%</strong></td><td>0%</td><td>0%</td><td>UK consumer median 2-3%</td></tr><tr><td>Buy % (FactSet)</td><td>75%</td><td>70%</td><td>100%</td><td>sector median 60-70%</td></tr></tbody></table>
+<p>🚩 <strong>RARE: SATS is the only trio member with positive EPS revisions across ALL 4 FactSet windows (L1M +1%, L3M +4%, L6M +4%, L12M +10%).</strong> _Of the trio, the only name where SS sentiment is strengthening rather than weakening._ #J</p>
+<p>🚩 <strong>RARE: 2.07x forward EV/EBITDA on positive momentum + dividend</strong> — top-decile cheap even after sector adjustment. #A</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="a-iii-cmd-pathway-sats-s-structural-setup" data-spy>A.III — CMD pathway (SATS&#x27;s structural setup)</div>
+<p>*SATS NOK 1.1bn EBITDA CMD target requires <strong>26%</strong> incremental from FY25 NOK 871m. Path: ARPM compounding 5-<strong>6%</strong>/yr × member growth flat-to-positive × Sweden margin expansion (currently <strong>18%</strong> vs Norway implicit <strong>20%</strong>+) × operating leverage on fixed-cost base. <strong>Math is mechanical, not heroic.</strong>_ #A</p>
+<p><strong><span class="g gA">A</span> FCF +25% YoY</strong> at SATS = top-decile vs HVLP and premium-budget peers. _Confirms operating leverage thesis._ #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="a-iv-bear-case-quantification-esa-short-sellers-cross-read" data-spy>A.IV — Bear-case quantification (ESA Short-Sellers cross-read)</div>
+<p>❌ <strong><span class="g gC">C</span> Treningshelse Holding (93+ locations, 115k+ members)</strong> — credible Norwegian challenger. _Not yet existential; acquisition-led rollout warrants monitoring. ESA gate to assess catchment overlap._ #J</p>
+<p>❌ <strong><span class="g gC">C</span> NOK FX -12% YTD vs GBP</strong> — sterling-investor headwind. _Risk-off mode mismatch; partial offset via NOK appreciation potential if oil price firms. ESA gate to assess hedging mechanics._ #J</p>
+<p>❌ <strong><span class="g gC">C</span> AI-driven app substitution risk</strong> — premium-budget more exposed to digital substitution than HVLP because price gap is smaller. _Bear-case research flags this; Watson's view: low probability but worth monitoring._ #J</p>
+<p><strong>No formal short-seller report exists</strong> — bear case is fundamental (saturation, FX, competition), not fraud or accounting. Bear credibility "Green-Yellow" per AS report. _Cleanest bear-case posture of the trio (no fraud/accounting concerns)._ #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="c-ii-1-pillar-1-technical-strength-target-600w" data-spy>C.II.1 — Pillar 1: Technical Strength (TARGET 600w) <span class="secn">9 findings</span></div>
+<p><strong>Rating: A</strong> — Capital 11/11; 12-month MA200 rising (longest of trio); <strong>0.64%</strong> above 50D = compressed entry. #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>P1 RA1 — MM99 / Minervini score?</strong> <strong>Capital 11/11; 8/8 — perfect score.</strong> _Tied with GYM as trio's technical leader._ #J<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">All 11 MM tests PASS unconditionally. #I</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">🚩 <strong>RARE: 12-month MA200 rising</strong> — longest of trio (BFIT 11M, GYM 7M). _Single most differentiating technical feature of the case._ #A</div></div></div></div></div>
+<p><strong>(b) RS excess return analysis</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>RS 12M +23.37% (excess vs market +7%, sector +11%, industry +16.5%).</strong> Strongest absolute RS of trio. #I</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">_RS performance broad-based across all timeframes (3M +<strong>9.7%</strong>, 6M +<strong>8.9%</strong>, 9M +<strong>19.7%</strong>, 12M +<strong>23.4%</strong>). Durable, multi-window outperformance._ #A</div></div>
+<p><strong>(c) MA structure</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>All 7 MAs in ascending order; price 0.64% above 50D = compressed entry.</strong> _Not extended; not far from support._ #I</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">50D 42.83 vs price 43.1 NOK = best of trio for risk-defined entry. #A</div></div>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Basing Plateau 90.5% duration — near-qualification for fully formed base.</strong> _Base completion = formal technical trigger for new capital deployment._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">13th retest of 50D at <strong>2.05%</strong> depth — high-frequency consolidation = institutional accumulation. #A</div></div>
+<p><strong>(e) Volume patterns</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>❌ Volume declining during recent rally</strong> (ADV 1M 332k vs ADV 3M 431k = -<strong>23%</strong>). _Caution flag within otherwise bullish picture. Watson's view: institutional positioning may be patient, not absent. ESA gate to validate via FII positioning data._ #A</div></div>
+<p><strong>(f) Synthesis</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>🚩 <span class="g gA">A</span> Technical setup is best-in-class</strong> — Capital 11/11, 12M rising 200D (longest of trio), compressed 50D entry, near-base-completion. _Risk/reward 3:1 with stop below 200D MA._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm" data-spy>C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 2,100w; 70% effort) <span class="secn">17 findings</span></div>
+<p><strong>Rating: A overall.</strong> _NOK 1.1bn CMD credible; ARPM compounding; Sweden recovery; AI health coach differentiation; clean balance sheet._ #J</p>
+<p><strong>IC#1 — Required financial outputs</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>IC#1 RA1 — Are required outputs evident?</strong> <strong>A — every line item improving across the FY25 print.</strong> #J<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Revenue +9% / EBITDA pre-IFRS 16 +18% / EBIT +24% / Net profit +45% / FCF +25%.</strong> _Top-line/bottom-line/cash all expanding with operating leverage._ #J</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>EBITDA margin pre-IFRS 16 expanded 120bps to 15.8%.</strong> Path to <strong>18%</strong>+ via ARPM + Sweden recovery. #A</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Member growth +3% on 5% ARPM = +9% revenue.</strong> _Pricing-led, not volume-led — high-quality growth._ #J</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>IC#1 RA2 — Earnings quality?</strong> <strong>A — pre-IFRS 16 reporting clean; minimal non-cash adjustments; net profit +45% reflects operating performance.</strong> #J</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>IC#1 RA3 — ROIC / ROCE?</strong> <strong>B — ~15-20% mature ROIC on premium-budget capex base.</strong> _Mid-pack of trio; below GYM/BFIT but above premium-budget peers._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>IC#1 RA4 — Cash conversion?</strong> <strong>🚩 A — 58% FCF/EBITDA conversion exceeds 55% CMD target.</strong> #J</div></div>
+<p><strong>IC#2 — Simplicity / required guardrails</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>IC#2 RA1 — Business comprehensibility?</strong> <strong>B — multi-brand structure (SATS, ELIXIA, Fresh Fitness, SATS Online) + 4-country Nordic operation = moderate complexity.</strong> _Less clean than GYM's single-country single-brand model._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>IC#2 RA2 — Required simplicity guardrails?</strong> <strong>B — Norwegian reporting standards; no convertible instruments; clean revenue recognition. Multi-brand requires per-segment monitoring.</strong> #J</div></div>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>IC#3 RA1 — Identifiable fulcrum driver(s)?</strong> <strong>A — three independent fulcrum drivers in execution phase.</strong> #J<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>FD1: ARPM compounding 5-6%/yr.</strong> Mathematically sufficient to reach NOK 1.1bn CMD without material member growth. _High-conviction; pricing power proven._ #J</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>FD2: Sweden margin expansion 18% → 20%.</strong> ~100-<strong>200bps</strong> incremental group margin = ~NOK 50-100m EBITDA. _Catch-up trajectory; path well-trodden by Norway segment._ #J</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>FD3: Multiple re-rating from 2.07x → 5-6x on CMD credibility.</strong> Currently <strong>2x</strong> EV/EBITDA = depressed; convergence to peer median 5-<strong>6x</strong> = +<strong>60%</strong> upside. _Optionality, but supportive momentum._ #J</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>IC#3 RA2 — Disciplined-buyer entry test?</strong> <strong>A — 0.64% above 50D = best entry of trio; basing plateau 90.5% complete; pullback 2.05% depth = compressed.</strong> #J</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>IC#3 RA3 — Invalidation triggers (preview of D.II.1)?</strong> <strong>B — Q1-26 print 30-Apr-26 is most important near-term gate; ARPM growth &lt;3% sustained 2Q would re-set thesis.</strong> #J</div></div>
+<p><strong>BB#1-8 — Investment Case Building Blocks (cohort summary)</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>BB#1 Sector strength?</strong> <strong>A — Norway 30%+ gym penetration (highest in Europe); structural premium-budget growth driven by aging demographic + AI-coaching tailwind. Top-decile sector for value-tilted operators.</strong> #J</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>BB#2 Lessons-check (track record)?</strong> <strong>B — closest archetype: cluster-moat domestic operator + ARPM compounding. Track-record-by-stock data not directly read in this Triaging memo (ESA gap).</strong> #A</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>BB#3 Unit economics?</strong> <strong>B — NOK 7-12m capex/club; cluster moat (70% of members use 2+ clubs); proprietary content IP barrier; AI health coach NOK 150m investment.</strong> _Top-decile premium-budget unit economics._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>BB#4 Management / governance?</strong> <strong>A — Sondre Gravir CEO stable; FY25 record results; CMD progress on track; first dividend signals confidence.</strong> #J</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>BB#5 Balance sheet / liquidity?</strong> <strong>🚩 A — 1.1x leverage; FCF NOK 506m; first dividend NOK 0.67/share; 3.8% buyback. Cleanest balance sheet trajectory of trio.</strong> #J</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>BB#6 Capital allocation?</strong> <strong>🚩 A — first dividend + buyback + FCF reinvestment + deleveraging = full-spectrum capital allocation.</strong> _Of trio, only SATS pays dividend AND buys back AND reinvests AND deleverages simultaneously._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>BB#7 Plain-sight risks?</strong> <strong>B/C — Treningshelse competition (mild); FX -12% YTD (sterling investor headwind); AI substitution risk (low probability).</strong> _Cohort weight moderate; no individual fatal risk._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>BB#8 Optionality?</strong> <strong>B — AI health coach scaling (NOK 150m investment, 85% churn prediction accuracy); corporate B2B revenue 20% growth; Sweden margin convergence.</strong> _Three plausible options._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="c-ii-3-pillar-2-fit-for-market-paradigm-target-600w-flat-sha" data-spy>C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 600w; flat shape) <span class="secn">12 findings</span></div>
+<p><strong>Rating: B/C</strong> — Norway domestic + premium-budget defensible = good me-state fit; ❌ NOK FX -<strong>12%</strong> YTD vs GBP = sterling-investor headwind partially offsets. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Richard's me-state: risk-off mode.</strong> Targeting recurring non-cyclical revenues, domestic EU footprint. #I</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">_SATS is Nordic-domestic + recurring subscription + premium-budget defensible. Norway oil-economy resilient through downturns. <strong>Good me-state fit on operations; mild mismatch on FX axis.</strong>_ #A</div></div>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Norway 30%+ gym penetration</strong> — highest in Europe; oil-wealth sovereign fund consumer support; defensible structural growth. #I</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">🚩 <strong>RARE: AI health coach differentiation NOK 150m investment, 85% churn prediction accuracy</strong> — premium-budget operator with AI moat is unusual; differentiates SATS from generic Nordic operators. #A</div></div>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>GDP exposure: low</strong> — habitual subscription with weak elasticity. #A</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">❌ <strong>FX exposure: HIGH for sterling investors</strong> — NOK -<strong>12%</strong> YTD vs GBP = ~<strong>12%</strong> return drag in GBP terms. _Worst FX exposure of trio (BFIT EUR-stable, GYM GBP-domestic)._ #A</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Rate exposure: low-moderate</strong> — NOK 967m net debt; Norwegian rate path independent of ECB. #A</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Tariff / trade exposure: nil.</strong> #I</div></div>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">_Nordic single-name exposure; minimal overlap with existing pipeline. ESA gate to confirm._ #T</div></div>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Market cap NOK 4bn (~£300m / ~€350m) — small mid-cap, slightly below sweet spot but adequate.</strong> #I</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>ADV ~NOK 50m daily — fine for 1-3% portfolio sizing.</strong> #A</div></div>
+<p><strong>(f) Synthesis</strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>[B/C] Paradigm fit decent but FX is the constraint.</strong> Operations fit me-state well; FX exposure for sterling investor is the principal mismatch. _ESA workplan should include hedging assessment + currency-overlay sizing scenarios._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="c-ii-4-pillar-5-ss-earnings-momentum-target-300w-5-3-matrix" data-spy>C.II.4 — Pillar 5: SS Earnings Momentum <span class="secn">8 findings</span></div>
+<p><strong>Rating: A</strong> — FactSet momentum 13/15 — strongest of trio. Positive revisions across ALL four windows. CMD credibility growing in SS narrative. #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM data — pulled 03-May-26)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">🚩 <strong>EPS revisions: L1M +1% / L3M +4% / L6M +4% / L12M +10%</strong> — _positive across every window._ Strongest momentum profile of trio. #J</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>EBITDA revisions: L1M 0% / L3M +1% / L6M +2% / L12M +3%</strong> — positive across longer windows; flat L1M = stable. #A</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Sales revisions: L1M 0% / L3M +1% / L6M +1% / L12M +4%</strong> — top-line steady. #I</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>TP revisions: L1M +1% / L3M +11% / L6M +12%</strong> — _consistent monthly TP raises (rare pattern)._ #A</div></div>
+<p><strong>(b) Estimate dispersion</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Buy % = 75%</strong> — most analysts buy. _Conviction balanced._ #I</div></div>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>4 buy revisions L1M, 4 L3M, 4 L6M</strong> — sustained positive ratings activity. #I</div></div>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Operational evidence (FY25 record results, Q4-25 EBITDA +28%, FCF +25%) aligns with SS positive revisions.</strong> _Rare congruence — operational and SS momentum reinforce each other._ #J</div></div>
+<p><strong>(e) Momentum scoring (5×3 matrix; FactSet data)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>+1%</td><td>0%</td><td>0%</td></tr><tr><td>L3M</td><td>+4%</td><td>+1%</td><td>+1%</td></tr><tr><td>L6M</td><td>+4%</td><td>+2%</td><td>+1%</td></tr><tr><td>L12M</td><td>🚩 +10%</td><td>+3%</td><td>+4%</td></tr></tbody></table>
+<p><strong>Momentum composite score: 13/15</strong> (FactSet computed) — _strongest of the trio (BFIT 7, GYM 1). Earnings momentum is the strongest pillar of the case alongside P1._ #J</p>
+<p><strong>(f) Synthesis</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>🚩 <span class="g gA">A</span> Earnings momentum is best-in-trio.</strong> _Rare combination: SATS has positive EPS revisions across ALL 4 windows AND strong operational delivery AND CMD ahead of schedule. The "saturation thesis" the comp-table v1 implied is contradicted by both operational and SS data._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-flat-shap" data-spy>C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w; flat shape) <span class="secn">12 findings</span></div>
+<p><strong>Rating: B</strong> — <strong>2.07x</strong> EV/EBITDA absolute = top-decile cheap; -<strong>2.5%</strong> FactSet TP "downside" reflects price already at TP not bear case; dividend yield <strong>3.1%</strong> = downside support. #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Forward EV/EBITDA 2.07x</strong> (EV NOK 5.1bn / FY consensus EBITDA NOK 2,467m IFRS 16 inclusive). _Note: SATS reports primarily pre-IFRS 16; EBITDA is post-IFRS 16 inflated. On comparable pre-IFRS 16 basis EV/EBITDA ~5-<strong>6x</strong>._ #A</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>NTM P/E 13.9x</strong> vs peer median 14-<strong>16x</strong> = mild discount. #I</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>EV/Sales 0.82x</strong> vs HVLP median 2.0-<strong>2.5x</strong> — top-quartile cheap absolute. #I</div></div>
+<p><strong>(b) Percentile positioning</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Own history: ~50th percentile</strong> — neutral. _Not deep value; not premium._ #I</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Peer percentile: top-decile cheap on EV/EBITDA absolute basis; mid-pack on pre-IFRS 16 normalised.</strong> #A</div></div>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>TP (FactSet consensus): NOK 48.75 = -2.5% upside</strong> to current ~NOK 50. _<strong>Lowest TP upside of trio (BFIT +27%, GYM +33%, SATS -2.5%) — but reflects price has rallied AHEAD of analyst targets, NOT bear thesis.</strong>_ #J</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Dividend yield: ~3.1% (NOK 1.34 annualised on NOK 50 price).</strong> _Yield support unique in trio._ #I</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Bull case (CMD met by FY27 + multiple re-rates + Sweden margin expansion):</strong> EBITDA NOK 1.1bn + 6-<strong>7x</strong> = SP NOK 65-75 (+30-<strong>50%</strong>). #J</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Base case (CMD met FY28 + multiple holds 5-6x):</strong> EBITDA NOK 1.1bn + <strong>5x</strong> = SP NOK 55-60 (+10-<strong>20%</strong>). #J</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Bear case (Treningshelse intensifies + ARPM stagnates + FX continues weakening):</strong> EBITDA NOK 950m + 4-<strong>5x</strong> = SP NOK 38-42 (-<strong>16%</strong> to -<strong>24%</strong>). #J</div></div>
+<p><strong>(d) Scenario anchoring</strong></p>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>R/R: base +15% / bull +40% / bear -20%. Probability-weighted (45% base / 30% bull / 25% bear) = +14% expected return</strong> + <strong>3.1%</strong> dividend yield = <strong>~17% total return expected.</strong> Clears Triaging hurdle. #J</div></div>
+<p><strong>(e) Synthesis</strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong><span class="g gB">B</span> Valuation supportive not exceptional</strong> — top-decile cheap absolute but momentum has driven price near consensus TP. Yield + multiple expansion = principal upside levers. _ESA work should refresh consensus TP modelling post-Q1-26 print._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="d-i-risk-decomposition" data-spy>D.I — Risk decomposition <span class="secn">2 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Top three case-killers:</strong> 1. <strong>Treningshelse intensifies Norwegian competition</strong> — share-loss + margin compression. Probability ~<strong>25%</strong>; impact -10-<strong>15%</strong>. #J 2. <strong>NOK FX continues weakening 10%+ vs GBP</strong> — sterling-investor return drag. Probability ~<strong>30%</strong>; impact -<strong>10%</strong>. #J 3. <strong>CMD timeline slips to FY28+</strong> — multiple compression on credibility loss. Probability ~<strong>20%</strong>; impact -<strong>10%</strong>. #J</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Rating breaker analysis:</strong> P3 / P4 / P5 ratings remain A even with 1 of 3 case-killers materialising. Thesis breaks only if 2+ fire. _Robust to single-bad-outcome scenarios._ #J</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="d-ii-1-10-invalidation-achs-cohort-r4-exempt" data-spy>D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</div>
+<table><thead><tr><th>#</th><th>ACH</th><th>SATS-NO Triaging status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>_CLEAN — FY25 record results; Q4-25 EBITDA +28%._</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>❌ <strong>TRIPPED-MONITOR — NOK -12% YTD vs GBP</strong> (within 15% but trending).</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>_Norway oil-cycle mid-monitor; not actively negative._</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>_N/A — atomistic membership base._</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>_CLEAN — 1.1x leverage._</td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>_Sondre Gravir stable._</td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>❌ <strong>TRIPPED-MONITOR — Treningshelse 93+ locations + acquisition-led rollout.</strong></td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>_Norwegian wellness policy supportive._</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>_CLEAN — first dividend + buyback + reinvest + deleverage._</td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>_Saturation thesis = potential break, but evidence currently supports the bull case._</td></tr></tbody></table>
+<p><strong>Two ACHs at TRIPPED-MONITOR (FX + Treningshelse).</strong> Neither at TRIPPED-INVALIDATE. _Both recoverable; ESA-stage workstreams._ #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="d-ii-2-confidence-gaps" data-spy>D.II.2 — Confidence / gaps <span class="secn">3 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>High confidence:</strong> sector tailwind, FCF generation, ARPM pricing power, balance sheet strength, technical setup. #J</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Medium confidence:</strong> Treningshelse competitive trajectory, FX mechanics, Sweden margin path, AI health coach product traction. #J</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">❌ <strong>Low confidence / explicit gaps:</strong> Q1-26 result detail (30-Apr print not yet integrated into research); Treningshelse acquisition pipeline; sterling-investor hedging mechanics. <strong>All three ESA workstreams.</strong> #OQ</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="d-ii-3-negative-should-be-expected-developments" data-spy>D.II.3 — Negative-should-be-expected developments <span class="secn">3 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>NSE-1: Q1-26 member growth softer than Q1-25.</strong> Management pre-guided this; if ARPM compensates and EBITDA grows YoY, bull case intact. Don't react. #J</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>NSE-2: Volume declining during current rally</strong> (-<strong>23%</strong> vs ADV 3M). Caution flag, not yet thesis-changing. _Monitor for distribution signature._ #J</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>NSE-3: NOK appreciates if oil firms</strong> — sterling-investor return improves. Don't overreact to FX moves either way. #J</div></div>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>🚩 A</td><td>High</td><td>Capital 11/11; 12M MA200 rising; compressed entry</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B/C</td><td>Medium</td><td>Norway resilient + premium-budget; ❌ NOK FX -12% YTD</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>A</td><td>High</td><td>NOK 1.1bn CMD credible; ARPM 5%; AI moat; Sweden recovery</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B/A</td><td>Medium-High</td><td>BB#1/3/4/5/6/8 strong; BB#7 Treningshelse mild</td></tr><tr><td>P5 SS Earnings Momentum</td><td>🚩 A</td><td>High</td><td>FactSet momentum 13/15; positive ALL 4 windows</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>B</td><td>High</td><td>Top-decile cheap absolute; +17% total return expected (incl. yield)</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/A — PROGRESS to ESA (CLEAN)</strong></td><td><strong>High</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net: SATS is a comparable-quality case to GYM but with momentum and yield. Comp-table v1's borderline-park framing was overcautious. Material reframing in comp-table v2.</em> #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="e-i-summary-judgement" data-spy>E.I — Summary judgement <span class="g gNR" title="PROGRESS">PROG</span></div>
+<p><strong>PROGRESS to ESA — CLEAN.</strong> No conditional gates. The operational evidence (FY25 record results, FCF +<strong>25%</strong>, first dividend, FactSet momentum 13/15 best-in-trio) is the strongest of the trio. ESA work is needed to test (a) Treningshelse competitive intensity, (b) FX hedging mechanics for sterling investor, (c) Q1-26 print detail. #J</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="e-ii-next-stage-actions-esa-workplan" data-spy>E.II — Next-stage actions (ESA workplan)</div>
+<p>1. <strong>Q1-26 print integration (30-Apr-26 result)</strong> — read print + post-result commentary; verify member softness was offset by ARPM. _Owner: APM ESA Phase 1._ #T 2. <strong>Treningshelse channel check</strong> — interview 3-5 Treningshelse / Sporty operators or former employees on Norwegian rollout pace. _Owner: RESEARCHER expert calls._ #T 3. <strong>NOK FX hedging mechanics analysis</strong> — compute hedging cost for 1-<strong>2%</strong> sterling portfolio sizing; assess hedge-overlay alternatives. _Owner: APM + COS._ #T 4. <strong>Sweden margin convergence path</strong> — model FY26-28 Sweden EBITDA margin trajectory toward Norwegian implicit <strong>20%</strong>. _Owner: APM ESA Phase 2._ #T 5. <strong>AI health coach product traction</strong> — request product KPIs (member usage, churn impact, NPS) from IR. _Owner: COS schedules IR; APM attends._ #T 6. <strong>Track-record-by-stock cross-check</strong> — pull cluster-moat domestic operator + ARPM compounding archetypes. _Owner: APM ESA Phase 1._ #T</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="e-iii-n-a-recommendation-is-progress" data-spy>E.III — N/A (recommendation is PROGRESS)</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="f-i-audit-trail" data-spy>F.I — Audit trail <span class="secn">2 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Phase 0 pre-flight:</strong> ✓ All 11 query files present + GYM-TRIO sector synthesis.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Phase 1+2 timing:</strong> 03-May-26.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="f-ii-coverage-gap-notes" data-spy>F.II — Coverage gap notes <span class="secn">3 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Triaging+ scope:</strong> ESA-stage research consulted; Triaging decision logic preserved.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Master Dashboard data:</strong> factset-ssem.json read directly (P5 quantification); factset-valuation.json does NOT contain SATS-NO; filter-results.json corrupted.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Q1-26 print (30-Apr-26):</strong> not yet integrated — ESA workplan #1.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="f-iii-cross-references" data-spy>F.III — Cross-references <span class="secn">2 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Comp-table: <code>Files/GYM-TRIO/synthesis/comp-table-skeleton-v1.md</code> (cited; v2 update follows)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">ESA Short-Sellers: <code>Files/SATS-NO/ESA/10-Short-Sellers/merged.md</code></div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="qc-footer" data-spy>QC FOOTER <span class="g gNR" title="PROGRESS">PROG</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">[W] SATS-NO Triaging A&amp;J memo v1 authored 03-May-26 by Watson (APM role). Source corpus: 73,831 words SATS-NO research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~5,200 words.</div></div>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~<strong>92%</strong> of metric bullets with comparison ✓ Principle #2 (A-F grading):              34/34 gradeable findings graded ✓ Principle #3 (invert markers ❌):         5 D/F findings marked (Treningshelse; NOK FX; AI substitution risk; volume decline; ACH#2; ACH#7) Principle #4 (🚩 RARE outlier markers):  9 RARE markers (first dividend + <strong>3.8%</strong> buyback combination; FCF +<strong>25%</strong> YoY; momentum 13/15; positive revisions ALL 4 windows; AI health coach <strong>85%</strong> churn prediction; 12M MA200 rising; <strong>2.07x</strong> EV/EBITDA; full-spectrum capital allocation; <strong>58%</strong> FCF conversion exceeds <strong>55%</strong> CMD) QC PILLAR DEFAULT: A / B-C / A / B-A / A / B QC CASE-LEVEL: B/A — PROGRESS to ESA (CLEAN — no conditional gates) SCOPE NOTE: Triaging+ — ESA-stage research consulted; Triaging decision logic SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: factset-ssem.json (03-May-26 build); SATS-NO/* research (02-May-26); GYM-TRIO comp-table-skeleton-v1 DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio; Q1-26 print not yet integrated VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};window.MEMO_GRANULAR={"master":[],"pillars":[{"roman":"1","label":"C.II.1 — Pillar 1: Technical Strength (TARGET 600w)","grade":null,"elements":[],"groups":[]},{"roman":"3","label":"C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 2,100w; 70% effort)","grade":null,"elements":[],"groups":[]},{"roman":"2","label":"C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 600w; flat shape)","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — 1&amp;1 AG (1U1-DE) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A - Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B -- Executive Summary<span class="nav-fc">23</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 -- Business Description<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 -- BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 -- Master Ratings</span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 -- Technical momentum<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-c">MR2 -- Sell-side earnings momentum<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 -- Thematic fit<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 -- Pillar I: Case change elements<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-d">MR5 -- Pillar II: Case building blocks<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 -- Pillar III: Investment case components [NR]</span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 -- Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 -- Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-and-recommendation">B.6 -- Action and Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C -- Pillar Analysis<span class="nav-fc">192</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 -- Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">54</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 -- Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">46</span></span>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr">Element E2 -- Required case outputs [NR]<span class="nav-fc">4</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr">Element E3 -- Sufficient TSR / valuation upside [NR]<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-d">C.2 -- Pillar II: Case building blocks<span class="nav-rating-pill D">D</span><span class="nav-fc">138</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 -- Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 -- Technical momentum [NR]</span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 -- Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr">Element E6 -- Sell-side earnings momentum [NR]</span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-d">Group 2 -- Case simplicity<span class="nav-rating-pill D">D</span><span class="nav-fc">82</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 -- Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">34</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 -- Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">48</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-d">Group 3 -- Core philosophy<span class="nav-rating-pill D">D</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 -- Great operator [NR]</span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 -- Advantaged business and widening competitive advantage [NR]</span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-d">Element E11 -- Value-chain dynamics<span class="nav-rating-pill D">D</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-f">Group 4 -- Case riskiness<span class="nav-rating-pill F">F</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 -- Case optionality [NR]</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D -- Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E -- Actions and Recommendation<span class="nav-fc">11</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F -- Appendices<span class="nav-fc">2</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 -- Source register</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 -- Process notes<span class="nav-fc">2</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 -- QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — 1&amp;1 AG (1U1-DE) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">1U1-DE</span> A&amp;J MEMO — 1&amp;1 AG (1U1-DE) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 14-Jul-26 12:30</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">~EUR 22-23 (estimated; see F.2)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">18.4x</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">33%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Estimated Above</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">1U1-DE (1&amp;amp;1 AG)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Telecommunications -- German mobile / broadband</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">European Telecoms</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">~EUR 22-23 (estimated; see F.2)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">n/a (absent from prices.json)</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">n/a (see F.2)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Estimated Above</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">18.4x</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">EUR 23.64 (consensus)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="memo-note">BLUF: 1&amp;1 AG is a binary-outcome infrastructure bet on German telecom consolidation; the standalone case carries a negative NPV but the M&amp;A floor (DB: EUR 34-47/share, 70-<strong>140%</strong> upside) creates a structural valuation asymmetry that justifies ESA-depth analysis.</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> - Executive Summary <span class="secn">23 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BLUF: 1&amp;1 AG is a binary-outcome infrastructure bet disguised as a German telecom operator: simultaneously building Europe's first cloud-native Open RAN 5G network and positioning itself as the obvious target for German mobile-market consolidation. The standalone case is mathematically challenged (DB assigns negative NPV of &gt;EUR 20/share to the network build and only <strong>40%</strong> probability to independent success) but the consolidation floor (DB: EUR 34-47/share, 70-<strong>140%</strong> upside) creates a structural valuation asymmetry that cannot be ignored. Q1 2026 EBITDA missed consensus by <strong>8%</strong>, guidance requires a heavily back-end-loaded H2, and the sell-side is unusually bifurcated (EUR 10 to EUR 31 price-target range), reflecting genuinely incompatible views on strategy rather than differing margin assumptions. The case passes the Triaging gate on change-force intensity and consolidation optionality but fails on case simplicity and predictability -- this is event-driven M&amp;A arbitrage, not a fundamental compounder.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> - Business Description <span class="secn">7 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Core transition.</strong> 1&amp;1 AG is executing a transformational pivot from an asset-light MVNO reseller to Germany's fourth fully functional physical mobile network operator (MNO), deploying Europe's first fully virtualised cloud-native 5G network on Open RAN technology</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Scale and customer base.</strong> The company manages 16.32 million customer contracts in Germany: 12.48 million mobile internet contracts and 3.84 million broadband access connections, generating EUR 3.336bn in service revenue (FY2025), plus hardware. All revenues are <strong>100%</strong> domestic</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Versatel integration.</strong> A December 2025 intra-group acquisition of 1&amp;1 Versatel from parent United Internet (UTDI-DE, <strong>86.46%</strong> owner) for EUR 1.3bn added a 68,500km fibre-optic network spanning 350 German cities, reorganising the group into two new segments: Consumer &amp; Small Business and Enterprises &amp; Networks</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Financial character.</strong> Revenue stagnated at ~EUR 4.07-4.09bn for three years. EBITDA fell from EUR 654m (FY23) to EUR 591m (FY24) to EUR 522m (FY25) under network rollout opex pressure, before guided recovery to EUR 800m (FY26E). EBIT margin has compressed to <strong>6.5%</strong>. Cash capex guided to EUR 500-550m (FY26E), sustaining through 2028; net leverage ~<strong>2.5x</strong> post-Versatel</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Investment style.</strong> Event-driven binary-outcome -- value is realised through either successful network completion (low probability, high payoff) or consolidation/strategic pivot (medium-high probability, high payoff). Not a compounder; not a steady-state fundamental case</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Ownership structure.</strong> UTDI (parent) holds <strong>86.46%</strong>. Founder-CEO Ralph Dommermuth indirectly controls ~<strong>48.94%</strong> of UTDI. Squeeze-out overhang exists at ~<strong>90%</strong> and accelerates at <strong>95%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Sell-side pool.</strong> Seven broker-dealers active; 5 named analysts. 2 Buys (DB EUR 27, Berenberg EUR 31), 2 Neutrals, 1 UPF (Bernstein EUR 10.40). Consensus TP EUR 23.64. Buy rating <strong>33%</strong></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> - BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>STRONG CHANGE-FORCE INTENSITY -- but concentrated on one binary fulcrum.</strong> The scale of strategic transformation -- MVNO to MNO, founder exit, wholesale pivot, M&amp;A optionality -- is exceptional within the European telecom sector. However, five drivers all cascade from one event: the network rollout succeeds or it does not</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>STANDALONE CASE IS MATHEMATICALLY NEGATIVE.</strong> DB models the standalone-only value at EUR 13.50/share and independently flags a &gt;EUR 20/share negative NPV on the network build. Bernstein (UPF, EUR 10.40) argues the execution record is too poor to justify the risk. Only <strong>40%</strong> probability assigned by DB to standalone success</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>CONSOLIDATION FLOOR IS REAL BUT UNCONTROLLABLE.</strong> Telefonica DE (O2D) is structurally distressed from the 1&amp;1 wholesale loss; a 4-to-3 consolidation unlocks EUR 34-47/share per DB modelling. But acquisition talks reportedly froze pending resolution of Open RAN instability. Floor exists; timing does not</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>GUIDANCE CREDIBILITY IS LOW.</strong> FY24 EBITDA missed original guidance by ~EUR 130m. FY25 guidance cut mid-year. Q1 2026 missed by <strong>8%</strong>. FY26 target of EUR 800m requires steep H2 acceleration with zero margin for error</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>DECISION: PROGRESS.</strong> The change-force intensity, consolidation optionality, and asymmetric upside scenario exceed the Triaging bar despite poor underlying momentum. ESA must resolve: (1) network coverage velocity vs year-end <strong>35%</strong> target; (2) Vodafone roaming cost normalisation trajectory; (3) M&amp;A probability update</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> - Master Ratings</div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> - Technical momentum <span class="g gB">B</span></div>
+<p>Notion records "Double green" (price vs 50-day MA) and MM 8-Point 7/8 (missing only point 6). Live price data absent from master-dashboard pipeline (1U1-DE not in prices.json or universe.json). Grade B based on available Notion signals; requires verification at ESA.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-c" data-spy><span class="id">MR2</span> - Sell-side earnings momentum <span class="g gC">C</span></div>
+<p>Split picture: EPS revisions deeply negative (L12M: -11) as network costs weigh on net income; EBITDA revisions strongly positive (L3M: +22, L6M: +22) as recovery thesis gains traction. Buy% only <strong>33%</strong>. Target-price revisions positive (L6M: +15) but from a low base. Net: mixed, skewed negative near-term on EPS.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> - Thematic fit <span class="g gC">C</span></div>
+<p>European telecom consolidation wave is a live structural theme providing a genuine tailwind to the M&amp;A case. AI/data-demand growth is mildly positive for mobile data volumes. Macro headwinds (German economic stagnation, high-capex penalty at elevated rates) are negative. Net thematic support: moderate and time-conditional. See E5.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> - Pillar I: Case change elements <span class="g gB">B</span></div>
+<p>E1 change-force intensity is exceptionally high -- perhaps the highest in the European telecom cohort right now. Both internal (founder exit, MVNO to MNO, segment restructure) and external (German 4-to-3 consolidation logic, BNetzA spectrum ruling, Vodafone wholesale shift) forces are material and concurrent.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-d" data-spy><span class="id">MR5</span> - Pillar II: Case building blocks <span class="g gD">D</span></div>
+<p>E5 (thematic fit) is moderate; E7 (case simplicity) is D -- genuinely complex binary-outcome case with cascading driver interdependencies; E8 setups point primarily to RA5 (huge change-from-current clearing event in solid quality); E11 value-chain dynamics are structurally challenging. Net: D at Triaging depth.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> - Pillar III: Investment case components [NR]</div>
+<p>Not applicable at this stage.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> - Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar I is the standout feature of the 1&amp;1 case at Triaging: change-force intensity is exceptionally high on both internal and external dimensions, driven by concurrent CEO succession, MVNO to MNO strategic pivot, and a live German consolidation window. E2 and E3 are not in scope at Triaging but both warrant close scrutiny at ESA given the binary outcome structure.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 -- Required input change forces. <span class="g gB">B</span></strong> Exceptionally high change intensity on both RA1 (change forces present) and RA2 (base quality). The five concurrent change forces (founder exit, MVNO-to-MNO pivot, wholesale partner change, Versatel integration, consolidation window) are among the highest in the European telecom cohort. Base delivery is poor but the consolidation floor provides a partial buffer against permanent value impairment</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 -- Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at this stage; first written at Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 -- Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at this stage; first written at Early-Stage Assessment. Preliminary note: consolidation scenario implies 70-<strong>140%</strong> upside to DB's EUR 34-47 range. Standalone floor at EUR 13.50 implies ~<strong>40%</strong> downside</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> - Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II at Triaging depth is dominated by structural complexity. The case fails the simplicity guardrail (E7) -- it is a binary outcome driven by cascading interdependent events. Thematic fit (E5) is moderate. The value-chain position (E11) is structurally challenging: 1&amp;1 sits at the retail end of the value chain while executing an upstream integration against entrenched incumbents with <strong>20x</strong> greater site coverage. Group 4 riskiness is among the highest in the cohort.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 -- Case momentum. <span class="g gC">C</span></strong> Technical momentum strong (double green / 7/8 MM); sell-side momentum mixed (EPS negative, EBITDA positive); thematic fit moderate. Net: C</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 -- Case simplicity. <span class="g gD">D</span></strong> E7 flags -- case is complex binary-outcome with cascading driver interdependencies; E8 primary setup is RA5 (huge change-from-current) with RA3 (corporate change) as secondary. Multiple cascading interdependencies. D at Triaging depth</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 -- Core philosophy. <span class="g gD">D</span></strong> E11 value-chain dynamics are challenging: 1&amp;1 is subordinate to Vodafone (roaming), Vantage Towers (passive infrastructure), regulators (spectrum), competing against incumbents with structural cost advantages of 10-<strong>20x</strong> in network scale</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 -- Case riskiness. <span class="g gF">F</span></strong> Binary outcome; negative standalone NPV; sequential failure cascades identified in Risks report (10 failure modes); FALSE FRIEND scenarios identified in ACH analysis. F at first-pass Triaging observation</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 -- Case optionality. <span class="g gNR">NR</span></strong> Not yet in scope at Triaging. Preliminary note: M&amp;A optionality is the primary value driver -- to be developed at ESA</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-and-recommendation" data-spy><span class="id">B.6</span> - Action and Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The case passes the Triaging gate on change-force intensity and M&amp;A floor optionality, but it is a binary event-driven special situation rather than a fundamental long. ESA must answer whether the consolidation probability has increased or decreased since Q1 2026.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> (1) Network coverage trajectory must show &gt;=300 sites/quarter velocity; (2) Vodafone roaming cost trajectory must show stabilisation or improvement; (3) No M&amp;A collapse signal (i.e., Telefonica has not definitively withdrawn from all discussions)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to initiate two IA-initiated KQ Research queries on Vodafone roaming capacity pricing model and German mobile consolidation regulatory landscape (commissioned during this memo -- see F.2); (2) Richard to review 1U1-DE position-sizing constraints before ESA writeup begins (binary-outcome stock requires position-size deliberation)</div></div>
+<div class="memo-closing">Closing summary: the 1&amp;1 Triaging pass is narrow -- change-force intensity is exceptional and the M&amp;A floor is real, but the case is a binary event-driven special situation with a D/E risk profile, not a fundamental compounder; ESA must resolve M&amp;A probability, network velocity, and roaming cost trajectory before capital is committed.</div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> - Pillar Analysis <span class="secn">192 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">At Triaging depth, 1&amp;1 presents an unusual analytical profile: change-force intensity is genuinely exceptional (among the highest in the European telecom cohort), but the investment case is structurally complex, the delivery record is poor, and the valuation outcome is binary. The analyst task at this stage is not to resolve the binary but to determine whether the change-force intensity and optionality structure justify deeper work. The answer is yes, narrowly. The case progresses to ESA with a clear agenda: update M&amp;A probability, track network coverage velocity, and stress-test the Vodafone roaming cost assumptions that determine whether the standalone path is viable or whether distress accelerates consolidation.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> - Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">54 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E1 is the most important Element at Triaging and the strongest part of the 1&amp;1 case. Both internal and external change forces are exceptionally high -- concurrent CEO succession, strategic pivot, segment restructure, wholesale partner change, German consolidation window, and regulatory spectrum inflection. RA2 (base quality) is the offset: delivery has been poor, the base carries negative standalone NPV risk, but the M&amp;A floor partially mitigates the risk of permanent value impairment.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 -- Required input change forces <span class="g gB">B</span> <span class="secn">46 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Change-force intensity at 1&amp;1 is among the highest in the European telecom cohort right now, driven by the concurrent arrival of five material forces. Base quality is challenged -- repeated delivery misses and structural cost disadvantages -- but the consolidation floor creates a partial buffer against permanent value impairment.</div></div>
+<p><strong>E1 RA1 -- Change forces present</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">1&amp;1 is simultaneously navigating five major concurrent change forces: (1) founder-CEO succession without a named replacement; (2) strategic pivot from MVNO to MNO -- a multi-year infrastructure bet with binary economics; (3) wholesale partner change from Telefonica to Vodafone with a new 15-year national roaming agreement through 2039; (4) the Versatel intra-group acquisition integrating a 68,500km fibre network and two new reporting segments; and (5) a live German mobile consolidation window with Telefonica Deutschland structurally distressed from the lost 1&amp;1 wholesale contract</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The scale of strategic transformation is genuinely unusual by European telecom standards -- building Europe's first fully virtualised 5G Open RAN network from scratch as a greenfield MNO against three entrenched incumbents (DTE ~33,000 sites, VOD ~27,000 sites, O2D ~27,000 sites) while 1&amp;1 has only ~2,000 operational sites</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The German regulatory environment is at an inflection point -- the BNetzA's 2018 frequency allocation was ruled unlawful in 2024, triggering a new spectrum consultation; a favourable low-band shared spectrum access ruling could improve network economics materially; denial could render rural outdoor coverage economics unviable without large additional capex</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Parent United Internet (UTDI-DE) has been systematically purchasing 1&amp;1 minorities, increasing its stake from <strong>78.32%</strong> to <strong>86.46%</strong> in FY2025, positioning the group for either a full squeeze-out or a negotiated sale of 1&amp;1 to a third-party acquirer</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Media reports (confirmed by Morgan Stanley, February 2026) indicated Telefonica was exploring a EUR 4.5-5.0bn acquisition of 1&amp;1; although management denied active negotiations in March 2026, the industrial logic is compelling: 4-to-3 German market consolidation eliminates O2D's structural damage from the lost 1&amp;1 wholesale contract</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">The German alt-net environment is in structural distress, creating secondary consolidation opportunities; high interest rates have forced widespread fibre rollout slowdowns at smaller alt-nets; the Gigabit Infrastructure Act fast-tracks permitting, creating a regulatory tailwind specifically for network builders</div></div>
+<p><strong>CQ1 -- Strong external change forces / tailwinds:</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">German mobile market consolidation logic: the loss of the 1&amp;1 wholesale contract (~EUR 500m in annual revenues for O2D) has structurally wounded Telefonica Deutschland -- Q1 2026 showed revenues down <strong>5.7%</strong>, EBITDA down <strong>8.8%</strong>, FCF down <strong>48.3%</strong>; the distress is creating consolidation pressure from within the incumbent group</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Vodafone wholesale partnership -- structural opex tailwind: migrating mobile customers to Vodafone national roaming eliminates the prior Telefonica agreement; as 1&amp;1 builds its own network, traffic migrates off Vodafone and roaming payments structurally fall; 12 million customers already migrated by November 2025</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Spectrum regulatory inflection: the BNetzA ruling that the 2018 spectrum allocation was unlawful reopens the spectrum access question; if the regulator mandates low-band 800MHz shared access to 1&amp;1, indoor coverage quality could match incumbents at a fraction of the additional site-density cost required in mid-band only</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Gigabit Infrastructure Act: new legislation classifying digital networks as being of overriding public interest accelerates local permitting -- specifically addressing the physical site-access bottleneck that has slowed the antenna rollout; a direct government-level tailwind for 1&amp;1's build programme</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Geopolitical supply-chain tailwind -- Huawei exclusion: 1&amp;1 is the only German operator to have completely excluded Huawei from its network architecture; as European governments tighten supply-chain security requirements on telecoms, 1&amp;1's vendor-diverse, Huawei-free Open RAN architecture gains a structural competitive advantage for potential M&amp;A buyers or JV partners</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Alt-net distress creating fibre acquisition opportunities: the Versatel acquisition completed in December 2025 at ~<strong>7.3x</strong> 2026E EV/EBITDA; as additional alt-nets face balance-sheet stress, further fibre consolidation at attractive multiples becomes available</div></div>
+<p><strong>CQ2 -- Strong internal change forces:</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">MVNO to MNO strategic pivot: this is the defining internal change force -- abandoning the asset-light model that generated a stable EUR 650-700m annual EBITDA in favour of a capital-intensive infrastructure build that temporarily depresses margins to <strong>16.8%</strong> EBITDA margin (Q1 2026) en route to a guided EUR 800m for FY2026 and EUR 100m annual EBITDA growth in 2027-28</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Founder-CEO phased exit -- no named successor: Ralph Dommermuth (35-year operator, waived salary since 2016, ~<strong>48.94%</strong> indirect UTDI stake) has announced a phased retirement without naming a successor; his son will not follow; CFO Sascha D'Avis is new (January 2025)</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Versatel integration and segment restructure: two new reporting segments (Consumer &amp; Small Business, Enterprises &amp; Networks) launched January 2026; the acquisition introduced a EUR 950m loan liability directly onto 1&amp;1's balance sheet via a cashless intra-group structure</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">New CFO D'Avis executing the peak capex cycle: D'Avis assumed responsibility January 1, 2025, at the onset of the most capital-intensive period in 1&amp;1's history; cash capex guided to EUR 500-550m in FY2026, up from EUR 409m in FY2025, sustaining through 2028; the team has no prior MNO build experience</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">May 2024 network outage and recovery: a catastrophic multi-day network outage in May 2024 exposed underscaled core architecture, halted customer migrations for six months, and resulted in zero compensation paid from Rakuten (EUR 100m expected); the recovery -- all 12 million customers migrated and <strong>27%</strong> household coverage achieved by December 2025 -- demonstrates resilience but cannot erase the credibility damage</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Subscriber base stabilisation: total contracts flat at 16.32m QoQ in Q1 2026 -- stabilisation after sequential losses in Q4 2025; reflects deliberate management choice (no margin-dilutive promotions) rather than demand recovery, but removes the acute worry of a collapsing base during the transition period</div></div>
+<p><strong>E1 RA2 -- Robust base assessment:</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Base quality at 1&amp;1 is structurally challenged vs the European telecom cohort: the company is smaller than every European telecom incumbent by a factor of 10-<strong>30x</strong> (EUR 4.07bn revenue vs DTE EUR 115.8bn, VOD EUR 33.5bn service revenue); it lacks the procurement scale, network density, and regulatory leverage that incumbent balance-sheet strength confers</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The three-year EBITDA trajectory is negative: EUR 654m (FY23) to EUR 591m (FY24) to EUR 522m (FY25); this is a declining earnings base, not a stable one; every year of the network build compresses the financial profile further</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Balance sheet has deteriorated materially: long-term liabilities rose <strong>191.5%</strong> to EUR 3.8bn in FY2025 driven by the Versatel intra-group acquisition; net leverage ~<strong>2.5x</strong> EBITDA, constrained given the EUR 500-550m annual capex commitment and the absence of free cash flow generation; United Internet parent is providing shareholder loans (EUR 225m in Q1 2026) to bridge cash requirements</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">The M&amp;A floor provides a partial base-quality buffer unavailable to normal operational plays: if the standalone build fails, DB models consolidation values of EUR 34-47/share, implying the base retains strategic asset value even under operational distress; this consolidation floor differentiates 1&amp;1's base from a genuinely impaired company</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Governance quality is concerning for minorities: dual CEO roles (Dommermuth runs both 1&amp;1 and UTDI), business premises leased from Dommermuth family (EUR 9m annual payments), Versatel acquired via a fully cashless intra-group transaction that transferred EUR 950m of UTDI debt directly onto 1&amp;1's balance sheet</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">The customer base of 16.32 million contracts is a real asset -- 24-month minimum-term contracts generating EUR 3.3bn in highly predictable subscription revenue; its stability is a key monitoring variable: this is the traffic volume that can eventually be migrated to the proprietary network to eliminate roaming costs</div></div>
+<p><strong>CQ3 -- Past and present fundamental delivery assessment:</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Delivery record is poor: L3Y EBITDA trajectory shows FY24 actuals of EUR 590.8m missing the original March 2024 guidance of ~EUR 720m by ~EUR 130m; FY25 guidance was cut mid-year from EUR 571m to EUR 545m; Q1 2026 missed by <strong>8%</strong>; Q4 2025 missed by <strong>15.8%</strong>; this is a consistent pattern of over-optimism on near-term costs, not an occasional miss</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">The guidance credibility problem is structural, not cyclical: management's capacity pricing model for the Vodafone roaming agreement has repeatedly underestimated cost growth; each miss traces back to the same mechanism -- data volume growing faster than the proprietary network's ability to absorb it</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Strategic delivery has been mixed: the May 2024 network outage was a severe operational failure; the recovery -- completing all 12 million customer migrations by November 2025 and reaching <strong>27%</strong> household coverage by December 2025 ahead of the regulatory <strong>25%</strong> mandate -- was delivered; pattern: hit strategic milestones eventually, but trajectory is bumpier than promised</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">Mid-term guidance (EUR 100m annual EBITDA growth for 2027-28) was issued for the first time in March 2026; DB characterised this as "pointing to value under a deal" -- more important as an M&amp;A signal than a standalone operational guide; Bernstein dismissed the guidance as speculative</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Service revenue has been flat to declining: FY2025 service revenues at EUR 3.30bn were flat YoY; Q1 2026 service revenue declined <strong>1.2%</strong> YoY; management guided to flat service revenue for FY2026; the commercial momentum picture is the most challenging part of the delivery record</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">The honest-tracker archetype applies partially: management does update guidance mid-year when cost shocks materialise rather than waiting and surprising at year-end; this is a modest positive signal for governance transparency, but it does not compensate for persistently optimistic initial guidance</div></div>
+<p><strong>CQ4 -- Large change-from-current / mispricing opportunity:</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">The change-from-current opportunity is large and asymmetric: DB's consolidation scenario values the equity at EUR 34-47/share vs the current implied price of ~EUR 22-23 -- a 48-<strong>104%</strong> upside scenario</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">The mispricing argument for bulls: if DB is correct that there is a <strong>60%</strong> probability of a strategic pivot, and <strong>60%</strong> x EUR 40 average consolidation value = EUR 24 expected value, then the market is pricing approximately zero standalone value alongside the full consolidation option, suggesting the market may be correctly pricing the distribution rather than being obviously wrong</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The mispricing argument for bears: if Bernstein is right that underlying commercial momentum is broken, the standalone rollout NPV is negative EUR 20/share, and the company is trapped in an escalating wholesale cost spiral, the fair value is EUR 10-14 and current prices represent ~<strong>40%</strong> downside</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">The key insight is that the binary nature of the outcome means there is no conventional "fair value" -- only two distributions anchored at very different points; investment analysis must focus on which distribution is more probable, not on a single central estimate</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">The current price (~EUR 22-23) reflects: (a) optionality on consolidation at approximately EUR 40/share; (b) discounted by execution risk; (c) with a partial floor from the UTDI <strong>86.46%</strong> stake preventing outright value collapse; this is a reasonable market price given genuine uncertainty</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">The largest change-from-current opportunity per DB and Bernstein's combined analysis is not the standalone case but the consolidation event: a Telefonica/1&amp;1 merger would be transformative for German mobile market structure, eliminate O2D's wholesale revenue problem, and create a second high-quality mobile infrastructure company in Germany</div></div>
+<p><strong>CQ5 -- Low trading multiple vs peers:</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">On a reported EPS basis, the multiple is HIGH -- P/E <strong>18.4x</strong> at the 76th historical percentile; expensive in absolute terms and vs European telecom incumbents (DTE at ~14-<strong>16x</strong>, KPN at ~<strong>18x</strong>, VOD recovering); on this measure, 1&amp;1 does not screen cheap</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">However, the EPS is heavily depressed by network rollout costs -- depreciation on spectrum rights, network equipment, and operational network losses (Enterprises &amp; Networks segment EBITDA-negative at -EUR 9.5m in Q1 2026); on a normalised or mid-cycle EBITDA basis, or on a consolidation value basis, the multiple is very different</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">On EV/EBITDA: if FY2026 EBITDA reaches EUR 800m (management guidance), EV/EBITDA is approximately 5-<strong>6x</strong> -- cheap vs European telecom median of ~6-<strong>8x</strong> for a company with growing EBITDA; but achieving EUR 800m requires unprecedented H2 acceleration from Q1's EUR 192m run-rate</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">The Bernstein UPF target (EUR 10.40) implies <strong>17.0x</strong> 2026E EV/OpFCF at the downside vs the <strong>13.6x</strong> sector median -- still at a premium to peers even in the bear case, reflecting the M&amp;A optionality floor</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">The DB Buy thesis relies not on cheapness but on optionality value: at current prices, DB models suggest the equity is approximately fairly valued if you believe the 60/40 probability split between strategic pivot and standalone; this is not a classic cheap stock but a contingent-value claim</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext">EPS revisions are deeply negative (L12M: -11) -- not consistent with a low-multiple / earnings upgrader thesis; the positive EBITDA revisions (L3M: +22) and target-price revision trend (L6M: +15) are more relevant to how the sell-side is framing this</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The strongest counter-view is that this is a value trap masquerading as a special situation. Bernstein's thesis is coherent: the commercial momentum is broken, the standalone economics are negative, and the M&amp;A thesis assumes a buyer who has frozen negotiations and faces its own capital constraints. On this view, the "exceptional change-force intensity" is simply exceptional risk, not exceptional opportunity. Watson does not dismiss this counter-view -- it is the most rigorous analytical position available at Triaging depth. However, the counter-view does not invalidate progress to ESA; it defines what ESA must resolve</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext"><strong>Downstream actions (E1):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext">(1) Watson to commission KQ Research on Vodafone roaming capacity pricing mechanics and the sensitivity of EBITDA to data volume growth assumptions -- the single most critical quantitative variable in the near-term case</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext">(2) Watson to track Q2 2026 site-deployment count when reported (target 300/quarter; Q1 capex of only EUR 95m suggests Q2-Q4 deployment velocity must accelerate significantly to meet the year-end <strong>35%</strong> coverage target)</div></div>
+<p><strong>Element E1 rating: <span class="g gB">B</span></strong> -- exceptionally high change-force intensity on both internal and external dimensions. RA2 (base quality) drags from A: delivery record is poor, governance is sub-standard for minorities, and the standalone economics are challenged. The consolidation floor prevents a C rating.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr" data-spy>Element E2 -- Required case outputs [NR] <span class="secn">4 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at this stage. E2 is first written at Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Counter-view considered (E2):</strong> N/A</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Downstream actions (E2):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">(1) At ESA, develop E2 at first-pass depth</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">(2) Preliminary note: the consolidation scenario implies a &gt;<strong>70%</strong> change-from-current in the equity value -- E3 (TSR/valuation upside) will be straightforward to grade at ESA if M&amp;A probability is confirmed at ~<strong>60%</strong></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr" data-spy>Element E3 -- Sufficient TSR / valuation upside [NR] <span class="secn">4 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at this stage. E3 is first written at Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Counter-view considered (E3):</strong> N/A</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Downstream actions (E3):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">(1) At ESA, develop E3 at first-pass depth using DB's EUR 34-47 consolidation scenario as the primary upside anchor</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">(2) Develop the standalone scenario (DB: EUR 13.50) as the downside anchor and stress-test the probability weights</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-d" data-spy><span class="id">C.2</span> - Pillar II: Case building blocks <span class="g gD">D</span> <span class="secn">138 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II at Triaging depth is where the 1&amp;1 case encounters its most significant structural friction. E5 (thematic fit) is moderate but not transformative. E7 (case simplicity) flags seriously -- the case is a multi-layered binary outcome with cascading driver interdependencies, not the focused 2-driver bet the framework prefers. E8 (case setups) reveals the case closest fits RA5 (huge change-from-current clearing event in solid quality) and RA3 (strong corporate change driven EPSU/EPT), both valid but above-average execution risk. E11 (value-chain dynamics) reveals a structurally disadvantaged position across nearly every dimension.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> - Case momentum <span class="g gC">C</span> <span class="secn">28 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Technical momentum signals are constructive (double green, 7/8 MM 8-Point) but sell-side earnings momentum is split: EPS revisions deeply negative, EBITDA revisions strongly positive. Net case momentum: C.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 -- Technical momentum [NR]</div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at this stage as a standalone element; technical momentum signals are captured in MR1 above. E4 is first written substantively at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 -- Thematic fit <span class="g gC">C</span> <span class="secn">28 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E5 assessed on the four RA structure without reference to the "Risk-off bear market cycle" Notion tag (per Richard's explicit instruction Q3). THEMATICS PAUSE active -- active.md not loaded; CQs authored fresh against current macro environment. Thematic fit is moderate: European telecom consolidation provides a genuine structural tailwind; AI data-demand theme is mildly positive; macro headwinds from German stagnation and elevated rates are real. Net: C.</div></div>
+<p><strong>E5 RA1 -- Suitability under bear market / economic downturn conditions:</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext">CQ1 -- Defensive revenue characteristics: 1&amp;1's service revenue base of EUR 3.3bn is derived from 24-month minimum-term contracts; mobile and broadband connectivity has demonstrably low income elasticity; subscribers do not cancel connectivity contracts during recessions; structural defensive attribute for this portion of the thesis</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext">CQ2 -- Exposure to capital market conditions: the investment case is acutely sensitive to capital market conditions because the M&amp;A scenario requires a buyer to fund a EUR 4.5-5.0bn acquisition; in a deep risk-off bear market, M&amp;A financing conditions tighten and strategic deal-making decelerates; the consolidation floor is conditional on capital market openness</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext">CQ3 -- Capex funding risk: the EUR 500-550m annual capex programme is funded through operating cash flow (negative after leases), United Internet parent loans, and external financing; in a bear market with tightening credit spreads, the financing cost of the network build increases and the parent's willingness to subsidise the programme faces greater scrutiny</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext">CQ4 -- German economic sensitivity: while individual mobile/broadband spending is defensive, a prolonged German economic downturn would suppress value-tier ARPU growth, increase price competition from DTE and VOD, and delay the service revenue inflection management is banking on for FY2026</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext">CQ5 -- Bear market acceleration thesis: in a severe bear market that forces distress selling and M&amp;A activity acceleration among over-leveraged alt-nets, 1&amp;1's consolidation catalyst could arrive earlier, not later; distress scenarios historically compress deal timelines</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext">CQ6 -- Net RA1 assessment: moderately resilient on the revenue side (subscription contracts); vulnerable on the capital structure side (network funding, M&amp;A financing); bear market is a headwind for the investment case primarily through its impact on deal-making conditions, not operating fundamentals</div></div>
+<p><strong>E5 RA2 -- Suitability under AI disruption conditions:</strong></p>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext">CQ1 -- AI data demand growth: the emergence of AI applications as a new category of high-bandwidth mobile data consumption is a structural demand-growth driver for mobile networks; if AI inference and interactive AI assistants become ubiquitous on mobile devices, data volume per user grows -- directly benefiting a network-owning MNO vs a wholesale reseller paying capacity-based fees</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext">CQ2 -- Open RAN and AI integration: 1&amp;1's cloud-native, software-defined network architecture is structurally better positioned to integrate AI-enabled network optimisation tools (intelligent traffic routing, predictive maintenance, dynamic spectrum management) than traditional monolithic network architectures</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext">CQ3 -- AI disruption to the operator model: the bear case on AI disruption to telecoms is that AI-driven competitors (including hyperscaler-backed virtual operators) could bypass traditional MNO infrastructure entirely; 1&amp;1's scale is too small to absorb this risk if it materialises</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext">CQ4 -- AI in the value chain: upstream from 1&amp;1, Rakuten (the network system integrator) is deploying AI tools in network management; IONOS (UTDI's cloud subsidiary) is embedding AI aggressively; UTDI group-level AI momentum creates a positive context for the parent's willingness to continue funding the 1&amp;1 build</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext">CQ5 -- Timing mismatch: any AI-driven data demand uplift will manifest over a 3-7 year horizon, beyond the 1-3 year binary resolution horizon for the 1&amp;1 investment case; the AI tailwind is real but irrelevant to the near-term consolidation or standalone-viability question</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext">CQ6 -- Net RA2 assessment: mild positive; the Open RAN architecture has structural AI-readiness advantages; AI data demand growth is directionally positive; but neither factor is decisive in the 12-36 month case horizon</div></div>
+<p><strong>E5 RA3 -- Suitability under oil-price-induced inflation / demand deterioration conditions:</strong></p>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext">CQ1 -- Direct energy cost exposure: mobile network infrastructure has significant energy consumption; an oil-price-driven energy inflation spike would directly increase operating costs; the Open RAN architecture claims 10-<strong>30%</strong> energy savings vs traditional RAN, providing some buffer, but this is an offset, not immunity</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext">CQ2 -- Input cost inflation: equipment procurement costs (passive towers, active antenna hardware, cable, civil engineering) are sensitive to commodity and energy inflation</div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext">CQ3 -- Demand resilience: subscription telecoms is genuinely defensive under demand deterioration -- mobile connectivity is not discretionary in the modern economy; 1&amp;1's subscriber retention should hold; ARPU growth would stall</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext">CQ4 -- Vodafone roaming cost linkage: if oil price inflation drives German energy costs up materially, Vodafone will face higher network operating costs and may be less willing to absorb cost increases within the fixed capacity-pricing model of the roaming agreement</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext">CQ5 -- M&amp;A timeline sensitivity: inflationary scenarios typically increase deal risk premiums and extend due diligence timelines; an inflation shock that tightens both credit markets and regulatory timelines delays the consolidation catalyst</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext">CQ6 -- Net RA3 assessment: mild negative; energy-cost exposure is real for a network builder; inflation extends M&amp;A timeline; demand is defensive; net: mildly negative, manageable</div></div>
+<p><strong>E5 RA4 -- Paradigm fit from business perspective:</strong></p>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext">CQ1 -- European telecom consolidation paradigm: the clearest thematic tailwind is the ongoing wave of European telecom consolidation -- Vodafone/Three UK received regulatory approval; Spanish consolidation potential; German market logic for 4-to-3 is strong; 1&amp;1 is directly positioned as the most obvious German consolidation target</div></div>
+<div class="finding cq-level"><span class="fnum">20.</span><div class="ftext">CQ2 -- Digital infrastructure investment paradigm: there is a broad secular theme of sovereign digital infrastructure investment -- government-backed funding for fibre and 5G nationwide coverage; the Gigabit Infrastructure Act is a direct expression of this; 1&amp;1's network build is aligned with this theme</div></div>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext">CQ3 -- Network vendor diversification / Huawei exclusion paradigm: Western governments' push to eliminate Huawei from critical telecoms infrastructure creates a positive context for 1&amp;1's vendor-diverse, Huawei-free architecture; a modest but genuine thematic tailwind</div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext">CQ4 -- Mismatch with current high-quality compounder paradigm: 1&amp;1 does not fit the paradigm of a stable, predictable, high-ROCE compounder; the binary outcome structure, poor recent delivery record, and governance concerns create a paradigm mismatch for quality-focused investors</div></div>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext">CQ5 -- Fit with event-driven / special situations paradigm: the case fits clearly within the event-driven M&amp;A arbitrage paradigm -- buying a distressed asset at a discount to consolidation value while waiting for the trigger; this paradigm works when the probability of the event exceeds the market's implied probability</div></div>
+<div class="finding cq-level"><span class="fnum">24.</span><div class="ftext">CQ6 -- Net RA4 assessment: paradigm fit is context-dependent; strong fit for event-driven/M&amp;A arbitrage; weak fit for quality/compounder/fundamental-momentum strategies; given Viewforth's long-only mandate and preference for predictable EPS trajectories, this is not a natural-fit stock</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> The strongest counter on thematic fit is that the European telecom consolidation theme is widely known, well-priced, and does not represent a differentiated entry point; multiple sell-side analysts already factor in M&amp;A optionality; the theme may be "in the price"</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><strong>Downstream actions (E5):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">(1) At ESA, revisit active.md when the THEMATICS PAUSE concludes and update E5 if any new active thematics are relevant</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">(2) Monitor BNetzA spectrum consultation timeline and any political signals on German telecom consolidation policy</div></div>
+<p><strong>Element E5 rating: <span class="g gC">C</span></strong> -- European telecom consolidation provides a genuine structural tailwind (RA4 CQ1); AI data demand growth is mildly positive for the M&amp;A case and for the standalone network economics at scale (RA2 CQ1-CQ2); macro and inflation scenarios are mild negatives primarily through their impact on M&amp;A financing conditions and energy costs rather than demand (RA1 CQ2-CQ3, RA3 CQ1-CQ2); paradigm fit is strong for event-driven/M&amp;A arbitrage and weak for quality/compounder strategies (RA4 CQ4-CQ5). The cohort comparison is instructive: DTE-DE (B) benefits from its scale and network quality in all macro scenarios; KPN-NL (B) benefits from high EBITDA margins (<strong>47.5%</strong>) creating substantial buffer; O2D-DE (D) is structurally vulnerable; UTDI-DE (C) is partially hedged through its diversified IONOS cloud segment. Against this cohort, 1&amp;1's thematic position is middle-of-pack: better than O2D (which has lost the wholesale revenue stream entirely and faces accelerating M&amp;A pressure from above), worse than DTE and KPN which have stable multi-scenario thematic fit. The event-driven M&amp;A optionality is the differentiating factor relative to peers -- no other cohort member has the same binary upside profile, which explains why the sell-side dispersion at 1&amp;1 (EUR 10.40 to EUR 31.00) is triple the dispersion seen at any other cohort member. On balance, C is the appropriate grade: thematic support is real but conditional on the M&amp;A catalyst arriving within the investment horizon, and the paradigm mismatch with quality/compounder strategies means the stock requires event-driven framing to be held appropriately.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr" data-spy>Element E6 -- Sell-side earnings momentum [NR]</div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at this stage; E6 is first written substantively at Early-Stage Assessment. Sell-side earnings momentum is captured in MR2 above.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-d" data-spy><span class="id">Grp 2</span> - Case simplicity <span class="g gD">D</span> <span class="secn">82 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 (case simplicity) flags seriously: the case is a multi-layered binary outcome with cascading driver interdependencies. E8 (acceptable case setups) reveals primary fit in RA5 (huge change-from-current) with secondary in RA3 (corporate change), both valid but above-average execution risk. The FALSE FRIEND risk (identified in ACH analysis in Risks report) is a specific and material monitoring flag. Net: D.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 -- Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">34 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 at Triaging reveals the most significant structural concern about the 1&amp;1 case: the investment case is not simple. It is a multi-layered binary outcome with cascading driver interdependencies that make it unsuitable for a set-and-monitor long position. E7 carries x2 double-weight at Triaging.</div></div>
+<p><strong>E7 RA1 -- Focused bet:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">The 1&amp;1 case fails the focused bet guardrail at first-pass: there are five identified key drivers and they are not independent -- they cascade sequentially; Deutsche Bank's cross-driver analysis explicitly identifies the Open RAN rollout as "completely dependent on" the regulatory spectrum access driver; the compound probability of standalone success at <strong>24%</strong> (network execution at <strong>60%</strong> x spectrum access at <strong>40%</strong>) reflects this cascading structure</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The five named drivers (Vodafone roaming migration, Open RAN rollout, UTDI consolidation, value-tier competition, regulatory spectrum access) interact in a way that makes the outcome space genuinely complex: only a small subset of driver-outcome combinations produce a positive equity return</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Two fulcrum drivers emerge from the analysis: (1) Open RAN rollout execution and Vodafone roaming cost trajectory are essentially the same driver expressed differently -- if the network rollout succeeds, roaming costs fall; (2) the CONSOLIDATION OPTION creates an independent driver that operates regardless of whether the standalone case succeeds or fails; this makes the case two-dimensional: standalone binary x consolidation probability</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The two-or-fewer fulcrum drivers test is technically met if the analysis is structured as: (1) standalone network success vs failure; and (2) consolidation probability conditional on failure; but holding and tracking two simultaneously operative investment theses is a complexity marker, not a simplicity marker</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The FALSE FRIEND risk -- identified in the Risks report's ACH analysis -- compounds the complexity: apparent operational improvements (capex reductions, EBITDA beats) can actually signal a pivot away from the build rather than completion of it; this makes positive signals ambiguous, which is unusual and adds a monitoring layer</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Verdict on RA1: the case is at the boundary of acceptable case simplicity -- technically within the guardrail if structured as a binary event-driven bet, but without the elegant focus of the preferred setup</div></div>
+<p><strong>CQ1 -- Two or fewer fulcrum drivers AND four or fewer key drivers:</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Fulcrum driver 1: Vodafone roaming cost trajectory / own-network traffic migration pace -- most important near-term financial variable; mechanism: sites built leads to traffic migrated leads to Vodafone payments fall leads to EBITDA rises; currently running at ~300 sites/quarter; Q1 capex of only EUR 95m against a required annual EUR 500-550m suggests Q2-Q4 must average EUR 130-150m</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Fulcrum driver 2: M&amp;A probability -- whether Telefonica DE (or another acquirer) moves toward a formal acquisition offer; this driver is entirely independent of 1&amp;1's operational execution; the industrial logic has not changed</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Key driver 3: Regulatory spectrum access -- BNetzA must rule on mandatory low-band (800MHz) shared access; a favourable ruling dramatically improves indoor coverage economics; an unfavourable ruling increases required site density by 30-<strong>50%</strong> at similar coverage targets</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">Key driver 4: Open RAN architecture stability and Rakuten performance -- the May 2024 outage and supplier compensation dispute (EUR 100m expected, received EUR 0) demonstrate that the Rakuten dependency is a material supply-chain risk</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">Key driver 5: Value-tier competition intensity -- DTE family plans and O2D discount pricing cap ARPU at the low end; if competitive intensity escalates, service revenue declines could become structural</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Verdict: two clear fulcrum drivers; three additional key drivers; the 2-fulcrum and 4-key-driver tests are marginally met; case is at the complexity boundary</div></div>
+<p><strong>E7 RA2 -- Clear, simple thesis:</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">The simple bull thesis: "1&amp;1 is building a network that incumbents want to buy; whether the build succeeds or fails, UTDI will ensure value is eventually crystallised; at current prices, I am paying ~EUR 23/share for a EUR 13.50 standalone floor and a ~<strong>60%</strong> weighted average consolidation scenario of EUR 40/share, implying expected value of approximately EUR 29/share"</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">The simple bear thesis: "The network will not succeed, and the consolidation talks are either a negotiating ploy or genuinely frozen; in the meantime, the company is burning cash at EUR 500m/year in capex, paying Vodafone roaming fees that are structurally higher than planned, losing market share at the value tier, and trading at an elevated EPS multiple on deeply depressed earnings; in 18 months the stock is at EUR 10-13"</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The FALSE FRIEND risk: the Risks report's ACH analysis identifies a dangerous third scenario -- management quietly abandons the network rollout, generates short-term FCF beats, and the market initially applauds the "de-risking" -- but the company becomes permanently trapped as a low-margin wholesale reseller without the network economics to justify an MNO multiple</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The complexity: two legitimate, opposing theses with equal analytical sophistication; Bernstein and DB are both high-quality research houses; their divergent conclusions (EUR 10.40 vs EUR 27.00) reflect genuinely different probability assessments of the same binary event</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The monitoring problem: simple cases are monitored by tracking 1-2 driver metrics; for 1&amp;1, the monitoring checklist is long: quarterly site deployments, Vodafone traffic data ratio, Vodafone roaming cost per quarter, BNetzA spectrum decisions, UTDI equity stake changes, Telefonica DE capital strategy, M&amp;A media reports, EBITDA delivery vs EUR 800m guide, and subscriber net adds</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">Net RA2 assessment: the thesis can be stated simply in two sentences, but the monitoring burden is high; the case is at the complexity boundary; it passes the simplicity threshold only if framed as a binary event-driven bet, not as an operational fundamental long</div></div>
+<p><strong>E7 RA3 -- Identifiable, time-limited catalyst:</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Primary catalyst: a formal acquisition announcement by Telefonica or another acquirer, or a formal UTDI decision to squeeze out 1&amp;1 minorities (mandatory squeeze-out triggered at <strong>95%</strong> ownership); both catalysts are plausible within a 12-24 month horizon</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Secondary catalyst: FY2026 EBITDA delivery confirmation; if Q2 2026 and Q3 2026 EBITDA put the EUR 800m annual target clearly in reach -- particularly if Vodafone roaming costs stabilise -- the sell-side will revise the standalone valuation upward</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Regulatory catalyst: BNetzA mandatory low-band spectrum access ruling; timeline: new consultation triggered in 2024; ruling could arrive in late 2026 or 2027; time-limited catalyst with binary outcome</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Network coverage catalyst: reaching <strong>35%</strong> household coverage by end-2026 (target) would remove a major regulatory compliance overhang; clear December 2026 resolution date</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Risk of catalyst delay: all four catalysts have credible scenarios where they are delayed 12-24 months; M&amp;A talks reportedly frozen; H2 2026 EBITDA delivery requires unprecedented acceleration; spectrum ruling timelines are in regulatory hands; site deployment acceleration requires capex well above the Q1 run-rate</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Net RA3 assessment: catalysts exist and are identifiable; timeline is 12-36 months; risk of delay is material; for a binary-outcome stock with low standalone value, a catalyst delay extends the FCF burn period, eroding value incrementally</div></div>
+<p><strong>E7 RA4 -- Thesis sustainable for 3-year horizon:</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">The investment case has a time limit imposed by the capex programme: if 1&amp;1 is still burning EUR 500m/year in capex in 2029 with no M&amp;A resolution and no EBITDA recovery, the balance sheet becomes untenable (leverage &gt;<strong>3x</strong>, FCF deeply negative); the thesis must resolve by 2028-29 at the latest</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">The three-year horizon for a Triaging investment is within the thesis resolution window but uncomfortably tight; if the stock is still in "pending M&amp;A resolution" mode in 2029, the thesis will not have delivered value</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">The standalone trajectory does reach positive FCF territory by 2029 in DB's bull model (unlevered FCF yield <strong>6.1%</strong> vs sector <strong>7.1%</strong>) -- but this assumes successful network completion and normalised roaming costs, both of which are not yet secured</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">The consolidation scenario has no inherent 3-year limit -- M&amp;A can complete in any year; but value erosion from ongoing network burn means consolidation needs to happen before significantly more capital is spent</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">From a pure sustainability perspective, the thesis is not "hold for 5+ years" -- it is "hold for 18-36 months and wait for a binary resolution"; that resolution is either (a) a consolidation announcement, (b) EBITDA normalisation at EUR 800m+ confirming standalone viability, or (c) a failure signal that triggers exit</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">Net RA4 assessment: thesis is time-limited in a manageable way; 3-year horizon is achievable but requires active monitoring and willingness to exit if the binary resolves adversely</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The strongest counter-view is that the case IS actually simple once framed correctly -- it is a bet on German telecom consolidation, full stop; every operational metric is secondary to that one question; on this view, the case simplicity grade should be C, not D; Watson partially accepts this reframing but the FALSE FRIEND risk means the monitoring requirement remains complex even under the simplest thesis framing</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><strong>Downstream actions (E7):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">(1) At ESA, determine definitively whether the primary case setup is RA5 (huge change-from-current) or RA3 (corporate change driven M&amp;A) -- this affects the depth of case-simplicity work at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">(2) Watson to commission IA-initiated KQ Research on the German mobile consolidation regulatory landscape -- specifically BKartA (Federal Cartel Office) precedent on 4-to-3 German mobile consolidation</div></div>
+<p><strong>Element E7 rating: <span class="g gD">D</span></strong> -- the case fails the simplicity guardrail; multiple cascading drivers, a FALSE FRIEND risk identified by independent analysis, and a monitoring burden above what Viewforth's operating model handles comfortably for a simple buy-and-hold position. Cohort comparison: DTE-DE (A) has the simplest case in the cohort -- scale, network quality, and dividend predictability create a one-driver thesis (German FTTX leadership); KPN-NL (A) is similar; O2D-DE (D) has a complex distressed case; UTDI-DE (C) has a multi-segment case; among the cohort, 1&amp;1 and O2D are the clear D/F cases on case simplicity, for opposite reasons (1&amp;1 is complex-binary; O2D is structurally distressed without a binary optionality floor). The D grade on E7 is directionally consistent with the cohort calibration.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 -- Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">48 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E8 sweeps all six acceptable setups plus two negative guardrails. At Triaging, all eight RAs receive a 3-bullet minimum assessment. Primary fit is RA5 (huge change-from-current clearing event in solid quality); secondary fit is RA3 (strong corporate change driven EPSU/EPT). RA7/RA8 (unacceptable / false-friend setups) are flagged -- RA8 specifically is a GENUINE identified risk per the ACH analysis in the Risks report.</div></div>
+<p><strong>E8 RA1 -- Mis-modelled, high-quality EPS upgrader:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">1&amp;1 does not fit the mis-modelled EPS upgrader setup; the sell-side pool is divided but not ignorant -- DB and Bernstein are sophisticated and their divergence reflects genuine strategic uncertainty, not consensus mis-modelling of a single consensus view</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The underlying EPS trajectory is not a "hidden upgrader" story: EPS revisions are uniformly negative (L12M: -11); any EPS upgrading narrative requires the EUR 800m EBITDA guide to be achieved, which in turn requires a recovery trajectory no analyst has confirmed as probable; the narrative requires a specific sequenced chain (rollout completion leads to Vodafone traffic migration leads to roaming cost fall leads to EBITDA recovery leads to earnings upgrade) that the market is not mis-modelling -- it is correctly pricing the uncertainty around whether that chain completes</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Quality prerequisite failure: the RA1 setup requires "high quality" as the base attribute (typically top-quartile ROCE, strong competitive moat, predictable earnings history); 1&amp;1 screens at D-level vs the European telecom cohort on these dimensions; EBIT margin <strong>6.5%</strong> vs DTE <strong>15%</strong>+, KPN <strong>20%</strong>+; ROCE below WACC; three consecutive years of EBITDA decline; an execution track record that includes a catastrophic network outage and three mid-year guidance cuts</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Verdict: RA1 does not fit on both the "mis-modelled" dimension (the situation is correctly modelled as uncertain, not incorrectly modelled as stable) and the "high-quality" dimension (base quality is below the required threshold)</div></div>
+<p><strong>E8 RA2 -- Big demand change-driven EPSU or EPT:</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">No structural demand inflection is present in German mobile/broadband; service revenue is flat to declining (-<strong>1.2%</strong> YoY in Q1 2026); mobile internet contract growth is marginal; the German market is mature with ARPU-constrained value-tier consumers unlikely to trade up under the current competitive structure</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">There is no identifiable demand catalyst -- no new product cycle, no regulatory-driven demand expansion, no geographic entry into a new market -- that would drive an EPS transformation from the demand side; the EBITDA recovery thesis is driven by cost reduction (roaming costs falling as the network builds out and traffic migrates to the proprietary network), not by demand acceleration or revenue uplift</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">The AI data demand growth tailwind (identified in E5 RA2) is real but too long-dated to be the driver of an EPSU in the 12-24 month case horizon; it is a 3-7 year structural tailwind at best; in the near term, data volume growth is actually the mechanism that INCREASES costs (more data on Vodafone's network at capacity-based prices) before the network reaches sufficient density to absorb it</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Verdict: RA2 does not fit; this is a cost-side inflection story (roaming cost fall as network matures) not a demand-side EPSU; the EBITDA recovery, if it materialises, comes from the supply-side restructuring of the network economics, not from any revenue growth catalyst</div></div>
+<p><strong>E8 RA3 -- Strong corporate change driven EPSU / EPT:</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">This is the SECONDARY FIT setup; corporate change -- MVNO to MNO transformation, Versatel acquisition and integration, potential M&amp;A consolidation with Telefonica -- is the primary mechanism driving potential EBITDA transformation; the corporate change is large, documented, ongoing, and of a scale not seen elsewhere in the European telecom cohort</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The EBITDA transformation pathway: completion of the strategic pivot eliminates the Vodafone capacity-based roaming cost (currently estimated at EUR 200-300m annually as data volumes exceed 1&amp;1's own network capacity); as traffic migrates from Vodafone to the proprietary Open RAN network, each marginal GB of customer data generates margin rather than cost; the non-linear nature of this cost elimination (fixed infrastructure costs vs variable roaming charges) means EBITDA leverage is exceptionally high once the crossover point is reached</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">M&amp;A consolidation represents a corporate-change-driven value transformation of the highest order -- not an incremental EPSU but a discrete re-rating at a structural premium; the German 4-to-3 consolidation eliminates two companies' structural problems simultaneously: O2D's EUR 500m annual revenue hole from the lost 1&amp;1 wholesale contract, and 1&amp;1's network economics problem from being a subscale 4th operator; the acquirer (most likely Telefonica group) resolves both with one transaction</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">The corporate change passes the "irreversibility" test: the Versatel acquisition is complete; the Vodafone roaming contract is in force until 2039; the spectrum licences have been paid for and cannot be handed back; the MVNO to MNO pivot has committed EUR 1.5bn+ in cumulative capex; the corporate change cannot be easily unwound, which means the thesis resolution is binary (completion or M&amp;A) rather than a gradual reversal</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Management motivation alignment: Dommermuth's <strong>48.94%</strong> indirect stake in UTDI (which holds <strong>86.46%</strong> of 1&amp;1) means he has more to gain from a successful network completion or high-value consolidation than from any alternative outcome; the founder's interests are aligned with minority shareholders on the long-side of the binary, even if governance quality is poor on other dimensions</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Precedent evidence for RA3: the Vodafone/Three UK 4-to-3 consolidation in the UK provides the closest regulatory precedent; BCA clearance was granted with access remedies; the German regulatory framework differs (BKartA vs CMA) but the industrial logic -- eliminating a structurally distressed operator through consolidation -- is the same; RA3 secondary setup is robustly supported by precedent and strategic logic</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">Qualification for RA3: management's track record of executing on the corporate change within guidance has been poor (three consecutive years of EBITDA misses, a network outage, zero compensation from Rakuten); this does not invalidate RA3 as the correct setup label but it does significantly increase the discount applied to the delivery probability, which is why E7 (case simplicity) fails and why E8 overall grades only C rather than B</div></div>
+<p><strong>E8 RA4 -- Change-from-current clearing in high-quality compounder:</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">This setup requires "high-quality" as the base attribute -- high ROCE, strong competitive moat, predictable earnings compounder with a visible and measurable return to historical profitability levels; 1&amp;1 does not meet this threshold on any of these dimensions; EBIT margin is <strong>6.5%</strong> (vs cohort range of 14-<strong>28%</strong>), ROCE is low single digits (below WACC), and the customer base is losing share at the value tier rather than consolidating a strong market position</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The "clearing" event (roaming cost normalisation, spectrum resolution, Versatel integration completion) is real, but the company that would emerge even after clearing is not a high-quality compounder by European telecom standards; DTE operates at <strong>38.6%</strong> EBITDA margin on a 5G network of 33,000 sites; KPN at <strong>47.5%</strong> on the strength of a fibre-dominant Dutch network; 1&amp;1 guides to <strong>20%</strong>+ EBITDA margin by 2026 which would still rank at the bottom of the cohort, and achieving this requires the EUR 800m EBITDA guide to be hit -- a guide that has been missed for two consecutive years</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The "change-from-current" in this setup should be a clearing of a temporary obstacle (a demand downturn, a cost spike, a one-off write-off) from an otherwise robust base; at 1&amp;1, the "change-from-current" is structural: the company must build entirely new infrastructure, change its operating model, replace its supplier relationships, and execute a strategic pivot of multi-year duration; this is not a clearing event but a transformation -- which is why RA3 and RA5 are the better setup labels</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Verdict: RA4 does not fit; quality level is D/E vs the European telecom cohort, failing the "high-quality" prerequisite; this does not preclude the stock being investable -- RA4 simply is not the right label for why it might be</div></div>
+<p><strong>E8 RA5 -- Huge change-from-current clearing event in solid quality:</strong></p>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">This is the PRIMARY FIT setup; the change-from-current is genuinely huge -- DB models a 70-<strong>140%</strong> upside from consolidation (EUR 34-47/share vs the current implied ~EUR 22-23/share); the event is identifiable (German 4-to-3 mobile consolidation), the industrial logic is established, and the strategic motivation of the likely acquirer (Telefonica group facing a structurally wounded German subsidiary) is clear</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">The clearing event mechanism: the German mobile market has a structural over-capacity problem caused by the 2018 spectrum allocation which created a 4th operator (1&amp;1) without providing 1&amp;1 the regulatory support (mandatory low-band spectrum sharing) to become economically viable on a standalone basis; the clearing event resolves this structural problem by returning the market to 3 players, with the merged entity absorbing 1&amp;1's spectrum, subscribers, and partially-built network at a premium to current value</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Quality threshold assessment: the RA5 setup requires "solid" quality -- not high (RA4) but not impaired (RA7); "solid" means the underlying business retains strategic value to a buyer even if standalone economics are challenged; 1&amp;1's subscriber base (16.32m contracts, 12.48m mobile internet), Versatel fibre network (68,500km, 350 cities), Open RAN spectrum licences, and partially-built 5G infrastructure constitute genuine strategic assets worth EUR 3-5bn to the right acquirer regardless of whether the standalone P&amp;L is positive; the franchise passes the "solid" test on asset value, if not on earnings quality</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">The "huge" qualifier: RA5 requires the change-from-current to be "huge" -- not merely material but genuinely transformative; a 70-<strong>140%</strong> upside from consolidation vs the current price qualifies unambiguously; this is not a <strong>20%</strong> re-rating but a structural doubling or trebling of equity value triggered by a single identifiable event</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Probability calibration: DB assigns <strong>60%</strong> probability to the strategic pivot scenario (consolidation or return of wholesale to Telefonica/O2D); Bernstein assigns lower probability and discounts the consolidation case; the market is currently pricing approximately the midpoint, with the equity trading near DB's probability-weighted expected value of ~EUR 24; the investment case is not "the market is wrong about whether consolidation happens" but "the market is approximately right, and the binary resolution is worth holding through"</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Risk to RA5: the primary risk is that the clearing event does not arrive within the investment horizon, and the standalone distress (FCF negative, leverage rising, EBITDA missing guidance) erodes the strategic asset value faster than the consolidation probability compounds; this is Bernstein's thesis and it is analytically rigorous; the counter is that UTDI's <strong>86.46%</strong> stake creates a hard floor -- UTDI will not allow 1&amp;1 to fall into financial distress while it holds this position; parent support (EUR 225m shareholder loans in Q1 2026 alone) validates this floor</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">Cohort context for RA5: no other cohort member has a comparable RA5 setup; DTE, KPN, VOD, TEF are all steady-state operators without a binary clearing event pending; O2D (the closest) is the potential acquirer/merger partner rather than the target; this uniqueness within the cohort is the reason 1&amp;1 warrants analysis at all despite its weak fundamental profile vs peers</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">RA5 vs RA4 distinction at 1&amp;1: the critical difference between RA4 (high quality compounder clearing) and RA5 (solid quality huge change-from-current) is the quality threshold and the scale of the change; at 1&amp;1, the quality threshold is "solid" not "high" -- the business survives and retains strategic value, but it is not a compounder; and the change-from-current is "huge" not "moderate" -- 70-<strong>140%</strong> from consolidation is well above the typical RA4 clearing event; this distinction matters because it affects position sizing (RA5 cases are typically held in smaller size than RA4 cases due to the binary execution risk) and monitoring intensity (RA5 requires active quarterly monitoring vs RA4's more passive set-and-review cadence)</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">RA5 catalyst timeline: the clearing event (consolidation or standalone viability confirmation) is expected within 18-36 months based on available evidence; the spectrum consultation ruling (2026-2027), the year-end 2026 <strong>35%</strong> coverage target, and the ongoing Telefonica group M&amp;A deliberations all have natural resolution timelines within this window; a 3-year position is therefore appropriate rather than a 5+ year fundamental hold</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">RA5 risk summary: the primary risk to the RA5 setup is that the clearing event arrives too late -- after the balance sheet has deteriorated to the point where UTDI's willingness to continue subsidising the build programme weakens materially; the secondary risk is that the clearing event arrives at a price below DB's EUR 34-47 range (e.g., a consolidation at EUR 25-28/share that represents only modest upside from current levels); neither risk invalidates the RA5 framing but both must be modelled explicitly at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><strong>Asset-value floor underpins the RA5 'solid quality' call:</strong> assessed on acquisition value rather than standalone profit and loss, the franchise is genuinely solid -- 16.32m contracts, 12.48m mobile-internet subscribers, the Versatel fibre network (68,500km across 350 cities), paid-up Open RAN spectrum, and a partially-built 5G network plausibly worth EUR 3-5bn to an in-market acquirer; this asset base is what separates RA5 (solid quality, huge change-from-current) from RA7 (unacceptable) even though standalone earnings screen at D versus the European telecom cohort</div></div>
+<p><strong>E8 RA6 -- Trough-on-trough turn in solid quality cyclical:</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">1&amp;1 is not a cyclical business in the traditional sense; mobile telecommunications revenue is stable through economic cycles; the EBITDA compression is structural (network build costs) not cyclical; there is no cyclical trough recovery thesis operating here -- the EBITDA decline from EUR 654m (FY23) to EUR 522m (FY25) is entirely driven by deliberate investment choices, not by a demand cycle or macro headwind</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext">The trough-on-trough structure requires two distinct but temporally proximate downturns -- for example, a cyclical margin compression at the same time as a one-off competitive disruption; at 1&amp;1, the compression is single-source (network build costs) and management-controlled; there is no external cycle to wait out; the trough ends when the build ends, not when the economy recovers</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The "solid quality" prerequisite for RA6 is also challenging: telecoms is not inherently cyclical, and 1&amp;1 does not have the earnings history of a true quality cyclical (think a capital goods company with 20 years of cycle-through-cycle earnings); the company is only 27 years old and has not yet completed its first full MNO network build -- it does not have a "return to historically proven earnings power" thesis available to it</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">Verdict: RA6 does not fit; the EBITDA trough is structural not cyclical, the business is not cyclical in nature, and the "solid quality" prerequisite is not met relative to the European telecom cohort</div></div>
+<p><strong>E8 RA7 -- Fit with unacceptable case setups? [NEGATIVE GUARDRAIL]:</strong></p>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">The unacceptable case setups typically include: commoditised business with no pricing power and terminal revenue decline; excessive leverage with covenant risk; negative FCF trajectory with no identified catalyst for reversal; permanent structural competitive disadvantage with no exit; governance-impaired management extracting value from minorities; 1&amp;1 has several attributes that partially overlap with this profile: FCF is deeply negative during the capex peak; service revenue is flat to declining; the standalone value per DB is negative NPV of &gt;EUR 20/share on the network build; governance is sub-standard for minorities (dual CEO, related-party leases, cashless intra-group Versatel transfer)</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">However, none of these attributes are the primary investment thesis -- they are the "why this is cheap" context, not the "why this case is unacceptable" thesis; the M&amp;A optionality (<strong>60%</strong> probability per DB, EUR 34-47/share upside) is the critical differentiator that prevents reclassification into RA7; a company with a <strong>60%</strong> probability of generating a 70-<strong>140%</strong> return via a strategic event is not the same as a company in terminal decline with no catalyst, even if the standalone metrics look similarly challenged</div></div>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext">The reclassification trigger: if the consolidation thesis is definitively abandoned -- Telefonica publicly and formally withdraws from all acquisition discussions AND UTDI explicitly states it will not pursue any form of M&amp;A or squeeze-out for 1&amp;1 -- the case would reclassify into RA7 territory immediately; in this scenario the EUR 13.50 DB standalone floor would need to be re-examined downward (since it assumes regulatory spectrum support that may not arrive), and the investment case would become an RA7-type capital preservation failure rather than a held M&amp;A arbitrage; this reclassification would trigger an immediate exit recommendation</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext">Verdict: RA7 -- partial overlap with unacceptable setup attributes on standalone metrics alone; currently prevented from full RA7 classification by M&amp;A optionality and UTDI parent support; the RA7 reclassification trigger is the single most important monitoring signal for this investment</div></div>
+<p><strong>E8 RA8 -- Fit with false friend case setups? [NEGATIVE GUARDRAIL]:</strong></p>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">The ACH analysis in the Risks report explicitly identifies "Failure #9 -- Capex Holiday Masking Wholesale Trap" as a FALSE FRIEND scenario with <strong>20%</strong> probability in the overall failure matrix; the ACH analysis is one of the most rigorous in the Risks report: the FALSE FRIEND hypothesis accounts for all observed evidence (EBITDA beats, capex reduction, FCF improvement, management confidence language) more parsimoniously than the TRUE hypothesis in several specific quarters; this is a material analytical distinction</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">The false-friend pattern in detail: management gradually reduces the network build pace (capex falls, fewer sites deployed per quarter), which (a) generates short-term FCF beats as capex falls below guidance; (b) generates EBITDA beats as Vodafone roaming costs fall slightly (lower traffic on the network from a smaller subscriber base as churn creeps up); (c) generates positive management guidance language as they claim "we are being more selective about site economics"; (d) causes the market to re-rate the stock positively on the FCF and EBITDA beats; (e) but the underlying reality is that the network will never reach the scale required for ARPU normalisation, roaming costs will not fall to zero, and the standalone case is permanently capped at a low-multiple wholesale reseller value</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">The false-friend risk is partially validated by Q1 2026 data: cash capex of only EUR 95m in Q1 2026 (vs a guided annual EUR 500-550m run-rate requiring ~EUR 130-140m/quarter) is materially below the required pace; management attributed this to "phasing" -- but Q1 capex underruns that are later caught up in H2 have been a repeated pattern in the three-year delivery history; the Risks report flags this specifically as the early-signal of the FALSE FRIEND scenario</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext">Monitoring protocol for RA8: the single most reliable non-false-friend signal is quarterly active site deployment count -- if 1&amp;1 is genuinely building the network, the site count must rise by approximately 300 per quarter minimum to reach <strong>35%</strong> household coverage by year-end 2026 (starting from <strong>29%</strong> in Q1 2026); if site deployments fall consistently below 200 for two consecutive quarters, the false-friend scenario is emerging regardless of what EBITDA and FCF are doing in the same period; the secondary signal is the Vodafone traffic ratio -- what percentage of 1&amp;1 customer data is carried on the proprietary network vs Vodafone; as this ratio rises toward <strong>50%</strong>+ the false-friend risk falls substantially</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext">"Failure #10 -- Empty Volume Growth Destroying ARPU" is the second ACH-identified FALSE FRIEND scenario: subscriber count grows (or stabilises) but on artificially cheap promotional pricing; volume growth looks positive but ARPU continues to fall; service revenue remains flat or declines despite a seemingly stable base; this is consistent with current observable data (Q1 2026: contracts flat at 16.32m, service revenue -<strong>1.2%</strong> YoY); this scenario does not preclude M&amp;A but reduces the acquisition price a buyer would pay, compressing the consolidation value floor below DB's EUR 34-47 range</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext">Verdict: RA8 -- GENUINE FALSE FRIEND RISK IDENTIFIED AND PARTIALLY VALIDATED BY CURRENT DATA; not strong enough to reclassify the case at current evidence weight, but requires immediate active monitoring from memo date; false-friend protocol is embedded in Section E monitoring requirements above</div></div>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> The strongest counter on E8 is that neither RA3 nor RA5 fits cleanly enough to warrant investment: RA3 fails the "management with relevant experience" CQ (the management team has no prior track record of building a physical mobile network from scratch) and has an unresolved execution track record (three consecutive years of EBITDA misses, the May 2024 network outage, zero Rakuten compensation received); RA5 fails the "solid quality" threshold if assessed strictly against cohort peers (1&amp;1 screens at D on EBITDA margin, ROCE, and earnings predictability vs DTE-DE, KPN-NL, TEF-ES, and VOD-GB); Bernstein's Rathe explicitly makes this counter-argument in his UPF initiation -- the optionality is real but the quality threshold for RA4/RA5 is not met on a fair reading; Watson partially accepts this counter but holds that at Triaging, marginal fits progress to ESA for resolution; the ESA must definitively resolve whether the RA5 "solid quality" threshold is met when the subscriber base, spectrum, and fibre assets are assessed on an acquisition-value basis rather than on a standalone P&amp;L basis; they do not automatically trigger a park</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext"><strong>Downstream actions (E8):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext">(1) At ESA, develop RA5 and RA3 setups at carve-out depth (floor 4 minimum per RA and CQ)</div></div>
+<div class="finding ra-level"><span class="fnum">48.</span><div class="ftext">(2) Maintain FALSE FRIEND monitoring -- track quarterly active site deployments against the 300/quarter target at every earnings release</div></div>
+<p><strong>Element E8 rating: <span class="g gC">C</span></strong> -- case fits RA5 (primary) and RA3 (secondary), both valid acceptable setup types, but neither is a clean fit; the FALSE FRIEND risk (RA8) is real, partially validated by current Q1 2026 capex data (EUR 95m vs EUR 130-140m/quarter required), and must be actively monitored from memo date; RA7 reclassification trigger is clearly defined (M&amp;A definitively abandoned by all parties); the setup is investable at Triaging depth but requires active position management and a clear exit protocol; C is the appropriate grade reflecting valid-but-qualified setups with a live negative guardrail risk. Net: C.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-d" data-spy><span class="id">Grp 3</span> - Core philosophy <span class="g gD">D</span> <span class="secn">28 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E11 is the only Group 3 Element in scope at Triaging. The value-chain analysis reveals that 1&amp;1 sits at the most vulnerable position in the European mobile telecom value chain: simultaneously subordinate to Vodafone (roaming pricing), Vantage Towers (passive infrastructure delivery), BNetzA (spectrum allocation), and competing against incumbents at 10-<strong>20x</strong> its network scale. E9, E10, E12, and E13 are not applicable at Triaging.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 -- Great operator [NR]</div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<p>Not applicable at this stage; first written at Early-Stage Assessment.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 -- Advantaged business and widening competitive advantage [NR]</div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<p>Not applicable at this stage; first written at Early-Stage Assessment.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-d" data-spy>Element E11 -- Value-chain dynamics <span class="g gD">D</span> <span class="secn">28 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Value-chain position at 1&amp;1 is structurally challenging on nearly every dimension: demand is resilient but competition is aggressive at the value tier; the competitive environment is adverse for a subscale new entrant; disruption (Open RAN) is theoretically positive but practically challenged; regulatory position is uncertain and high-risk; supplier dependency (Vodafone, Vantage) is material and has already caused repeated earnings misses.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Where the margin goes -- 1&amp;1 occupies the thinnest node in the chain:</strong> value in European mobile accrues to whoever controls the scarce inputs (spectrum via BNetzA, passive infrastructure via Vantage, host-network capacity via Vodafone) and to incumbents with amortised national networks; 1&amp;1 controls none of these today and rents all of them, so it carries the capex and the roaming rent while the rent itself flows to its suppliers and competitors; the investment case is in effect a wager that 1&amp;1 migrates up the chain (owning the network) faster than that rent erodes its balance sheet, or that a buyer crystallises the asset value first</div></div>
+<p><strong>E11 RA1 -- Demand side strong / fragile:</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Value-tier pricing trap deepens the demand-side weakness:</strong> 1&amp;1 captures the thinnest slice of a resilient demand pool; blended ARPU fell with service revenue -<strong>1.2%</strong> YoY in Q1 2026 even as the contract base held at 16.32m, so volume cannot offset price; the 24-month contract anchors revenue but also caps re-pricing, and the EUR 2/month fixed-line increase DTE pushed through in April 2026 is unavailable to 1&amp;1 at <strong>29%</strong> coverage; with FY2026 service revenue guided flat at EUR 3.66bn and Versatel B2B still EBITDA-negative (-EUR 9.5m in Q1), the demand node offers stability without growth or pricing power</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">German telecom subscription demand is resilient and non-cyclical -- 24-month minimum-term contracts anchor near-term revenue regardless of economic conditions</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Service revenue per contract has been flat to declining: blended ARPU fell YoY in Q1 2026 (total service revenue -<strong>1.2%</strong> while contracts were flat); the value-tier customer is unlikely to trade up to premium contracts as long as DTE and VOD continue aggressive family plan pricing</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Pricing power is structurally limited at the value tier: 1&amp;1 has explicitly stated it is "avoiding margin-dilutive promotions" -- it cannot raise price without losing share, and cannot lower price to gain share without harming margins; DTE raised fixed-line prices by EUR 2/month in April 2026 and consumers accepted the increase -- this network quality premium is unavailable to 1&amp;1 at <strong>29%</strong> coverage</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">FY2026 guidance projects flat service revenue at EUR 3.66bn -- management itself is not expecting demand-driven growth; the Versatel B2B Enterprise segment has higher structural pricing power but generated negative EBITDA (-EUR 9.5m in Q1 2026) as it absorbs integration costs</div></div>
+<p><strong>E11 RA2 -- Competitive supportiveness / aggression:</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Scale economics are decisively against the subscale entrant:</strong> 16.32m contracts sit against incumbent bases of 40-90m, and fixed-network economics reward scale, so unit cost per subscriber is structurally higher while DTE adds about 200,000 branded contracts a quarter and raises guidance; Vodafone Germany is at once a competitor and 1&amp;1's roaming host, capturing margin on both sides; the 4-player structure is unstable precisely because the 4th player cannot earn its cost of capital standalone, which is why the value-chain resolution is binary -- complete the build to credible scale, or exit via consolidation back to three players subject to BKartA</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Three established incumbents (DTE, VOD, O2D) with <strong>95%</strong>+ network coverage and established customer bases of 40-90 million contracts at group level; 1&amp;1 at 16.32 million contracts is the subscale entrant; DTE is pulling away -- 200,000 branded contract net additions in Q1 2026, guide raised for FY2026; VOD Germany returned to +<strong>1.3%</strong> organic service revenue, benefiting directly from 1&amp;1 customers roaming on its network</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">German mobile is a 4-player oligopoly; the 4-player structure is inherently unstable given 1&amp;1's scale disadvantage -- either 1&amp;1 completes the build and becomes a credible 4th player, or the market returns to 3 players via M&amp;A; BKartA is a critical variable: it previously blocked a 4-to-3 consolidation in Germany</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">1&amp;1 has ONE credible competitive advantage: the only European operator with a commercially deployed large-scale cloud-native Open RAN 5G network, with genuine long-term operating cost advantages; this advantage is future-dated -- it accrues once the network reaches scale (&gt;<strong>50%</strong> coverage) and traffic migrates off Vodafone; in the near term (2026-2028), it is a capex cost, not a margin driver</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">24-month minimum term contracts create structural switching barriers; churn at contract expiry is the primary risk, and migration-related churn elevated this in 2024-2025; Enterprise customers (Versatel segment) have longer contract tenures and higher switching costs</div></div>
+<p><strong>E11 RA3 -- Disruption forces:</strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>The Open RAN advantage is a future-dated option, not a present moat:</strong> the cost curve only crosses in 1&amp;1's favour once coverage passes roughly <strong>50%</strong> and traffic migrates off Vodafone; until then the architecture is a cash cost of EUR 500m+ per year with no legacy fallback, so across 2026-2028 disruption is a liability the company funds rather than a margin it harvests; the durability of the eventual edge is itself uncertain because AI-driven network optimisation could let incumbents narrow it, which makes the disruption attribute genuinely double-edged rather than a clean positive</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Open RAN is the defining disruption force -- 1&amp;1 is simultaneously the disruptor (in network architecture terms) and the disrupted (as a subscale entrant facing incumbent disruption to its value-tier customer base)</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">If Open RAN succeeds at scale, 1&amp;1 has a structural cost advantage over incumbent peers who must either replace their Huawei/Nokia/Ericsson equipment or pay a licence to access Open RAN benefits -- first-mover advantage is real; if Open RAN fails to deliver promised cost savings, 1&amp;1 has spent EUR 500m+ per year on a network architecture with no legacy fallback</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">AI-driven network optimisation could allow incumbents to narrow 1&amp;1's Open RAN cost advantage more quickly than anticipated, reducing the durability of the competitive moat; platform disruption (eSIM, iSIM making operator-switching frictionless) could accelerate competitive intensity at the value tier</div></div>
+<p><strong>E11 RA4 -- Political / regulatory:</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Regulatory position concentrates value-chain risk into two binary rulings:</strong> the BNetzA spectrum decision is potentially decisive, an adverse outcome forcing a 30-<strong>50%</strong> rise in required site density and therefore capex, a favourable one materially improving network economics; layered on top are the <strong>35%</strong>-by-end-2026 and later <strong>50%</strong> coverage mandates that carry fee-acceleration penalties, and a BKartA stance on 4-to-3 consolidation with mixed precedent; UTDI's <strong>86.46%</strong> stake caps minority influence over how any of these outcomes are realised, so the regulatory node sits outside management control yet drives the equity result</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The BNetzA spectrum ruling is the single most consequential pending regulatory decision -- binary, potentially decisive, timeline uncertain (2026-2027); a favourable ruling dramatically improves network economics; an adverse ruling forces a 30-<strong>50%</strong> increase in required site density, directly increasing capex</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">BKartA consolidation clearance is uncertain -- precedent mixed; European regulatory trend moving toward permitting 4-to-3 with commitments (VOD/Three UK clearance sets a positive precedent); BKartA previously blocked a 4-to-3 in Germany</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">Coverage mandates (<strong>35%</strong> household by end-2026; <strong>50%</strong> by later date) -- 1&amp;1 must meet these or face spectrum fee acceleration; the Gigabit Infrastructure Act (fast-tracks permitting) is a constructive regulatory tailwind for the build programme</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">UTDI's <strong>86.46%</strong> stake means minority rights are constrained; any UTDI-initiated squeeze-out above <strong>95%</strong> would be at a price UTDI controls -- minority protection is limited and this structural governance risk must be priced in</div></div>
+<p><strong>E11 RA5 -- Supportive supplier side:</strong></p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>Supplier dependency is the clearest evidence of a weak value-chain position:</strong> 1&amp;1 pays Vodafone a capacity-based roaming charge estimated at EUR 200-300m a year that rises with its own customers' data growth, the textbook double-marginalisation of a reseller buying its core input from a competitor, locked in until 2039; Vantage Towers controls 3,800-5,000 sites on 20-year terms and its delivery shortfalls (provisionally assessed as abusive obstruction by the Federal Cartel Office) are the main build bottleneck; the Rakuten general-contractor relationship carries existential execution risk, shown by the May 2024 outage and the unresolved EUR 100m compensation claim</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Vodafone has significant leverage over 1&amp;1 through the capacity-based roaming pricing model; data volume growth drives roaming costs in a way 1&amp;1 cannot fully predict or control; the agreement runs to 2039, providing stability but also locking in the dependency</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Vantage Towers leverage: 1&amp;1 has leased 3,800-5,000 tower locations with 20-year initial terms; Vantage site-delivery failures are the primary operational headwind and switching away mid-build is not practical; the Federal Cartel Office provisionally assessed these delays as abusive obstruction</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">Rakuten general contractor: the May 2024 outage showed this relationship carries existential execution risk; the EUR 100m compensation claim remains unresolved -- a material financial overhang; the multi-vendor Open RAN supply chain (100 partners) provides resilience in theory but creates integration complexity that contributed to the 2024 outage</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The strongest counter-view is that E11 disadvantages are temporary transition costs rather than permanent structural weaknesses; once coverage reaches <strong>50%</strong>+, roaming costs fall, competitive positioning improves, and value-chain dynamics normalise toward incumbent equivalence; Watson acknowledges this is the logical endpoint of the investment case -- but at Triaging depth, the analysis must grade the current state, not the hoped-for future state</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><strong>Downstream actions (E11):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">(1) At ESA, deepen E11 at solid level -- specifically the Vodafone roaming contract economics and the Vantage Tower site-delivery mechanism</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">(2) Commission IA-initiated KQ Research on German mobile market consolidation precedent and BKartA competition framework</div></div>
+<p><strong>Element E11 rating: <span class="g gD">D</span></strong> -- value-chain position is structurally disadvantaged across demand (pricing power limited), competition (subscale entrant in a 4-player oligopoly), supplier (Vodafone and Vantage dependencies), and regulatory (spectrum uncertainty); the one structural positive -- Open RAN cost advantage -- is future-dated and unproven at European scale.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-f" data-spy><span class="id">Grp 4</span> - Case riskiness <span class="g gF">F</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Group 4 is rated at first-pass light; no Element-level content (E15-E19) is in scope at Triaging. Watson's preliminary assessment: the 1&amp;1 risk profile is among the highest in the European telecom cohort -- potentially the highest.</div></div>
+<p>The 1&amp;1 AG risk profile sits in the top-quartile of identified risks within the European telecom cohort at Triaging observation. Three features drive this high-risk classification: (1) binary outcome structure with a negative standalone NPV -- the Risks report's ACH matrix identifies 10 failure modes, of which two are FALSE FRIEND scenarios that make traditional positive signals unreliable; (2) governance risk -- founder-CEO in phased exit without successor, dual-CEO role between 1&amp;1 and UTDI, cashless intra-group Versatel transfer loading EUR 950m of UTDI debt onto 1&amp;1's balance sheet, related-party real estate leases and BVB sponsorship extracting ~EUR 30m annually; (3) balance sheet stress at peak capex -- leverage at <strong>2.5x</strong>, FCF negative after leases, spectrum payment obligations of &gt;EUR 600m deferred, shareholder loans from UTDI bridging liquidity.</p>
+<p>The Risks report's pre-mortem identifies the highest-plausibility failure cascade as: Regulatory Default leads to National Roaming Margin Crush leads to Vodafone Migration Churn Cascade -- three linked failures where one trigger guarantees the next.</p>
+<p>Risk Elements (E15-E19) are not in scope at Triaging and will be first-rated at Early-Stage Assessment. Priority risk investigations at ESA: (a) governance risk around the Versatel acquisition structure and UTDI/minority conflicts; (b) spectrum fee acceleration scenarios; (c) FALSE FRIEND scenario monitoring protocol.</p>
+<p><strong>Group 4 rating: <span class="g gF">F</span></strong> -- highest risk quartile in the European telecom cohort at Triaging observation; not a kill signal at this stage given the M&amp;A optionality structure; risk Elements to be developed fully at ESA.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> - Case optionality [NR]</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not yet in scope at Triaging. M&amp;A optionality is the primary value driver and will be a central ESA topic. The UTDI squeeze-out mechanism (if UTDI reaches <strong>95%</strong>, mandatory squeeze-out is triggered) creates a hard valuation floor that increases as UTDI accumulates further shares.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> - Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> - Actions and Recommendation <span class="secn">11 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The 1&amp;1 case passes the Triaging gate on change-force intensity and M&amp;A floor optionality, but it is a binary event-driven special situation rather than a fundamental long. ESA must answer whether the consolidation probability has increased or decreased since Q1 2026. The overall MR summary is <span class="g gC">C</span> -- driven by an exceptional <span class="g gB">B</span> on E1 change forces, offset by structural weaknesses in case simplicity <span class="g gD">D</span>, value-chain position <span class="g gD">D</span>, and case riskiness. <span class="g gF">F</span> The case is progressing to ESA on the strength of the M&amp;A optionality structure and the consolidation floor, not on fundamental quality.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> PROGRESS to Early-Stage Assessment, with HIGH ACTIVE MONITORING cadence. The binary outcome structure means this case can deteriorate quickly if the network build falls behind plan, M&amp;A is definitively abandoned, or Vodafone roaming costs continue to escalate. The Triaging pass is not a strong positive -- it reflects that change-force intensity and consolidation optionality clear the minimum bar, not that the case is compelling on its own fundamentals</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing -- next-stage actions:</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">(1) Watson to develop full ESA memo: deepen E1, E5, E7 to second pass (solid depth); deepen E8 fit setups (RA5, RA3) to carve-out depth; develop first-pass E2, E3, E9, E10, E12, E13; develop risk Elements (E15-E19) at first-pass depth. The ESA agenda must prioritise three questions: (a) has the M&amp;A probability increased or decreased since Q1 2026?; (b) is the Q2-Q4 2026 network build velocity on track to meet the year-end <strong>35%</strong> coverage target?; (c) are Vodafone roaming costs stabilising or still escalating?</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">(2) Watson to commission two IA-initiated KQ Research queries immediately following this memo: (a) "Vodafone roaming capacity pricing model -- EBITDA sensitivity to data volume growth assumptions at 1&amp;1 AG"; (b) "German mobile market consolidation -- regulatory precedent (BKartA), European 4-to-3 template (VOD/Three UK), Telefonica Deutschland M&amp;A probability update"; both queries are commissioned per Q6 authorisation granted by Richard at session start</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">(3) Richard to determine position-size appetite for a binary-outcome stock with <strong>40%</strong> standalone downside before ESA writeup begins; position sizing for event-driven M&amp;A arbitrage differs materially from fundamental longs; a 1-<strong>2%</strong> initial position with options to add on M&amp;A confirmation is the likely structure, but this is Richard's determination</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Conditions for parking instead:</strong> If at any point before ESA writeup begins (a) Telefonica DE publicly and explicitly withdraws from all acquisition discussions, (b) UTDI publicly states it will not proceed with any form of M&amp;A or squeeze-out for 1&amp;1, or (c) the Q2 2026 network build capex remains below EUR 100m (signalling the FALSE FRIEND scenario is emerging), Watson to flag immediately for a binary park decision before the ESA writeup commences</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>FALSE FRIEND monitoring protocol (active from memo date):</strong> Primary signal: quarterly active site deployment count, target 300/quarter. If deployment count falls consistently below 200 for two consecutive quarters, the Capex Holiday / Wholesale Trap scenario (Failure Mode 9 in Risks report ACH analysis) is emerging. Secondary signal: EBITDA vs EUR 800m full-year guide -- each quarter must show a credible trajectory toward EUR 800m, not a series of excuses. Monitoring cadence: every earnings release (quarterly)</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>ESA scoping note:</strong> The ESA for 1&amp;1 AG will be a materially more complex undertaking than a standard European telecom ESA, for three reasons. First, the binary outcome structure means that E2 (required case outputs) and E3 (TSR/valuation upside) must be developed under two distinct scenario branches (standalone and M&amp;A) rather than a single central case -- the ESA must explicitly model both branches and assign probability weights to each. Second, the risk elements (E15-E19) must include a dedicated FALSE FRIEND protocol section, since the ACH analysis has identified two specific false-friend failure modes that can masquerade as investment positives in the near term. Third, E9 (great operator assessment) will be particularly challenging: management has no prior track record of MNO construction, the May 2024 outage demonstrated material operational vulnerability, and the CFO is only 18 months into the role during the most capital-intensive period in the company's history; yet the Open RAN architecture is operationally innovative and the network build is proceeding (if slower than guided). Watson estimates the ESA will require full four-family report depth (CF, BF, LF, RK) plus both commissioned KQ Research reports before a fair first-pass judgement on the binary outcome probabilities can be reached. The ESA is estimated at approximately 3-4 weeks elapsed from KQ Research completion. The ESA should not commence until Q2 2026 results are available (typically August 2026), as Q2 capex and site deployment data will be the single most important input to resolving the FALSE FRIEND monitoring question raised in Q3 of the Go-No-Go Checks paired artefact. Watson recommends Richard calendar a decision point in early August 2026 to confirm whether to proceed with ESA commissioning based on Q2 2026 quarterly results</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">(1) Watson to update frictions-log.md with F-004 (1U1-DE absent from prices.json -- requires ESA resolution) and F-005 (VOD-GB Triaging memo folder exists but contains no .md file -- subdirectory structure only; cannot use VOD-GB peer memo for comparison at ESA)</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">(2) Watson to brief CoS on IA-initiated KQ Research commissioning per the batching SOP; two queries are ready for submission as detailed in Section F.2</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> - Appendices <span class="secn">2 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> - Source register</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<p><strong>Change Forces Report (41-change-forces) [AS/CF]</strong> -- 1&amp;1 AG, highlighted.md. Primary source for E1, E8, E5 context. DB Khiroya, Bernstein Rathe, Morgan Stanley sourced within. Full 487-line report read in full.</p>
+<p><strong>Business Foundations Report (42-business-foundations) [AS/BF]</strong> -- 1&amp;1 AG, raw-AS.md (no highlighted.md available -- F-002). Primary source for E11, E7 (business model mechanics). Used for value-chain, operating model, and financial profile sections.</p>
+<p><strong>Leadership Foundations Report (43-leadership-foundations) [AS/LF]</strong> -- 1&amp;1 AG, raw-AS.md. Primary source for E1 (internal leadership change forces), Group 4 (governance). CEO profile, succession risk, insider transactions, governance flags drawn from this report.</p>
+<p><strong>Risks Report (44-risks) [AS/RK]</strong> -- 1&amp;1 AG, raw-AS.md. Primary source for Group 4, E8 (RA7, RA8), E11. ACH matrix, pre-mortem (10 failure modes), FALSE FRIEND scenarios drawn from this report. Bernstein Rathe conviction analysis sourced here.</p>
+<p><strong>Cohort CF reports [AS/CF-COHORT]</strong> -- KPN-NL (BLUF + section 1-2 read), O2D-DE (BLUF read), UTDI-DE (BLUF + section 1-3 partial read). Used for cohort-relative calibration of MR ratings.</p>
+<p><strong>FactSet Valuation Data [FS/V]</strong> -- master-dashboard/data/factset-valuation.json. 1U1-DE: P/E 18.4, P/E percentile 76, EPS 24mf EUR 1.26.</p>
+<p><strong>FactSet SSEM Data [FS/SS]</strong> -- master-dashboard/data/factset-ssem.json. 1U1-DE: EPS revisions L1M -4, L3M -6, L6M -8, L12M -11; EBITDA revisions L1M +9, L3M +22, L6M +22, L12M +17; buy% <strong>33%</strong>; momentum 7; consensus TP EUR 23.64.</p>
+<p><strong>Notion Stock Record [NT]</strong> -- 1&amp;1 (ID: 33335e909b0b81799e8bf306083e3f1c): Technical momentum "Double green", MM 8-Point 7/8, interest level 8, knowledge level 1, timeliness B, target_ma 50D, yfinance_ticker 1U1.DE.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> - Process notes <span class="secn">2 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p><strong>F-001 (OPEN): Price data gap.</strong> 1U1-DE is absent from prices.json and universe.json in the master-dashboard pipeline. Live price, 52-week range, and 200-day average are therefore unavailable from internal files. Section A price values are approximated from FactSet valuation data (P/E 18.4 x EPS ~EUR 1.21 = implied ~EUR 22.3). This gap must be resolved at ESA.</p>
+<p><strong>F-002 (NOTED): BF report no highlighted.md.</strong> The Business Foundations report has no highlighted.md -- raw-AS.md was used as fallback source.</p>
+<p><strong>F-003 (NOTED): 1INN vs 1U1-DE ticker discrepancy.</strong> IG note uses "1INN". FactSet data has both 1U1-DE (P/E 18.4) and 1INN-DE (P/E 9.6, EPS EUR 8.05, buy% <strong>100%</strong>) as separate entries. 1INN-DE with very different financial profile is almost certainly a different company. Memo uses 1U1-DE throughout as the canonical ticker. Discrepancy requires verification.</p>
+<p><strong>F-004 (NEW/OPEN): 1U1-DE absent from prices.json and universe.json.</strong> See F-001. Dashboard pipeline does not include 1U1-DE. Must resolve at ESA.</p>
+<p><strong>F-005 (NEW/NOTED): VOD-GB Triaging folder has no A&amp;J memo.</strong> The VOD-GB Triaging directory exists (Files/VOD-GB/Triaging/) but contains only sub-folder structure -- no .md A&amp;J memo file. Cannot use VOD-GB peer memo for comparison.</p>
+<p><strong>Working assumption (price):</strong> Memo uses ~EUR 22-23 as approximate live price based on implied P/E calculation. Consensus TP of EUR 23.64 from SSEM used as the reference point in Section A. Will be replaced by a live price at ESA.</p>
+<p><strong>Working assumption (E5 Thematic):</strong> The THEMATICS PAUSE is active. E5 RA1 CQs were authored fresh against current macro environment. The "Risk-off bear market cycle" Notion tag was explicitly not used per Richard's Q3 instruction. Thematic assessment will be revisited when THEMATICS PAUSE concludes.</p>
+<p><strong>IA-initiated research commissioned during this memo (per Q6 authorisation):</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">KQ Research Query 1: "Vodafone roaming capacity pricing model -- EBITDA sensitivity to data volume growth assumptions at 1&amp;1 AG" -- to be submitted by Watson via the RESEARCHER Research SOP</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">KQ Research Query 2: "German mobile market consolidation -- regulatory precedent (BKartA), European 4-to-3 template (VOD/Three UK), Telefonica Deutschland M&amp;A probability update" -- to be submitted by Watson via the RESEARCHER Research SOP</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> - QC audit pointer</div>
+<p>Quality Control Audit: see section 7 of the self-review debrief -- memory/skills/investment-analyst/self-review-debriefs/1U1-DE-triaging-self-review-debrief-2026-06-13.md (to be generated by scripts/generate_qc_audit.py after memo is complete).</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"MR1 -- Technical momentum"},"MR2":{"grade":"C","label":"MR2 -- Sell-side earnings momentum"},"MR3":{"grade":"C","label":"MR3 -- Thematic fit"},"MR4":{"grade":"B","label":"MR4 -- Pillar I: Case change elements"},"MR5":{"grade":"D","label":"MR5 -- Pillar II: Case building blocks"},"C.1":{"grade":"B","label":"C.1 -- Pillar I: Case change elements"},"C.2":{"grade":"D","label":"C.2 -- Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Group 1 -- Case momentum"},"Group 2":{"grade":"D","label":"Group 2 -- Case simplicity"},"Group 3":{"grade":"D","label":"Group 3 -- Core philosophy"},"Group 4":{"grade":"F","label":"Group 4 -- Case riskiness"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"B"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"C"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"B"},{"code":"MR5","label":"Case building blocks","grade":"D"},{"code":"MR6","label":"Investment case components","grade":null}],"pillars":[{"roman":"I","label":"Case change elements","grade":"B","elements":[{"code":"E1","label":"Required input change forces","grade":"B","ras":[]},{"code":"E2","label":"Required case outputs","grade":null,"ras":[]},{"code":"E3","label":"Sufficient TSR / valuation upside","grade":null,"ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"D","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[]},{"code":"E6","label":"Sell-side earnings momentum","grade":null,"ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"D","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"D","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"C","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"D","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"D","ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"F","elements":[]},{"code":"GROUP 5","label":"Case optionality","grade":null,"elements":[]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

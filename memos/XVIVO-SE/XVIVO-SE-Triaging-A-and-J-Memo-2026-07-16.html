@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Xvivo (XVIVO-SE) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">31</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">9</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-c">MR1 — Technical momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-b">MR2 — Sell-side earnings momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">60</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">49</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 — Technical momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">23</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e15-invalidating-attributes-nr">Element E15 — Invalidating attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e16-strenuously-seek-to-avoid-attributes-nr">Element E16 — Strenuously seek-to-avoid attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e17-capital-constraining-attributes-nr">Element E17 — Capital-constraining attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e18-clear-transmission-mechanism-inputs-to-earnings-">Element E18 — Clear transmission mechanism, inputs to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e19-monitorable-transmission-mechanism-leading-track">Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">4</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">18</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">10</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Xvivo (XVIVO-SE) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">XVIVO-SE</span> A&amp;J MEMO — Xvivo (XVIVO-SE) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 16-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">SEK 261.0 (2026-07-02)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">37.8x (P/E percentile 15th of history; historically rich, not cheap)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">100%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (+22.5%)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">XVIVO-SE (Xvivo)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Medtech - consumables - mature</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Specialty diagnostic and life science laboratory instruments (organ preservation)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Chemometec (CHEMM-DK)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">SEK 261.0 (2026-07-02)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">SEK 160.0-SEK 310.4</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">SEK 213.1</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (+22.5%)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">37.8x (P/E percentile 15th of history; historically rich, not cheap)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">SEK 333.9 (consensus; +27.9% implied upside)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">31 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Progress to Early-Stage Assessment, medium conviction. <span class="g gC">C</span></strong> Xvivo offers genuine, near-monopoly exposure to a structural <strong>10x</strong> organ transplant supply-demand gap through a proven <strong>74%</strong> gross-margin razor-and-blade consumables model, but the Triaging-stage case is bad-news-first: execution culture is visibly cracking, FX hedging is zero, and the stock already trades at <strong>37.8x</strong> forward earnings.</li><li><strong>Key risk.</strong> The Risks report's Analysis of Competing Hypotheses names a structural "NO" verdict (US commercial lock-out and systematic margin destruction) as the least-inconsistent scenario, ahead of the bull "YES" case, with aggregate 24-month failure probability assessed at 35-<strong>45%</strong> versus a 20-<strong>25%</strong> base rate for comparable European medtech developers.</li><li><strong>Key support.</strong> The change-force set is unusually well-specified and near-term trackable for a Triaging-stage stock: European heart CE mark feedback expected by early summer 2026, a second US EVLP (ex vivo lung perfusion) hub already onboarded, and record <strong>63%</strong> organic kidney-disposable growth, against a peer-leading <strong>100%</strong> Buy-rated sell-side book (momentum score 9 of 9).</li><li><strong>Recommendation.</strong> Progress to Early-Stage Assessment with explicit ESA-stage focus on the FALSE FRIEND and NO ACH (Analysis of Competing Hypotheses) verdicts, the eNPS collapse (51 to 27), and whether the abdominal margin recovery to a <strong>70%</strong> target is actually on track; do not treat the <strong>100%</strong> Buy rating as validation without independently testing the bear case.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">9 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Core business: near-monopoly consumables platform across all four major transplantable organs.</strong> Xvivo runs a razor-and-blade model selling proprietary single-use perfusion disposables for lung, heart, liver and kidney preservation, with machines placed or loaned to seed disposable pull-through; consumables were <strong>84%</strong> of Q3 2025 revenue.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Revenue mix and scale: SEK 812.2m FY2025, split Thoracic / Abdominal / Services.</strong> Thoracic (lung and heart) delivered record SEK 160m Q1 2026 sales at <strong>83%</strong> gross margin; Abdominal (liver, kidney) delivered SEK 66m at a compressed <strong>54%</strong> gross margin; Services (organ recovery, US perfusionist network) delivered SEK 15.7m, down <strong>10%</strong> organically, at an <strong>18%</strong> gross margin.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Geographic structure: US-weighted, EUR-exposed cost base.</strong> Revenue mix is approximately <strong>53%</strong> Americas / USD, <strong>38%</strong> EMEA / EUR, <strong>9%</strong> APAC-other; the parent cost base is SEK-denominated while <strong>66%</strong> of parent external sales are EUR, creating a structural currency mismatch that the Risks report flags as severe.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Financial character: high-margin, low-ROIC platform mid-scale-up.</strong> Group gross margin is <strong>74%</strong> (2025); adjusted EBITDA margin <strong>20%</strong> (2025), improving to an underlying <strong>24%</strong> in Q1 2026 excluding one-off US heart go-to-market costs; ROIC has hovered near <strong>4%</strong>, well below double-digit medtech norms, reflecting heavy capitalised R&amp;D (SEK 152.8m in 2025) and acquisition goodwill.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Balance sheet: net cash, zero leverage, zero FX hedge.</strong> SEK 308.1m cash at Q1 2026 end, zero net debt, <strong>88%</strong> equity-to-assets, and an undrawn EUR 12m-equivalent revolving credit facility; the Risks report identifies a <strong>0%</strong> hedge ratio and 0-month hedge horizon as a severe negative outlier versus sector peers (Fisher &amp; Paykel <strong>90%</strong>, Mentice <strong>60%</strong>).</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Investment style: platform expansion transitioning to recurring consumable compounder.</strong> The case fits a "high-capex platform build transitioning into a high-margin recurring-revenue compounder" archetype; near-term EPS delivery is dependent on binary regulatory and commercial catalysts rather than steady-state execution, which is a materially different risk profile from a mature compounder.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Peer rank within the cohort: standout growth, standout valuation, standout Richard interest level.</strong> Xvivo's Q1 2026 organic growth of <strong>23%</strong> compares with a Nordic medtech sector median near <strong>10%</strong>; within its own four-stock cohort it carries by far the highest Richard interest-level flag (RI "A. Very desired, 1st decile") versus cohort peers Cellavision (RI "B. Desired") and Tecan (RI "Uncategorised, at the moment").</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Competitive moat structure: entrenched share, thin diversification.</strong> Perfadex Plus holds approximately <strong>90%</strong> global share in static cold lung preservation; Xvivo's portfolio covers <strong>98%</strong> of transplantable organs by type following the 2020 Organ Assist acquisition, but concentration risk is real -- a single Thoracic customer was SEK 132m (over <strong>10%</strong>) of 2025 group revenue.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>CEO Christoffer Rosenblad: stable but unproven under US commercialisation stress.</strong> In role since November 2022 following the sudden death of founder-CEO Dag Andersson; described by former colleagues as "thoughtful and cautious" -- a profile that fits European execution but is untested against the aggressive US commercial buildout the case now depends on.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Verdict: <span class="g gC">C</span> progress to Early-Stage Assessment at medium conviction.</strong> The change-force set is real, near-term trackable, and unusually well-specified for Triaging depth, but culture, margin and FX signals are deteriorating simultaneously with the commercial ramp the thesis depends on.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Key risk: the Risks report's ACH verdict is structurally bearish, not neutral.</strong> Across 18 evidence items and three competing hypotheses, "NO" (the case fails) carries the fewest material inconsistencies -- 4, versus 7 for the bull "YES" case and 5 for "FALSE FRIEND" -- pointing toward a structural US market-share lock-out and systematic margin destruction over 24 months, not a transient wobble.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key support: the near-term catalyst set is genuinely trackable.</strong> European heart CE mark feedback is expected by early summer 2026; a second US EVLP hub is already onboarded; kidney disposables surpassed SEK 10m in quarterly sales for the first time; and sell-side sentiment (<strong>100%</strong> Buy, momentum score 9 of 9, TP revisions +4 over three months) is uniformly positive, which cuts both ways as a support and as a groupthink risk.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>The single most important negative: culture is cracking exactly where execution risk is highest.</strong> Employee Net Promoter Score fell <strong>47%</strong> in one year (51 to 27, 2024 to 2025), described as statistically rare and historically a leading indicator of senior departures; this coincides with the CFO's reassignment to run the already-underperforming US services unit, in which he has no direct clinical operational background.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Recommendation: progress, do not treat sell-side consensus as validation.</strong> The ESA-stage brief must independently test the FALSE FRIEND ("empty machine syndrome" and "artificial margin expansion") and NO scenarios against actual H2 2026 delivery, not accept the unanimous Buy rating at face value.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-c" data-spy><span class="id">MR1</span> Technical momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Stage 2 uptrend is intact (price <strong>22.5%</strong> above the 200-day average, 200-day slope positive at +<strong>0.34%</strong>, two consecutive months of rising 200-day average) but the base is unconfirmed: zero contractions logged in the volatility-contraction-pattern scan, time-in-base fails the pass threshold, and the stock sits <strong>15.9%</strong> off its 52-week high with a swing high only 12 days old -- constructive but not yet a clean basing pattern. Relative strength percentile is 76th (93rd versus sector), a genuinely strong reading, which offsets the basing weakness; net <span class="g gC">C</span> reflecting the tension between strong relative strength and an unconfirmed technical base.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-b" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Sell-side earnings momentum is strongly positive: 12-month EBITDA revisions -33 and 12-month EPS revisions -42 reflect a large base effect from the 2025 heart-trial-driven deceleration, but near-term revisions have inflected hard -- 1-month EPS revisions +4, 3-month +1, 6-month EBITDA revisions +2 across every window measured, target-price revisions +3 (1-month) and +4 (6-month), and buy-rating revisions +17 over six months. Composite momentum score is 9 (scale not disclosed but internally the highest tier observed in this batch) with <strong>100%</strong> Buy ratings and zero Sell ratings -- rated <span class="g gB">B</span> rather than <span class="g gA">A</span> because the near-<strong>100%</strong> Buy consensus with zero dissent is itself a groupthink flag the Risks report explicitly raises.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Structural resilience in an economic downturn is genuine but partial: transplant demand is inelastic and reimbursement-driven (not discretionary consumer spend), but Xvivo's own capital-equipment placement cycle (machine sales/loans that seed the consumable annuity) is capex-sensitive to hospital budget cycles, and the US services segment is directly exposed to hospital staffing and procurement retrenchment in a downturn. AI-disruption exposure is negligible -- the business is physical (perfusion hardware, biological fluids, clinical logistics) and not an information-processing or software-substitutable service, though FlowHawk's digital workflow layer is a modest AI-enabled differentiator, not a disruption vector. Net thematic fit is mixed-to-moderate rather than a clean beneficiary or a clean casualty; rated. <span class="g gC">C</span></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Three binary catalysts (US EVLP hub scaling, European heart CE mark, abdominal margin recovery to <strong>70%</strong> by 2027) are large, specific, and trackable within a 12-24 month Triaging-relevant horizon, with the top-three-driver joint probability assessed by the source report itself at approximately <strong>38%</strong> -- a genuinely quantified, non-trivial base rate rather than blue-sky optionality; offset by the abdominal margin compression to <strong>54%</strong> (versus the <strong>70%</strong> target) actually worsening quarter-on-quarter, which is the opposite direction of travel the thesis requires; rated. <span class="g gB">B</span></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">E5 (Thematic fit) mixed <span class="g gC">C</span>; E7 (Required case simplicity guardrails) strained by a six-item key-driver count against a four-or-fewer ideal and by the zero-external-headwinds test failing on FX and competitive grounds <span class="g gC">C</span>; E8's primary setup fits Big demand change-driven EPS upgrade / earnings-power transition, qualified materially by the Risks report's structural bear ACH verdict; E11 (Value-chain dynamics) strong on the consumables node (<strong>81%</strong> calculated gross margin) but weak on the services node (<strong>25.5%</strong> calculated gross margin, structurally dilutive) <span class="g gC">C</span>; overall Pillar II at first-pass. <span class="g gC">C</span></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> Xvivo's change-force set is unusually specific for Triaging depth -- three named, quantified, near-term catalysts with an internally-modelled joint probability -- but the most financially material of the three (abdominal margin recovery) is currently moving the wrong way.</li><li><strong>E1 (Required input change forces): large, plausible, and trackable, offset by one currently-adverse driver. <span class="g gB">B</span></strong> US EVLP hub expansion, European heart CE mark, and US kidney ramp are each independently well-evidenced with hard Q1 2026 data points; abdominal margin expansion is the fourth driver and the one showing negative near-term momentum.</li><li><strong>E2: not applicable at Triaging.</strong></li><li><strong>E3: not applicable at Triaging.</strong></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1: Required input change forces. <span class="g gB">B</span></strong> Xvivo's Change Forces report names six distinct forward drivers with explicit plausibility and EPS-impact ranges: US Lung EVLP Hub Expansion (HIGH plausibility, 10-<strong>15%</strong> EPS impact), European Heart CE Mark (HIGH plausibility, 15-<strong>20%</strong> EPS impact), US Kidney Assist Transport Ramp (HIGH plausibility, 5-<strong>10%</strong> EPS impact), US Heart PMA and Continued Access Protocol execution (MEDIUM plausibility, 15-<strong>25%</strong> EPS impact), Abdominal Margin Expansion (MEDIUM plausibility, 10-<strong>15%</strong> EPS impact), and Service Model Integration (LOW plausibility, 0-<strong>5%</strong> EPS impact).<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Evidence is genuinely near-term, not speculative.</strong> Q1 2026 EVLP disposable sales surged <strong>56%</strong> year-on-year; a second US OPO (organ procurement organisation) hub was onboarded in early April 2026; kidney disposables surpassed SEK 10m in quarterly sales for the first time with <strong>63%</strong> organic growth; the European heart CE mark decision is expected "by early summer 2026" per management commentary on the 24 April 2026 earnings call.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>The joint-probability discipline is a genuine positive signal for Triaging rigour.</strong> The source report itself computes a ~<strong>38%</strong> joint probability for the top three drivers (assuming independent <strong>80%</strong>, <strong>80%</strong>, and <strong>60%</strong> probabilities) rather than presenting each catalyst as independently near-certain -- an unusually disciplined base-rate framing for a Change Forces report at this stage.</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>The adverse counter-driver is currently the largest swing factor.</strong> Abdominal segment gross margin fell to <strong>54%</strong> in Q1 2026 from <strong>63%</strong> a year earlier and 900 basis points below the RedEye broker's <strong>63%</strong> expectation, driven by unfavourable mix and third-party subcontractor dependencies in disposable manufacturing; the <strong>70%</strong>-by-2027 target requires a ~<strong>10x</strong> scale-up of disposable production that is not yet demonstrated.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2: Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at Triaging.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3: Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at Triaging.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> The building blocks support progression but do not yet clear a higher bar: value-chain economics are excellent at the consumables node and structurally weak at the services node, and the case-simplicity guardrails are strained by a six-driver key count against the four-or-fewer Triaging ideal.</li><li><strong>Group 1 (momentum): <span class="g gC">C</span></strong> Technical unconfirmed base despite strong relative strength; SSEM strongly positive but concentrated in a uniform Buy consensus; thematic mixed.</li><li><strong>Group 2 (simplicity): <span class="g gC">C</span></strong> Two identifiable fulcrum drivers (heart CE mark, US EVLP scale-up) but six total key drivers and zero external headwinds test fails on FX and competitive grounds.</li><li><strong>Group 3 (philosophy): <span class="g gC">C</span></strong> Consumables node is a genuine <strong>81%</strong> gross-margin moat; services node is structurally dilutive at <strong>25.5%</strong> calculated gross margin and actively declining.</li><li><strong>Group 4 (riskiness): <span class="g gC">C</span></strong> Light first-pass note at Triaging; the Risks report's structural NO ACH verdict and zero FX hedging are the two most material flags carried forward to Deep Dive.</li><li><strong>Group 5 (optionality): <span class="g gNR">NR</span></strong> Not yet in scope at Triaging.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1: Case momentum. <span class="g gC">C</span></strong> Technical <span class="g gC">C</span> (strong 76th-percentile relative strength but an unconfirmed base -- zero logged volatility contractions); SSEM <span class="g gB">B</span> (uniformly positive revisions and <strong>100%</strong> Buy ratings, tempered by the groupthink risk the Risks report itself names); thematic <span class="g gC">C</span> (structurally inelastic demand offset by capex-cycle and hospital-budget sensitivity).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2: Case simplicity. <span class="g gC">C</span></strong> The core thesis reduces to two identifiable fulcrum drivers (heart CE mark approval, US EVLP hub scale-up), but the full key-driver count of six (adding kidney ramp, heart PMA/CAP, abdominal margin, services integration) sits above the four-or-fewer Triaging ideal, and the zero-headwinds test fails materially: FX (zero hedge ratio), competitive consolidation (Getinge/Paragonix, Terumo/OrganOx), and a confirmed 6-12 month CE-mark delay are all live, simultaneous headwinds.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3: Core philosophy. <span class="g gC">C</span></strong> Xvivo occupies the highest-value node (consumables and fluids, <strong>81%</strong> calculated gross margin, ~<strong>40%</strong> calculated EBIT margin) in its own value chain, but the Recovery Services node is structurally dilutive (<strong>25.5%</strong> calculated gross margin, ~<strong>7.5%</strong> calculated EBIT margin) and is actively shrinking (-<strong>10%</strong> organic in Q1 2026), a genuine and unresolved drag on group-level economics.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4: Case riskiness. <span class="g gC">C</span></strong> Not yet Element-scored at Triaging; the framing-level flags carried forward are the Risks report's structural "NO" ACH (Analysis of Competing Hypotheses) verdict (fewest inconsistencies of the three competing hypotheses), the <strong>0%</strong> FX hedge ratio against a <strong>53%</strong> USD-revenue / SEK-cost mismatch, and the two named FALSE FRIEND scenarios (Empty Machine Syndrome and Artificial Margin Expansion), both rated HIGH plausibility by the source report.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5: Case optionality. <span class="g gNR">NR</span></strong> Not applicable at this stage.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision: <span class="g gB">B</span> progress to Early-Stage Assessment.</strong> The change-force set clears the Triaging bar on specificity and near-term trackability; the ESA-stage brief must independently pressure-test the Risks report's bear ACH verdict rather than defer to the unanimous sell-side Buy consensus.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> Confirm the European heart CE mark decision timeline holds to "early summer 2026" without a further slip; verify Q2 2026 abdominal gross margin shows sequential improvement off the Q1 <strong>54%</strong> print rather than further deterioration; test whether the eNPS decline (51 to 27) has stabilised or is still falling in any interim disclosure.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to initiate Early-Stage Assessment: deepen Element E1, add Elements E2 (Required case outputs) and E3 (Sufficient total-shareholder-return / valuation upside), and run E9 (Great operator) and E10 (Advantaged business) specifically interrogating the CFO-to-US-services reassignment and the culture metrics; (2) Watson to queue a self-initiated research query at Early-Stage Assessment on the actual mechanics of the abdominal disposable manufacturing bottleneck (the SEK 50m capacity project) -- the <strong>70%</strong>-margin target is currently the single most load-bearing unresolved assumption in the case.</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">60 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> Xvivo has a genuinely rare structural asset -- near-monopoly consumables exposure to an unambiguous, un-cyclical supply-demand gap in organ transplantation -- but the Triaging-stage case is a contested one: the Risks report's own Analysis of Competing Hypotheses names the bear case as the least-inconsistent of the three scenarios tested, and cultural and margin signals are deteriorating in parallel with the commercial buildout the bull case requires.</li><li><strong>Central tension.</strong> Bull case: three specific, quantified, near-term catalysts against a supportive sell-side consensus and a genuinely differentiated moat (Perfadex Plus ~<strong>90%</strong> share, patent-protected formulations, ~$<strong>500k</strong> machine plus ~$<strong>40k</strong>-per-case disposable switching costs). Bear case: a confirmed regulatory delay already realised, an abdominal margin trajectory moving the wrong way, zero FX hedging against a severe currency mismatch, and an employee-engagement collapse concentrated in exactly the unit (US services) the 2027 heart launch depends on.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">11 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> The change-force set is large, specific and near-term trackable -- an unusually high bar for Triaging depth -- but is not unconditionally positive: the abdominal margin driver is currently running counter to the thesis, and the Risks report frames a structural, not merely cyclical, bear scenario around US commercial execution.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 — Required input change forces <span class="g gB">B</span> <span class="secn">11 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E1 (Required input change forces) verdict. <span class="g gB">B</span></strong> Six distinct, plausibility-rated, EPS-quantified drivers are documented with hard Q1 2026 evidence; three carry HIGH plausibility ratings and a joint probability near <strong>38%</strong>; the abdominal margin driver is the one currently moving against the thesis and is the single most load-bearing open question for Early-Stage Assessment.</li></ul></div>
+<p><strong>RA1 — Change forces summary <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> Xvivo's change-force set is genuinely large and specific for a Triaging-stage stock: three HIGH-plausibility, quantified drivers (US EVLP hub expansion, European heart CE mark, US kidney ramp) each carry explicit EPS-impact ranges and current-quarter evidence, a materially higher evidentiary bar than the median Triaging case.<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Confidence gradation matters:</strong> The source report distinguishes High/Medium/Low confidence per driver, not just plausibility -- Driver 1 (EVLP hubs) and Driver 3 (kidney ramp) carry High confidence tags, while Driver 2 (heart CE mark) and Driver 4 (heart PMA) carry only Medium confidence despite HIGH plausibility, reflecting genuine regulatory-outcome uncertainty rather than execution uncertainty.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>The 38% joint probability is a rare quantified base rate.</strong> Few Triaging-stage Change Forces reports compute an explicit joint probability across the top drivers; treating <strong>38%</strong> as the working base case (rather than each driver's individual probability in isolation) is the correct way to read this Element, and it materially tempers the bull framing embedded in each individual driver description.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds? <span class="g gB">B</span></strong> The core external tailwind is structural and well-evidenced: transplant demand is estimated at approximately <strong>10x</strong> current organ supply, only 170,000 transplants were performed globally in 2024 against roughly 2 million patients in need, and the shift toward donation-after-circulatory-death donors (now roughly 50/50 with donation-after-brain-death in the US, growing over <strong>7%</strong> annually) structurally requires machine perfusion assessment that static cold storage cannot provide.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Regulatory tailwind, partially realised:</strong> French authorities granted an exceptional derogation and reimbursement for the heart technology in May 2026, and pending US OPO (organ procurement organisation) decertification rules could force broader perfusion adoption -- both are genuine near-term positives, though the OPO decertification rule remains a proposal, not an enacted mandate.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The offsetting external headwind is real and already realised, not hypothetical:</strong> European regulatory agencies imposed a confirmed 6-12 month delay to the heart CE mark process due to high agency workloads, which is a materialised negative, not a risk being monitored.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Competitive consolidation is intensifying, not stabilising:</strong> Getinge's $<strong>477m</strong> acquisition of Paragonix (September 2024) and Terumo's approximately $<strong>1.5bn</strong> acquisition of OrganOx (October 2025) both create better-capitalised multi-organ competitors, and Bridge to Life received FDA De Novo clearance for its VitaSmart HOPE liver device in January 2026, directly extending competitive pressure into Xvivo's addressable segments.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>NRP (normothermic regional perfusion) dynamics are a genuine positive, not a substitution threat:</strong> NRP surged to <strong>55.8%</strong> of US donation-after-circulatory-death donors in Q1 2026 and functions as a complement to Xvivo's ex vivo perfusion technology (pre-recovery resuscitation feeding downstream runs) rather than a substitute, evidenced concretely by Xvivo winning its first five US NRP contracts in the same quarter.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>TransMedics remains the dominant read-across competitor and the toughest comparison point:</strong> TransMedics holds over <strong>40%</strong> share of the US liver market and procured more than 3,700 organs via its 21-aircraft integrated logistics network in 2024, a scale and vertical-integration advantage Xvivo has explicitly chosen not to replicate, opting instead for an asset-light perfusionist-partnership model.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ2 — Strong internal change forces? <span class="g gB">B</span></strong> The clearest internal change force is the PSI (Perfusion Solution Inc) partnership granting access to 175 US perfusionists, executed in Q3 2025 and already generating the first US EVLP hub-and-spoke pilot (Indiana Donor Network, launched Q1 2026, with a second hub onboarded shortly after) -- a concrete, evidenced commercial-model change, not a stated intention.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>The FlowHawk digital platform is a genuine but modest internal lever:</strong> used by six of the ten largest US transplant programs, it deepens switching costs, though its direct EPS contribution is not separately quantified in the source material.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>The most consequential internal change is organisational, and it is a genuine mixed signal:</strong> CFO Kristoffer Nordstrom's move to Senior VP Corporate Strategy (effective April 2026) while retaining interim CFO duties and taking direct responsibility for the underperforming US services unit is framed by management as a fix, but the Leadership report flags that he lacks direct clinical operational experience -- precisely the skill gap the US services turnaround requires.</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>The SEK 50m capacity-scaling project is the single most financially material internal change and remains unproven:</strong> it aims to scale disposable production roughly <strong>10x</strong> to lift Abdominal gross margin from <strong>54%</strong> toward the <strong>70%</strong> 2027 target, but Q1 2026 results show margin moving in the opposite direction, and "on-budget, on-schedule" claims (per the Business Foundation report) have not yet translated into the intended margin outcome.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>Board refreshment adds outside commercial experience but has not yet been tested:</strong> the 2026 AGM elected two new directors (Emil Billback, Anne-Karen Hunt) bringing global commercialisation and medical-diagnostics backgrounds from Bonesupport, GE Healthcare and Demant, replacing two departing directors -- a reasonable governance upgrade whose practical effect on the US commercial execution problem is not yet observable.</div></div></div></div></div>
+<p><strong>RA2 — Robust base summary <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Xvivo's operating base is genuinely strong on gross-margin economics (<strong>74%</strong> group gross margin, 83-<strong>85%</strong> in Thoracic) and balance-sheet quality (SEK 308.1m cash, zero net debt), but the base is not robust on external-headwind absence, past-delivery congruency, or valuation -- three of the five Required Attribute sub-tests point to meaningful, currently-live concerns.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ1 — Absence of external headwinds? <span class="g gD">D</span></strong> Multiple material external headwinds are simultaneously active, not hypothetical: (1) the confirmed 6-12 month European heart CE mark delay is a realised regulatory setback; (2) well-capitalised competitor consolidation (Getinge/Paragonix, Terumo/OrganOx, Bridge to Life's FDA clearance) is compressing the competitive white space Xvivo needs for its heart and liver launches; (3) zero FX hedging against a <strong>53%</strong> USD-revenue / SEK-cost-base mismatch creates a mechanical earnings risk independent of operating performance.<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>The FX exposure is quantified and material, not a background risk:</strong> the Risks report calculates that a <strong>10%</strong> SEK appreciation would destroy approximately <strong>16%</strong> of 2025 baseline adjusted EBITDA (roughly SEK 16m against SEK 161m), and the 2025 comprehensive-income FX hit was already SEK 81.5m negative.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Q2 2025 provides a recent, real precedent for demand-side fragility:</strong> organic sales contracted <strong>15%</strong> in that quarter on US customer destocking at Lung Bioengineering, triggering a <strong>30%</strong> single-day share-price decline -- evidence that a large single-customer or single-region shock can move the stock materially even against a structurally growing end market.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>The competitive intensity is asymmetric in Xvivo's disfavour on scale:</strong> TransMedics' vertically integrated aviation-and-logistics model is difficult for Xvivo's asset-light perfusionist-partnership approach to match on service completeness, even though it is more capital-efficient.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA2 CQ2 — Well-invested base? <span class="g gB">B</span></strong> The physical and clinical infrastructure is genuinely well-invested: an approximately $<strong>500</strong>,000 XPS machine plus roughly $<strong>40</strong>,000-per-case disposables create durable switching costs, patented formulations (STEEN Solution, Perfadex Plus) block generic substitution, and the FlowHawk digital layer is embedded in six of the ten largest US transplant programs.<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Clinical evidence base is genuinely differentiated, not aspirational:</strong> the Lancet-published NIHP2019 trial showed a <strong>76%</strong> risk reduction in severe primary graft dysfunction, and the US PRESERVE trial achieved <strong>91.4%</strong> one-year survival, both real, published, peer-reviewed clinical outcomes rather than company-generated claims.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Manufacturing remains a genuine weak point in an otherwise well-invested base:</strong> all commercial manufacturing is outsourced to Western Europe / US partners (a single-source concentration risk), and the SEK 50m capacity project intended to resolve the sterilisation and cleanroom bottleneck constraining Abdominal margins is not yet demonstrated to be working.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis? <span class="g gC">C</span></strong> Delivery is mixed, not clean: Q1 2026 delivered a genuine top-line beat (SEK 241.0m versus SEK 235.9m consensus, +<strong>2.2%</strong>) with <strong>23%</strong> constant-currency organic growth, but simultaneously missed on margin (<strong>71%</strong> gross margin versus <strong>75%</strong> consensus, a 400-basis-point miss) and on EBITDA (SEK 51.1m versus SEK 54.2m consensus, a <strong>5.7%</strong> miss) -- the beat is on the growth line the thesis needs least urgently and the miss is on the margin line the thesis needs most.<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>The historical pattern reinforces this mixed read, not a clean track record:</strong> 2025 organic growth was only <strong>3%</strong> (<strong>8%</strong> excluding heart trials) after <strong>39%</strong> in 2024, and Q2 2025 delivered an outright <strong>15%</strong> organic contraction -- congruency with the thesis has been genuinely volatile quarter to quarter, not a smooth validating trend.</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Management's own honest-tracker archetype is a partial mitigant:</strong> the Leadership report notes management took the Q2 2025 miss cleanly without obfuscation and has not been found to artificially massage numbers, which is a genuine positive on credibility even where delivery itself has been uneven.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E1 RA2 CQ4 — Large change-from-current / mispricing? <span class="g gC">C</span></strong> The change-from-current case rests on three specific and quantified triggers (heart CE mark, EVLP hub scaling, kidney ramp) rather than a diffuse re-rating story, which is a genuine positive for Triaging-stage trackability; but at <strong>37.8x</strong> forward P/E (15th percentile of its own history, meaning historically rich rather than cheap), the market has already priced in a meaningful probability of these catalysts landing.<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>The consensus target price implies real remaining upside on paper:</strong> SEK 333.9 consensus versus SEK 261.0 current price is a <strong>27.9%</strong> implied gap, but with a <strong>100%</strong> Buy-rated, zero-Sell sell-side book, that gap reflects analyst consensus optimism rather than a market-clearing disagreement, and the Risks report's own bear-case fair value of SEK 120-145 (50-<strong>60%</strong> downside) sits far below the current price.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>The mispricing case is asymmetric and depends entirely on which ACH scenario resolves:</strong> if the bull "YES" case plays out, the <strong>27.9%</strong> consensus gap likely understates the upside given the option value in the heart platform; if the "NO" or "FALSE FRIEND" scenarios play out, the downside is materially larger than the upside, which is the core valuation-asymmetry question Early-Stage Assessment must resolve.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E1 RA2 CQ5 — Low trading multiple? <span class="g gD">D</span></strong> The multiple is not low by any measure -- <strong>37.8x</strong> forward P/E sits at only the 15th percentile of the stock's own ten-year valuation history, meaning the stock is trading rich relative to its own past, not at a discount; peer Vitrolife trades at <strong>18.9x</strong> EV/EBITDA against Xvivo's roughly <strong>50x</strong> forward EV/EBITDA cited in the Risks report.<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><strong>This is a genuine and material offset to the change-force case:</strong> a Triaging thesis built on "large and trackable change forces" is materially weaker when the market has already priced a rich multiple in anticipation of those same forces landing; the margin of safety is thin, not generous.</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>Cohort context sharpens the read further:</strong> Xvivo's valuation premium is not shared uniformly by its own cohort -- Cellavision (CEVI-SE) is "Not qualified" on Richard's Long-list-qualified screen and just suffered a -<strong>21.6%</strong> single-day earnings-miss crash, while Xvivo continues to command a premium multiple despite carrying comparable execution and margin risk of its own.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The strongest counter-argument is that the <strong>100%</strong> Buy-rated, momentum-score-9 sell-side consensus, combined with three independently well-evidenced HIGH-plausibility catalysts, means the market is under-pricing rather than over-pricing the case, and that a rich multiple is simply the correct reflection of a genuinely rare near-monopoly asset.<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Watson response:</strong> This is a credible bull case and is the reason for a progress recommendation rather than a park; but the Risks report's independently-constructed Analysis of Competing Hypotheses -- built from 18 separate evidence items, not sentiment -- found the bear "NO" scenario to have fewer material inconsistencies than the bull "YES" scenario, which is a structural, evidence-based counter-signal that a unanimous sell-side Buy consensus does not by itself refute.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) Watson to monitor the Q2 2026 print specifically for sequential improvement in Abdominal gross margin off the <strong>54%</strong> base -- a further decline would materially undermine the E1 RA1 change-force thesis; (2) Watson to track the European heart CE mark decision against the "early summer 2026" guided timeline and treat any further slip as a Section D.II invalidation-relevant signal at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">49 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> The building blocks support progression to Early-Stage Assessment but do not yet clear a higher bar: consumables-node economics are excellent, the services node is a genuine and growing drag, and the case-simplicity guardrails are strained by a wider-than-ideal driver count and live, simultaneous external headwinds.</li><li><strong>Group 1 (momentum): <span class="g gC">C</span></strong> Strong relative strength and sell-side momentum offset by an unconfirmed technical base and a mixed thematic read.</li><li><strong>Group 2 (simplicity): <span class="g gC">C</span></strong> Two clear fulcrum drivers but a six-item key-driver count and an active zero-headwinds failure.</li><li><strong>Group 3 (philosophy): <span class="g gC">C</span></strong> Consumables value-chain position is genuinely excellent; the services node is a real, worsening structural weakness.</li><li><strong>Group 4 (riskiness): <span class="g gC">C</span></strong> Light first-pass note; the Risks report's structural bear ACH verdict and zero FX hedging carry forward as the two most material Deep-Dive flags.</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">8 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> Technical momentum is genuinely strong on relative strength but the base itself is unconfirmed; sell-side momentum is strongly positive but concentrated in a suspiciously uniform consensus; thematic fit is structurally mixed once assessed without any live macro overlay.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 — Technical momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E4 (Technical momentum) is first assessed at Early-Stage Assessment; technical data (76th-percentile relative strength, Stage 2 uptrend, unconfirmed base) is summarised at MR1 level in Section B for context only.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">7 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict. <span class="g gC">C</span></strong> Assessed here using stock-specific, first-principles reasoning only, per Richard's explicit instruction of 04-Jul-26 -- no live macro or thematic frame was consulted. Xvivo's demand base is genuinely non-discretionary and reimbursement-driven, which is a real structural resilience characteristic; but the business is not immune to a downturn through its capital-equipment placement cycle and its US services labour cost base, and AI exposure is neutral-to-mildly-positive rather than a live threat or a live tailwind.</li></ul></div>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> Organ transplantation is not an elective or discretionary procedure -- demand is driven by clinical need and reimbursement systems (Medicare, national health services), not consumer discretionary spending, which gives Xvivo a genuinely defensive underlying demand characteristic that most consumer-facing or capex-cyclical businesses lack.<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>The capital-equipment placement mechanism is the offsetting structural fragility.</strong> Xvivo's razor-and-blade model still requires an initial machine placement (loan, lease, or sale) at each new site before the recurring consumable annuity begins; in a downturn, hospital capital-equipment budgets are among the more easily deferred line items, which could slow new-site adoption even though existing-site consumable revenue would likely hold up.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>US services labour cost exposure is a genuine downturn vulnerability, not a defensive characteristic.</strong> The Services segment already shows acute cost pressure (gross margin collapsed to <strong>18%</strong> in Q1 2026 from <strong>38%</strong> a year earlier) driven by surgeon and perfusionist compensation and retention costs; a downturn that further tightened US healthcare labour markets or hospital operating budgets would likely worsen, not improve, this segment's economics.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ1 — Bear market defensive credentials? [factual]:</strong> Transplant volumes are structurally supply-constrained, not demand-constrained (only 170,000 of an estimated 2 million needed transplants performed globally in 2024), meaning underlying procedure volume is unlikely to contract materially even in a broad economic downturn, since the binding constraint is organ availability and clinical capacity, not patient willingness or ability to pay for an elective procedure.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Reimbursement dependency is a genuine but manageable pass-through risk:</strong> most organ preservation costs are bundled into transplant procedure reimbursement (Medicare and equivalent European systems) rather than paid out-of-pocket, insulating volume from direct consumer-spending pressure, though government reimbursement-rate cuts in a fiscally stressed downturn remain a real tail risk not separately modelled in the source reports.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The capex-cycle vulnerability described above is the primary offsetting factor</strong> and is the reason this Core Question is graded [factual] rather than an unambiguous bullish <span class="g gA">A</span> or <span class="g gB">B</span> -- the demand-side defensiveness is real but the go-to-market mechanism (capital placement, US services labour) is not equally defensive.</div></div></div></div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Xvivo's core business is physical clinical hardware and biological perfusion fluids delivered through in-person surgical and perfusionist services -- a category structurally resistant to AI substitution or disintermediation, since AI cannot perform ex vivo organ perfusion or physically transport a donor organ.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>FlowHawk is a genuine, modest AI-adjacent asset rather than a disruption exposure.</strong> The digital workflow platform (used by six of the ten largest US transplant programs) is a data and logistics coordination tool that deepens customer lock-in; it represents a mild positive use of digital/AI-adjacent technology rather than a vector by which Xvivo's core revenue could be disrupted or replaced.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>No credible AI-substitution pathway exists for the core consumables business,</strong> and no near-term AI-native competitor is identified anywhere in the four source reports; the appropriate grade is a genuinely neutral-to-mild-positive <span class="g gC">C</span>, reflecting real but limited AI relevance rather than either a live threat or a live structural tailwind.</div></div></div></div></div>
+<p><strong>E5 RA3 — Suitability for Iran / oil-price induced inflation or demand deterioration <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> Direct Iran/oil exposure is minimal -- Xvivo has no significant energy-intensive manufacturing and no direct commodity-input cost line tied to oil; the primary transmission channel, if any, would be indirect, through elevated input costs at its outsourced Western European/US manufacturing partners or through general healthcare-system budget pressure in an oil-shock-driven inflationary environment.<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>No aluminium, plastics, or other oil-derivative commodity exposure is flagged as material in any of the four source reports,</strong> unlike, for example, a beverage-can-dependent consumer business; this is a case where the absence of evidence of exposure is itself informative, since the Risks report is otherwise thorough on cost-sensitivity analysis (it runs detailed FX sensitivity tables) and does not surface an oil/commodity sensitivity table for Xvivo.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>The more relevant transmission channel is currency, not direct commodity cost,</strong> and that channel is already covered comprehensively under the zero-FX-hedging finding elsewhere in this memo; net Iran/oil-specific exposure is assessed as low and largely indirect, rated <span class="g gC">C</span> as a genuinely neutral reading rather than either a beneficiary or a casualty case.</div></div></div></div></div>
+<p><strong>E5 RA4 — Paradigm fit from business perspective <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> Xvivo fits a "high-capex platform build transitioning into a high-margin recurring-consumable compounder" archetype -- a real and historically validated pattern in medtech (specialty diagnostics and lab-instrument businesses often follow exactly this trajectory), but the transition is not yet complete, and the current-stage risk profile (binary regulatory catalysts, culture strain, margin volatility) is materially higher than a mature compounder's.<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>The paradigm tension is that Xvivo is being priced, in part, as if the transition were further along than the evidence supports.</strong> A <strong>37.8x</strong> forward P/E is a multiple more consistent with an established, de-risked recurring-revenue compounder than with a platform still dependent on binary regulatory outcomes (heart CE mark) and unresolved manufacturing bottlenecks (abdominal margin).</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Within its own cohort, Xvivo is the clearest example of this paradigm currently in motion:</strong> Chemometec (CHEMM-DK) is further along a similar cell-analysis consumables trajectory and is "Long-list qualified" on Richard's screen; Cellavision (CEVI-SE) recently suffered a violent earnings-driven de-rating that illustrates the downside risk when a similar consumables-platform paradigm story disappoints; Tecan (TECN-CH) sits earlier-stage on Richard's own knowledge-level flag ("Pre-IG").</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> The strongest thematic counter-argument is that framing Xvivo as "downturn-resilient" overstates the defensiveness, because the stock's valuation multiple (not its underlying demand) is what will move most in a broad risk-off environment, and a <strong>37.8x</strong> forward P/E, momentum-crowded, <strong>100%</strong>-Buy-rated stock is exactly the kind of name that de-rates hardest on multiple compression even if the underlying transplant-demand fundamentals hold up.<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Watson response:</strong> This is a fair and important distinction between fundamental resilience (genuinely present) and share-price resilience (not established, and arguably weak given the valuation starting point); the memo's grading of E5 at <span class="g gC">C</span> rather than a higher grade already reflects this by treating the capex-cycle and multiple-compression risks as real offsets rather than assuming fundamental defensiveness translates mechanically into share-price defensiveness.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) At Early-Stage Assessment, explicitly separate "fundamental demand resilience" from "share-price resilience" when re-testing E5, given the valuation starting point; (2) monitor whether any US healthcare reimbursement-rate policy discussion emerges in 2026 that could pressure transplant-procedure bundled reimbursement, the one genuine downturn transmission channel not yet fully explored in the source reports.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">23 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gC">C</span></strong> The core investment thesis reduces cleanly to two fulcrum drivers, which is a positive; but the full driver count, multiple simultaneous live external headwinds, and a wide organisational change perimeter (CFO reassignment, board refresh, US restructuring) push the simplicity guardrails to the edge of the Triaging standard.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict. <span class="g gC">C</span></strong> Two clean fulcrum drivers are identifiable (European heart CE mark; US EVLP/kidney commercial scale-up), but the key-driver count extends to six once abdominal margin recovery, US heart PMA/CAP, and services integration are included, and the zero-headwinds test fails outright on FX and competitive grounds.</li></ul></div>
+<p><strong>E7 RA1 — Focused bet? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> The investment case can be reasonably compressed to two fulcrum drivers -- (1) European heart CE mark approval unlocking a large unpenetrated segment, and (2) US EVLP-and-kidney commercial scale-up converting existing clinical relationships into disposable revenue growth -- which passes the spirit of the "two or fewer fulcrum drivers" guardrail.<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>The key-driver count is the genuine strain point:</strong> six distinct drivers are separately tracked in the Change Forces report (EVLP hubs, heart CE mark, kidney ramp, heart PMA/CAP, abdominal margin, services integration), each with its own monitoring requirement, which sits above the four-or-fewer ideal and widens the Early-Stage Assessment monitoring perimeter materially.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ1 — 2 or fewer fulcrum drivers AND 4 or fewer key drivers? <span class="g gC">C</span></strong> The two-fulcrum-driver test is met; the four-or-fewer key-driver test is not -- six distinct, independently-monitored drivers exist, each carrying its own plausibility, confidence, and EPS-impact assumptions, which is a genuinely wider monitoring surface than the ideal Triaging setup.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Fulcrum driver 1 (heart CE mark) is trackable to a specific near-term date</strong> ("early summer 2026" per management), a genuine simplicity positive since the market will receive a clean binary signal rather than a diffuse multi-quarter data trickle.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Fulcrum driver 2 (US EVLP/kidney scale-up) is more diffuse and multi-quarter in nature,</strong> dependent on continued OPO hub onboarding and sustained kidney-disposable growth rather than a single discrete event, which is inherently harder to monitor cleanly than a binary regulatory decision.</div></div></div></div></div>
+<p><strong>E7 RA2 — Narrow perimeter? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Geographic perimeter is reasonably narrow (US, Sweden, Netherlands, Italy -- four countries, roughly 180 personnel), but the product/segment perimeter is wide: three business areas (Thoracic, Abdominal, Services) covering four distinct organ types with materially different margin structures, competitive dynamics, and regulatory pathways.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA2 CQ1 — 10 or fewer geographies and/or business units? [factual]:</strong> Geographic footprint is genuinely narrow at four countries of operation, comfortably within the 10-or-fewer test; the business-unit count (three segments spanning four organ types) is also within the nominal 10-or-fewer threshold, but the internal heterogeneity within that count (an <strong>83%</strong> gross-margin Thoracic segment alongside an <strong>18%</strong> gross-margin Services segment) means the perimeter, while numerically narrow, is analytically wide.</div></div>
+<p><strong>E7 RA3 — Zero headwinds? <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gD">D</span></strong> Multiple material, currently-active external headwinds exist simultaneously, failing this test outright: (1) the confirmed 6-12 month European heart CE mark delay is a realised, not hypothetical, headwind; (2) zero FX hedging against a severe USD-revenue/SEK-cost mismatch is an active, quantified earnings risk; (3) well-funded competitor consolidation (Getinge/Paragonix, Terumo/OrganOx, Bridge to Life) is compressing competitive white space in real time.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue? <span class="g gD">D</span></strong> Three distinct, simultaneously-active value-chain headwinds are documented with hard evidence rather than being speculative: the CE-mark delay is already realised and confirmed by management commentary; the FX exposure is quantified at approximately <strong>16%</strong> of baseline EBITDA at risk from a <strong>10%</strong> adverse currency move; and the abdominal margin compression (<strong>54%</strong> versus a <strong>63%</strong> prior-year and <strong>63%</strong> broker-expected level) reflects a genuine, currently-unresolved value-chain (manufacturing/subcontractor) headwind, not merely a competitive one.</div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> Two clear positive change-from-current items (heart CE mark approval, EVLP/kidney scale-up) are offset by at least two currently-active negative change-from-current items (abdominal margin compression, services segment contraction), giving a genuinely mixed net picture rather than a clean asymmetric positive.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E7 RA4 CQ1 — 2 or fewer change-from-current items or problems? <span class="g gC">C</span></strong> The positive change-from-current case is well-specified (CE mark decision, EVLP hub scaling); but two negative change-from-current items are simultaneously live and material -- the Q1 2026 abdominal margin miss and the Services segment's -<strong>10%</strong> organic contraction with an <strong>18%</strong> gross margin collapse -- meaning the net change-from-current count exceeds the ideal of two or fewer once negatives are included, not just positives.</div></div>
+<p><strong>E7 RA5 — Conservative investor relations? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> Management's investor relations posture is genuinely disciplined and non-promotional: the Leadership report characterises management as an "honest-tracker archetype" that took the Q2 2025 <strong>15%</strong> organic miss cleanly without obfuscation, and maintained full-year 2026 EBITDA guidance through the Q1 2026 print despite the margin miss, rather than either over-promising or panicking.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E7 RA5 CQ1 — Company confirms guidance is conservative? <span class="g gB">B</span></strong> Management does not issue precise numerical guidance on most operational metrics (a mild negative for external verifiability) but has a three-year demonstrated pattern of taking bad news cleanly (Q2 2025) and of hitting or exceeding disclosed clinical-trial timelines (the US heart trial completed enrolment five months ahead of schedule) -- a genuinely credible, if not fully quantified, conservative-guidance posture.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The strongest simplicity counter-argument is that the six-driver count overstates true complexity, because four of the six drivers (EVLP, kidney, heart CE mark, heart PMA) are really facets of a single underlying "US and European organ-perfusion commercial ramp" story rather than genuinely independent bets, and collapsing them conceptually would bring the case back within the four-or-fewer ideal.<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>Watson response:</strong> This is a reasonable simplification for communication purposes but not for monitoring purposes -- each of the four drivers has its own distinct regulatory pathway, competitive dynamic, and evidence stream (a heart CE mark rejection would not automatically imply a kidney-ramp failure, for example), so the Early-Stage Assessment monitoring plan should retain the six-driver granularity even while the investment narrative can be told more simply.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) At Early-Stage Assessment, build the Section D.III driver tables around the six named drivers rather than collapsing them, given their genuinely independent risk profiles; (2) Watson to specifically test whether the FX hedging policy (currently <strong>0%</strong>) changes at any point in 2026, since a hedging-policy shift would materially change the E7 RA3 zero-headwinds read.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gC">C</span></strong> The primary fit is Big demand change-driven earnings-per-share upgrade / earnings-power-transition, given the structural <strong>10x</strong> supply-demand gap and the specific, quantified near-term catalysts; the secondary fit is a corporate-change-driven setup around the CFO reassignment and board refresh. Both are qualified by the Risks report's structural bear ACH verdict, which is the primary reason neither setup clears a higher grade at Triaging.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA1 — Mis-modelled, high-quality EPS upgrader: <span class="g gC">C</span></strong> Sell-side estimates have been revised meaningfully upward on a near-term basis (1-month EPS revisions +4, momentum score 9), and the Q1 2026 top-line beat suggests some genuine under-modelling of the EVLP/kidney recovery; but the simultaneous margin miss means the case is not cleanly "mis-modelled in Xvivo's favour" -- the market appears to have correctly anticipated the margin risk even while under-modelling the top-line recovery, rated. <span class="g gC">C</span><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>E8 RA1 CQ1 — Evidence of sell-side under-modelling? <span class="g gC">C</span></strong> The pattern of positive near-term revisions (EPS +4 one-month, EBITDA +2 across one/three/six-month windows) combined with a still-elevated 24-month base-effect deceleration (EPS -42, EBITDA -33) suggests the sell-side is still working through 2025's slowdown rather than showing a clean, fresh under-modelling signal specific to 2026.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA2 — Big demand change-driven EPSU or EPT: <span class="g gB">B</span></strong> This is the strongest-fitting setup: a structural, well-evidenced <strong>10x</strong> supply-demand imbalance in organ transplantation is a genuine "big demand change" backdrop, and the three HIGH-plausibility catalysts (EVLP, heart CE mark, kidney ramp) are the specific mechanisms by which that demand change translates into disposable-revenue growth.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>E8 RA2 CQ1 — Large, structural, non-cyclical demand shift identified? <span class="g gB">B</span></strong> Yes -- the transplant supply-demand gap is structural and multi-decade, not a cyclical swing, and is corroborated by three independent data points (only <strong>10%</strong> of demand currently met, DCD donor growth over <strong>7%</strong> annually, TAM projected to reach USD 2.9 billion by 2033 at approximately <strong>7%</strong> CAGR from only <strong>4%</strong> current penetration).</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>E8 RA2 CQ2 — Is the demand change already substantially reflected in consensus? <span class="g gC">C</span></strong> Partially -- the <strong>100%</strong> Buy-rated sell-side consensus and <strong>37.8x</strong> forward multiple suggest the demand story is well understood and priced by the analyst community, reducing (but not eliminating) the "under-appreciated" component of the setup.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>E8 RA2 CQ3 — Clear, monitorable near-term milestones exist? <span class="g gB">B</span></strong> Yes -- the heart CE mark decision date and quarterly EVLP/kidney disposable volume are both clean, monitorable, near-term data points, a genuine positive for this setup's trackability.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>E8 RA2 CQ4 — Company has demonstrated capacity to execute the ramp? <span class="g gC">C</span></strong> Mixed -- EVLP and kidney execution has been genuinely strong (<strong>56%</strong> and <strong>63%</strong> growth respectively), but the abdominal margin execution and the US services execution have both been weak, so capacity to execute is proven in some segments and not yet proven in others.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>E8 RA2 CQ5 — Setup is differentiated from consensus narrative, not merely restating it? <span class="g gC">C</span></strong> The setup broadly matches the sell-side's own narrative (<strong>100%</strong> Buy, uniform bullishness) rather than representing a genuinely contrarian or differentiated read, which is itself a mild negative for setup quality per the Communicating SOP's groupthink caution.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA3 — Strong corporate change driven EPSU / EPT: <span class="g gC">C</span></strong> A secondary, weaker-fitting setup exists around the CFO reassignment and board refresh as a corporate-change catalyst for improved US execution, but this is speculative rather than evidenced -- no data yet shows the reassignment has improved US services outcomes, and the Leadership report explicitly flags the CFO's lack of relevant clinical operational experience as a risk to this thesis working.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>E8 RA3 CQ1 — Corporate change event identified with a credible operational-improvement mechanism? <span class="g gC">C</span></strong> The mechanism (an experienced, financially disciplined executive taking direct ownership of an underperforming unit) is plausible in the abstract, but the specific skill mismatch flagged by the Leadership report (no direct clinical operational background) weakens confidence in this specific instance.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA4 — Change-from-current clearing in high-quality compounder: <span class="g gC">C</span></strong> Xvivo has genuine high-quality compounder characteristics (<strong>74%</strong> gross margin, net cash, structural demand tailwind) but the "change-from-current clearing" language implies a resolved uncertainty, and the abdominal margin and CE-mark timelines remain unresolved as of Triaging, so this setup is present in nascent form rather than clearing.<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>E8 RA4 CQ1 — Is the change-from-current genuinely close to resolution, not merely directionally positive? <span class="g gC">C</span></strong> No -- both the heart CE mark decision and the abdominal margin trajectory remain open questions rather than near-resolved ones, which is the correct reason this setup does not yet clear at a higher grade.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA5 — Huge change-from-current clearing event in solid quality: <span class="g gC">C</span></strong> The heart CE mark decision, if positive, would qualify as a genuinely large discrete clearing event for a solid-quality business; but it has not yet occurred, and the base rate context (a confirmed prior 6-12 month delay) tempers confidence that the "early summer 2026" date will hold without further slippage.<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>E8 RA5 CQ1 — Is the clearing event large enough to be case-defining, and is its timing genuinely near-term? <span class="g gB">B</span></strong> Yes on magnitude (the Change Forces report assigns a 15-<strong>20%</strong> EPS impact to the heart CE mark alone, the largest single-driver impact of the six); more qualified on timing given the demonstrated delay precedent.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA6 — Trough-on-trough turn in solid quality cyclical: <span class="g gC">C</span></strong> This setup does not fit well -- Xvivo is not a cyclical business experiencing a trough-to-trough turn; its 2025 deceleration (<strong>39%</strong> to <strong>3%</strong> organic growth) reflects heart-trial enrolment completion and one-off destocking, not classic end-market cyclicality, so this setup is a weak match.<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>E8 RA6 CQ1 — Is the deceleration/recovery pattern genuinely cyclical rather than idiosyncratic? [factual]:</strong> No -- the 2025 slowdown is directly attributable to two identifiable, non-recurring causes (heart-trial enrolment completion effects and a single-customer destocking event), not to a broad end-market cycle, confirming this is a poor setup fit.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL]: <span class="g gB">B</span></strong> No unacceptable setup pattern (pure story stock with no evidenced fundamentals, serial acquirer with no integration discipline, promotional management with a pattern of guidance misses) is present; management's honest-tracker record and genuine clinical/commercial evidence base clear this negative guardrail.<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>E8 RA7 CQ1 — Any evidence of an unacceptable setup pattern? [factual]:</strong> No -- none of the four source reports surface a pattern of promotional guidance, undisclosed related-party dealing, or evidenced fundamentals-free story-stock characteristics; this guardrail is clear.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA8 — Fit with false friend case setups? [NEGATIVE GUARDRAIL]: <span class="g gD">D</span></strong> This guardrail is the single most important flag in the entire Element: the Risks report names two explicit, HIGH-plausibility FALSE FRIEND scenarios specific to Xvivo -- "Empty Machine Syndrome" (hardware placement growth masking a failure of consumable pull-through) and "Artificial Margin Expansion" (EBITDA margin gains driven by R&amp;D capitalisation rather than genuine operating leverage) -- both evidenced with specific warning indicators the source report already partially observes.<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>E8 RA8 CQ1 — Any evidence the bull case could be a false friend rather than genuine change? <span class="g gD">D</span></strong> Yes, materially: capitalised development costs reached SEK 152.8m-153m in 2025 (a genuine and sizeable share of reported EBITDA improvement), and the source report's own warning indicator for Artificial Margin Expansion (capitalised R&amp;D growing over <strong>30%</strong> year-on-year while reported R&amp;D expense drops) is a pattern worth testing directly against 2025-2026 disclosures at Early-Stage Assessment.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>At end of E8 at Triaging, Watson identifies the fitting setups.</strong> Primary fit: Big demand change-driven EPS upgrade / earnings-power transition (E8 RA2), on the strength of the structural <strong>10x</strong> supply-demand gap and three HIGH-plausibility quantified catalysts. Secondary fit: none clears a confident secondary designation -- the corporate-change setup (RA3) is too speculative and the huge-clearing-event setup (RA5) is contingent on an unresolved regulatory decision; Watson flags RA5 as the setup most likely to strengthen into a confident secondary fit if the heart CE mark decision lands positively on schedule.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> The strongest counter-argument is that the FALSE FRIEND guardrail finding is itself a false positive -- that capitalised R&amp;D at a clinical-stage medtech developing multiple novel devices (heart HOPE technology, liver 510(k) pathway) is normal and expected, not evidence of margin manipulation, and that the source report's own warning threshold (<strong>30%</strong>+ year-on-year capitalisation growth) has not actually been breached based on the disclosed 2024-to-2025 change (SEK 122.4m to SEK 152.8m-159.2m, approximately 25-<strong>30%</strong> growth, near but arguably at or just under the stated threshold).<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Watson response:</strong> This is a fair technical point -- the growth rate is close to, not clearly over, the report's own stated warning threshold -- but it does not remove the underlying concern; the correct Early-Stage Assessment action is to test the ratio precisely against FY2026 disclosures rather than to dismiss the flag, since the growth rate is close enough to the threshold that a modest acceleration in 2026 capitalisation would cross it.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) At Early-Stage Assessment, run the FALSE FRIEND "Artificial Margin Expansion" test explicitly against FY2026 interim disclosures -- track capitalised R&amp;D growth rate and the adjusted-EBITDA-to-operating-cash-flow gap as the two named warning indicators; (2) Watson to specifically test the "Empty Machine Syndrome" hypothesis by seeking hardware placement volume data separately from disposable/consumable revenue growth, which the current four reports do not cleanly disaggregate.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gC">C</span></strong> At Triaging, Element E11 (Value-chain dynamics) is in scope (second pass); Elements E9 (Great operator), E10 (Advantaged business), E12 (Supportive industry structure) and E13 (High secular growth potential) are not in scope -- marked "not applicable at this stage."</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">7 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gC">C</span></strong> The consumables-and-fluids node of Xvivo's value chain is a genuine, high-moat, high-margin position; the recovery-services node is a structurally dilutive and currently worsening weak point; net value-chain positioning is positive but not unambiguously so.</li></ul></div>
+<p><strong>E11 RA1 — Demand side strong / fragile? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> Demand-side strength is genuine and structural: only <strong>10%</strong> of estimated global transplant demand is currently met by supply, and donation-after-circulatory-death donor growth (over <strong>7%</strong> annually, now roughly 50/50 with donation-after-brain-death in the US) is expanding the addressable donor pool independent of any Xvivo-specific commercial action.<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>E11 RA1 CQ1 — Structural demand growth confirmed by independent data? <span class="g gB">B</span></strong> Yes -- the 170,000-transplants-against-2-million-need gap and the TAM projection (USD 2.9 billion by 2033 at approximately <strong>7%</strong> CAGR, only <strong>4%</strong> current penetration) are both independently sourced figures, not company-generated projections, giving genuine confidence in the demand-side read.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>E11 RA1 CQ2 — Any evidence of demand-side fragility or customer concentration? <span class="g gC">C</span></strong> Yes, a genuine offsetting fragility exists: a single Thoracic customer represented SEK 132m (over <strong>10%</strong>) of 2025 group revenue, and the Q2 2025 <strong>15%</strong> organic contraction was directly caused by a single-customer destocking event (Lung Bioengineering) -- real evidence that despite structural market growth, near-term revenue can be volatile around individual large-customer inventory cycles.</div></div></div></div></div>
+<p><strong>E11 RA2 — Competitive supportiveness / aggression? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> The competitive environment is intensifying, not stabilising: two major, well-capitalised acquisitions (Getinge/Paragonix at $<strong>477m</strong>, Terumo/OrganOx at approximately $<strong>1.5bn</strong>) have occurred within the past 24 months, both creating better-resourced multi-organ competitors, while TransMedics continues to hold a dominant, vertically-integrated position in the US liver market.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>E11 RA2 CQ1 — Competitive intensity trend: rising, stable, or falling? <span class="g gD">D</span></strong> Rising -- the two major acquisitions plus Bridge to Life's new FDA clearance for a competing liver device represent three distinct instances of competitive intensification within roughly 18 months, a clear rising-intensity trend rather than a stable or benign one.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>E11 RA2 CQ2 — Direct competitor scale relative to Xvivo? <span class="g gD">D</span></strong> TransMedics alone (approximately $<strong>605m</strong> 2025 revenue against Xvivo's SEK 812m / roughly $<strong>75</strong>-80m equivalent) and the newly-acquired OrganOx and Paragonix franchises within Terumo and Getinge respectively are all now backed by larger parent balance sheets than Xvivo commands standalone.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>E11 RA2 CQ3 — Xvivo's specific segment leadership under direct threat? <span class="g gC">C</span></strong> Partially -- Xvivo's approximately <strong>90%</strong> share in static cold lung preservation (Perfadex Plus) is not under immediate direct attack, but TransMedics' new CHOPS cold-storage product is explicitly described in the Business Foundation report as attacking this exact franchise, making this a live, not hypothetical, threat.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>E11 RA2 CQ4 — Pricing power evidence amid rising competition? <span class="g gB">B</span></strong> Genuinely positive -- Xvivo has maintained 83-<strong>85%</strong> gross margins in Thoracic despite the competitive intensification, evidence of real pricing power and switching-cost durability rather than margin erosion under competitive pressure.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>E11 RA2 CQ5 — Consolidation creating a more rational or more aggressive pricing environment? <span class="g gC">C</span></strong> Ambiguous from current evidence -- better-capitalised competitors could either compete more aggressively on price to gain share, or, having paid full prices for their acquisitions, could rationally avoid destructive price competition to protect their own returns; no clear signal either way is present in the source material.</div></div></div></div></div>
+<p><strong>E11 RA3 — Disruption forces? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> The most credible disruption vector is not technological substitution but distribution-model disruption: TransMedics' vertically-integrated aviation-and-logistics "one-call" model is explicitly cited as the mechanism by which Xvivo's XHAT (heart) device could fail commercially even after regulatory approval, because hospitals may prefer a single bundled logistics provider over a best-of-breed device from an unbundled supplier.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>E11 RA3 CQ1 — Is there a credible disruption mechanism, and how far along is it? <span class="g gD">D</span></strong> Yes, and it is already partially realised -- the Risks report names this exact scenario ("XHAT US Launch Flop") as its ACH (Analysis of Competing Hypotheses) winner among ten distinct failure modes, citing a <strong>60%</strong> sector base rate for second-to-market medtech devices failing to displace bundled logistics monopolies, a specific and sobering quantified base rate rather than a generic risk statement.</div></div></div></div></div>
+<p><strong>E11 RA4 — Political / regulatory? <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA4 answer: <span class="g gD">D</span></strong> Regulatory risk is the most concretely realised negative in the entire case: the European heart CE mark process has already been delayed 6-12 months due to high regulatory agency workloads, a confirmed fact rather than a modelled risk, and the US liver programme was separately paused in 2025 specifically to pursue a lower-cost 510(k) regulatory pathway rather than the original Investigational Device Exemption route.<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>E11 RA4 CQ1 — Has a regulatory delay or setback already materialised? [factual]:</strong> Yes -- both the European heart CE-mark delay and the US liver programme's pathway pivot are already-realised facts, not prospective risks, which is a materially different (and worse) risk category than an unrealised regulatory uncertainty.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>E11 RA4 CQ2 — Is the regulatory environment becoming more or less favourable overall? <span class="g gC">C</span></strong> Mixed -- pending US OPO decertification rules and the French heart-technology reimbursement derogation are favourable regulatory tailwinds partially offsetting the CE-mark delay and the liver-pathway pivot, giving a genuinely two-sided regulatory picture rather than a uniformly negative one.</div></div></div></div></div>
+<p><strong>E11 RA5 — Supportive supplier side? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA5 answer: <span class="g gC">C</span></strong> The supplier side carries a specific, named concentration risk: all commercial manufacturing is outsourced to Western Europe/US partners, described in the Business Foundation report as a single-source risk, with a SEK 50m capacity-expansion project underway specifically to relieve a sterilisation and cleanroom bottleneck that is currently constraining Abdominal segment output and margin.<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>E11 RA5 CQ1 — Is manufacturing capacity currently a binding constraint on growth or margin? <span class="g gD">D</span></strong> Yes, materially -- the Abdominal segment's margin compression to <strong>54%</strong> is explicitly attributed in the source reports to production/subcontractor constraints, meaning the supplier side is not merely a background risk but an active, currently-binding limitation on the case's most financially material near-term driver.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The strongest counter-argument is that Xvivo's asset-light, partnership-based value-chain model (perfusionist partnerships, outsourced manufacturing) is a deliberate and appropriate strategic choice for a company of its scale, and that comparing it unfavourably to TransMedics' vertically-integrated aviation model conflates "different strategy" with "worse strategy."<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Watson response:</strong> This is a reasonable strategic-choice argument in the abstract, but the Risks report's own evidence (the XHAT ACH-winner scenario, the manufacturing-constrained abdominal margin) suggests the asset-light choice is currently producing worse near-term outcomes in practice, not merely a different but equally viable path; the correct Early-Stage Assessment test is whether Xvivo's asset-light model can still win on unit economics even if it loses on service completeness against TransMedics.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) At Early-Stage Assessment, deepen the value-chain analysis using the Business Foundation report's calculated margin-by-node table (Consumables &amp; Fluids <strong>81%</strong> gross margin / ~<strong>40%</strong> EBIT versus Recovery Services <strong>25.5%</strong> gross margin / ~<strong>7.5%</strong> EBIT) to test whether the Services node should be considered for strategic exit or restructuring rather than continued investment; (2) Watson to track the SEK 50m capacity project's actual delivery against its stated timeline as the single most direct test of whether the Abdominal margin thesis is credible.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gC">C</span></strong> Light first-pass note at Triaging; deep Element-level work (E15-E19) is Early-Stage Assessment / Deep-Dive scope and is noted as "not applicable at this stage" below. The two flags most material to carry forward are the Risks report's structural "NO" Analysis of Competing Hypotheses verdict and the <strong>0%</strong> FX hedge ratio against a severe currency mismatch.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Framing-level observation (no Element-level scoring at Triaging):</strong> The Risks report's aggregate 24-month failure probability of 35-<strong>45%</strong> sits meaningfully above its own cited 20-<strong>25%</strong> base rate for comparably-staged European medical device developers -- a genuinely elevated, not merely average, risk reading for a Triaging-stage stock. The most diagnostically important finding is the Analysis of Competing Hypotheses verdict itself: across 18 evidence items tested against three competing scenarios (bull "YES", bear "NO", and "FALSE FRIEND"), the bear "NO" scenario carries the fewest material inconsistencies (4, against 7 for "YES" and 5 for "FALSE FRIEND"). This is a structural, evidence-based bear signal, not a sentiment-based one, and it sits in direct tension with the unanimous <strong>100%</strong> Buy-rated sell-side consensus described elsewhere in this memo. Two named FALSE FRIEND scenarios (Empty Machine Syndrome, Artificial Margin Expansion) are both rated HIGH plausibility and each carries a specific, testable early-warning indicator that Early-Stage Assessment should track directly rather than treat as background risk.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e15-invalidating-attributes-nr" data-spy>Element E15 — Invalidating attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Structural ACH Screening -- We are looking for evidence that none of the 10 general invalidating ACHs applies; each structural risk must be explicitly tested and ruled out or mitigated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E15 (Invalidating attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e16-strenuously-seek-to-avoid-attributes-nr" data-spy>Element E16 — Strenuously seek-to-avoid attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case-Specific ACH Screening -- We are looking for identification and rigorous testing of the 2-4 case-specific alternate hypotheses most credible given this stock&#x27;s situation; avoiding generic lists or unexamined risks.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E16 (Strenuously seek-to-avoid attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e17-capital-constraining-attributes-nr" data-spy>Element E17 — Capital-constraining attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Volatility Profile -- We are looking for a manageable volatility profile: limited earnings variability, predictable news-flow, low short interest, and adequate liquidity for typical portfolio position sizes.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E17 (Capital-constraining attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e18-clear-transmission-mechanism-inputs-to-earnings-" data-spy>Element E18 — Clear transmission mechanism, inputs to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E18 (Clear transmission mechanism, inputs to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e19-monitorable-transmission-mechanism-leading-track" data-spy>Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E19 (Monitorable transmission mechanism, leading tracking indicators to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not yet in scope at Triaging; light note only. The clearest optionality candidate visible even at Triaging depth is the US heart PMA pathway beyond the currently-modelled Continued Access Protocol, and the TAM-extension logic (structural under-penetration at only <strong>4%</strong> of a USD 2.9bn 2033 TAM) that could compound well beyond the three primary near-term drivers if the platform successfully establishes itself in heart preservation.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">4 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation: <span class="g gC">C</span> progress to Early-Stage Assessment, medium conviction.</strong> The change-force set is unusually well-specified for Triaging depth and clears the stage's qualitative bar; conviction is capped at medium because the Risks report's own structural ACH verdict runs counter to the bull narrative, and because culture, margin, and hedging signals are simultaneously deteriorating rather than confirming the ramp.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment, medium conviction; this is a genuinely two-sided case at Triaging depth, not a clean high-conviction progress.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing — next-stage actions:</strong> (1) Deepen E1 with the Business Foundation and Risks reports' peer-benchmarking content; add E2 (Required case outputs) and E3 (Sufficient total-shareholder-return / valuation upside) with explicit reference to the Risks report's SEK 120-145 bear-case fair value against the SEK 333.9 consensus target; (2) run E9 (Great operator) and E10 (Advantaged business) at Early-Stage Assessment floor depth with specific focus on the CFO-to-US-services reassignment outcome and whether the eNPS decline has stabilised; (3) commission a self-initiated research query on the actual mechanics and interim progress of the SEK 50m abdominal disposable capacity-scaling project, since the <strong>70%</strong>-margin target is the single most load-bearing unresolved assumption in the whole case; (4) explicitly re-test the FALSE FRIEND "Artificial Margin Expansion" hypothesis against FY2026 interim capitalised-R&amp;D growth-rate disclosures.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If parking — reassessment criteria:</strong> Not applicable; recommendation is to progress. Were a future reassessment needed, the trigger would be either a further slip in the heart CE mark timeline beyond early summer 2026, or a second consecutive quarter of Abdominal gross margin below <strong>54%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to place a calendar flag for the European heart CE mark decision (expected early summer 2026) as the single highest-value near-term monitoring event; (2) Watson to independently source and read the Risks report's full ACH matrix detail (18 evidence items) before Early-Stage Assessment drafting begins, since the Triaging-level digest captures the verdict but not the full evidentiary chain behind it.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">18 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">10 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change Forces</strong> [AS] -- submitted 2026-06-04, on disk at <code>Files/XVIVO-SE/41-change-forces/</code> (compact-watson.md digest read; identity-confirmed two-signal).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Business Foundation</strong> [AS] -- on disk at <code>Files/XVIVO-SE/42-business-foundations/</code> (compact-watson.md digest read).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Leadership Foundations</strong> [AS] -- on disk at <code>Files/XVIVO-SE/43-leadership-foundations/</code> (compact-watson.md digest read).</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Risks</strong> [AS] -- on disk at <code>Files/XVIVO-SE/44-risks/</code> (compact-watson.md digest read; ACH matrix and FX sensitivity tables load-bearing).</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Legacy Triaging material</strong> -- <code>Files/XVIVO-SE/Triaging/XVIVO-SE-Q5-C-2026-05-21.md</code> through <code>XVIVO-SE-Q9-C-2026-05-21.md</code> (May-2026 pre-current-framework Q&amp;A files), plus <code>Files/XVIVO-SE/DD/</code> and <code>Files/XVIVO-SE/ESA/</code> subfolders -- read as background research context, not as a substitute for the four current-framework family reports, and not itself a current-framework Triaging memo.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>master-dashboard/data/prices.json</strong> (generated 2026-07-02) -- live price, 52-week range, moving averages, relative-strength percentiles.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>master-dashboard/data/factset-valuation.json</strong> -- current P/E, P/E percentile, forward EPS.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>master-dashboard/data/factset-ssem.json</strong> -- sell-side revision counts, Buy%, momentum score.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>master-dashboard/data/universe.json</strong> -- cohort code 14.311 and sector code B.5 identity and full peer membership.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Notion Stock Notes</strong> [Notion] -- Xvivo stock page (properties: RI "A. Very desired, 1st decile"; RK "5. Deep dive"; LLQ "1. APM suggested live"); Recent Developments Summariser note dated 19-May-26; cohort peer stock pages and RDS notes for Cellavision (CEVI-SE) and Chemometec (CHEMM-DK); Tecan (TECN-CH) stock page.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">8 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>No live thematic overlay applied, per Richard's explicit instruction of 04-Jul-26.</strong> Element E5 (Thematic fit) and Master Rating MR3 above were assessed using stock-specific, first-principles structural reasoning only -- genuine downturn resilience or fragility, genuine AI-disruption exposure or benefit -- without reading or drawing on <code>memory/thematics/active.md</code> or any live macro/thematic frame. This is a deliberate deviation from the default <code>02-THINKING-SOP.md</code> instruction to author E5 Core Questions "fresh per current active thematics" and is recorded here as the explicit process flag required by that instruction.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Cohort and sector integration applied at NORMAL weight, per Richard's instruction.</strong> Full cohort peer set (14.311: Cellavision CEVI-SE, Chemometec CHEMM-DK, Tecan TECN-CH, Xvivo XVIVO-SE) and full sector peer set (B.5. Medtech - consumables - mature: 18 tickers) were identified directly from <code>master-dashboard/data/universe.json</code>, not from a hand-picked shortlist. Cohort peer detail was read in full (Notion stock pages and Recent Developments Summariser notes for Cellavision and Chemometec; stock page for Tecan); sector peer detail was not individually read stock-by-stock given the 18-name breadth and the Triaging-stage token-budget gate in <code>06-RESEARCH-SOURCE-MAP.md</code> -- sector context is carried at the identity/classification level (all 18 are Medtech-consumables-mature) rather than at individual-stock depth, which is the correct application of the relevance gate at this stage and this cohort size.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Eckert &amp; Ziegler (EUZ-DE) confirmed NOT a cohort or sector peer.</strong> Verified directly against <code>master-dashboard/data/universe.json</code>: EUZ-DE sits in cohort 14.300 (Nuclear medicine and radioisotope technology) and sector B.10 (Medtech - components) -- a different cohort and a different sector from Xvivo's 14.311 / B.5. No EUZ-DE content was used in this memo's cohort or sector comparisons; this confirms the instruction to verify rather than assume a medtech pairing.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RR-trust dial applied at balanced (default).</strong> The four family reports' analytical content and section verdicts were leaned on directly; the Investment Analyst's own judgement was applied primarily at the grading layer (A-F assignment) and at points of divergence, which are flagged explicitly below.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Divergence from source-report framing, flagged explicitly per the balanced RR-trust dial:</strong> the Change Forces report's overall framing is "qualified bullish with material execution risk" -- this memo's Triaging-level grading (Pillar I <span class="g gB">B</span>, overall case <span class="g gC">C</span>) is slightly more cautious than that framing on the Pillar II / building-blocks side, specifically because the Risks report's structural ACH "NO" verdict and the Leadership report's culture-deterioration findings are, in Watson's judgement, more load-bearing for a Triaging-stage progress/park decision than the Change Forces report's own BLUF emphasis suggests. This is a genuine, stated divergence, not a silent override.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Notion coverage note.</strong> The Xvivo Notion stock page carries 46 linked Stock Notes; given the exceptional richness of the four family-report digests already available (all four read in full, well above the Triaging floor of Change Forces alone), this memo read the stock-level page properties, the most recent Recent Developments Summariser note, and the equivalent cohort-peer materials for Cellavision and Chemometec, rather than all 46 individual notes. This is judged proportionate at Triaging depth; a fuller sweep of all 46 notes is recommended explicitly as an Early-Stage Assessment action given Richard's instruction for heavier-than-default Notion reading on this batch.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Data freshness.</strong> <code>prices.json</code> dated 2026-07-02 (2 days stale from memo date, within the 10-day threshold in <code>06-RESEARCH-SOURCE-MAP.md</code> §4c). <code>factset-valuation.json</code> and <code>factset-ssem.json</code> carry no per-record date field; file-level staleness was not separately verified via <code>stat</code> in this run -- flagged as a minor process gap, not expected to be material given the values' internal consistency with the Q1 2026 print discussed throughout the four family reports.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>No self-initiated research queries were run for this memo.</strong> The four family reports' digest content was judged sufficient to meet the Triaging-stage floor and well beyond it; no research gap was identified that the on-disk material did not already address. This is within the 0-5 query band in <code>05-IA-EXECUTION-DISCIPLINE.md</code> §3 (zero is a valid outcome, not a shortfall, when coverage is already this strong).</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/xvivo-se-triaging-self-review-debrief-2026-07-04.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"C","label":"Technical momentum"},"MR2":{"grade":"B","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"MR6":{"grade":"NR","label":"Pillar III: Investment case components [NR]"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"C","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"},"Group 5":{"grade":"NR","label":"Case optionality [NR]"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"C"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"B"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"B"},{"code":"MR5","label":"Case building blocks","grade":"C"},{"code":"MR6","label":"Investment case components","grade":"NR"}],"pillars":[{"roman":"I","label":"Case change elements","grade":"B","elements":[{"code":"E1","label":"Required input change forces","grade":"B","ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"C","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"C","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"C","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"C","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"C","ras":[]},{"code":"E12","label":"Supportive industry structure","grade":null,"ras":[]},{"code":"E13","label":"High secular growth potential","grade":null,"ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"C","elements":[{"code":"E15","label":"Invalidating attributes","grade":null,"ras":[]},{"code":"E16","label":"Strenuously seek-to-avoid attributes","grade":null,"ras":[]},{"code":"E17","label":"Capital-constraining attributes","grade":null,"ras":[]},{"code":"E18","label":"Clear transmission mechanism, inputs to earnings per share","grade":null,"ras":[]},{"code":"E19","label":"Monitorable transmission mechanism, leading tracking indicators to earnings per share","grade":null,"ras":[]}]},{"code":"GROUP 5","label":"Case optionality","grade":"NR","elements":[{"code":"E20","label":"Nice-to-have attributes","grade":null,"ras":[]}]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

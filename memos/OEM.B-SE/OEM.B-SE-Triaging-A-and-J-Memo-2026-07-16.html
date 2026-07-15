@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OEM International AB (OEM.B-SE) — Triaging Analysis &amp; Judgement Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-financials-excluded-from-word-count-target">Section A — Financials (excluded from word-count target)<span class="nav-fc">8</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-investment-case-executive-summary">Section B — Investment Case: Executive Summary<span class="nav-fc">11</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-investment-case-attributes">Section C — Investment Case Attributes<span class="nav-fc">99</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-1-pillar-i-case-change-elements">Section C.1 — Pillar I: Case CHANGE Elements<span class="nav-fc">53</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-internal-external-first-pass">E1 — Required input change forces (internal / external) — FIRST PASS, ×2 double-weight (6-bullet minimum per Required Attribute and per Core Question) <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">53</span></span>
+<span class="nav-item nav-subsection" data-anchor="section-c-2-pillar-ii-case-building-blocks-4-in-scope-elemen">Section C.2 — Pillar II: Case BUILDING BLOCKS (4 in-scope Elements at Triaging)<span class="nav-fc">46</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-first-pass-light">Group 1 — Case momentum<span class="nav-rating-pill NR" title="PASS">PASS</span><span class="nav-fc">28</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-first-pass-light">Group 2 — Case simplicity<span class="nav-rating-pill NR" title="PASS">PASS</span><span class="nav-fc">13</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-first-pass-light">Group 3 — Core philosophy<span class="nav-rating-pill NR" title="PASS">PASS</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-first-pass-light-no-elements-in-scope">Group 4 — Case riskiness</span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-not-in-scope-at-triaging">Group 5 — Case optionality</span>
+<span class="nav-item nav-section" data-anchor="section-d-investment-case-components-pillar-iii">Section D — Investment Case Components (Pillar III)</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions">Section E — Actions</span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">12</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">OEM International AB (OEM.B-SE) — Triaging Analysis &amp; Judgement Memo</div>
+      <div class="meta">Stage: Triaging (first A&amp;amp;J pass) | Date: 2026-07-07 | Analyst: Investment Analyst (Watson) Procedure: 02-THINKING-SOP.md Procedure 1 — Triaging Briefing dials: RR-trust/sceptic</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">OEM.B-SE</span> OEM International AB (OEM.B-SE) — Triaging Analysis &amp; Judgement Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 16-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-investment-case-executive-summary" data-spy><span class="id">B</span> Investment Case: Executive Summary <span class="secn">11 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<p><strong>Page-level BLUF:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Verdict:</strong> the case <strong>strengthens</strong> into Triaging on an unusually clean combination — genuine organic re-acceleration (Q1 2026 organic +<strong>5%</strong> vs +<strong>1%</strong> in Q4 2025) landing at the exact moment a controlling owner change (EQT, <strong>73.7%</strong> of votes / <strong>26.3%</strong> of capital, since February 2025) is visibly accelerating bolt-on M&amp;A (six deals closed year-to-date 2026, adding SEK 400m of annualised sales against SEK 2.3bn of unused debt capacity). Two tailwinds arriving together, not one masking the other's absence.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>The central tension the case must resolve, not avoid:</strong> the Risks report's own Analysis-of-Competing-Hypotheses matrix names "FALSE FRIEND" as the winning hypothesis with zero disconfirming items (versus nine against a clean "YES" case and four against a clean "NO" case) — meaning the highest-plausibility read of OEM today is that near-term M&amp;A acceleration and margin upticks could be <em>masking</em>, not confirming, a slower structural erosion of the 50-year decentralised, family-run operating culture as EQT's private-equity ownership beds in. Triaging's job is to flag this loudly, not resolve it; Early-Stage Assessment is where it gets tested against hard financial-profile evidence (E2) and a live look at post-EQT decentralisation metrics.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Financially, the core engine is genuinely strong and cohort-leading, not merely adequate:</strong> ROCE of <strong>30.7%</strong> (2025) and ROIC of <strong>28%</strong> run well above Addtech (<strong>27%</strong>), Lagercrantz (<strong>21.6%</strong>) and Lifco (<strong>20.6%</strong>), the group is net cash (-<strong>0.8x</strong> to -<strong>1.0x</strong> net debt/EBITDA against a <strong>1.0x</strong>-<strong>2.4x</strong> peer range), and EBITA margin has expanded from <strong>10.4%</strong> (2014) to <strong>16.2%</strong> (Q1 2026) — a decade of structural margin improvement, not a cyclical blip.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Two specific, trackable uncertainties keep this from a higher grade at Triaging:</strong> (1) CEO Jörgen Zahlin's 26-year tenure ends by 31-Dec-2026 with an externally-hired CFO (Daniel Warnholtz) starting August 2026 — a leadership-continuity risk landing in the same 12 months as the EQT cultural-integration risk, a genuine stacking of change-from-current items that E7 (case simplicity) must weigh explicitly; and (2) working capital is the one metric where OEM is a clear cohort laggard, not a leader (92 NWC days vs Lifco's 65), a structural cash-conversion drag that already shows up in the <strong>41.5%</strong> Q1 2026 operating-cash-flow contraction.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Valuation is a genuine, not illusory, discount, but the stock has already re-rated on the news the discount is meant to close:</strong> OEM's own reports place its multiple at <strong>18x</strong>-<strong>23x</strong> 2026e EV/EBITA against a <strong>23x</strong>-<strong>29x</strong> Swedish serial-acquirer peer range (Addtech, Lagercrantz, Lifco all trading at premiums), yet the live share price (SEK 171.80) already sits above the blended sell-side consensus target (SEK 161.67), which tempers how much of the discount thesis is still to play out versus already reflected in April-May's post-Q1 re-rating.</div></div>
+<p><strong>Master Ratings (first pass — light at Triaging):</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Technical momentum: C+ (provisional, data-gap flagged).</strong> OEM.B-SE is absent from the local <code>master-dashboard/data/prices.json</code> file, so no moving-average stack, RS percentile, or base-pattern read is available this stage — a genuine coverage gap, not a judgement call, and one that should be closed before Early-Stage Assessment (D-IA-4RR-08 requires the live technical read at every stage). What is known: the stock re-rated sharply after the 21-Apr-26 Q1 print (DNB Carnegie's price-target raise to SEK 180 followed the beat) and now trades at SEK 171.80, above the blended consensus target of SEK 161.67 — consistent with a stock that has already had its near-term "easy" re-rating, which argues for caution rather than chasing on a first Triaging pass. Grade held to C+ pending real technical data at ESA rather than inferred from price-target commentary alone.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Sell-side earnings momentum: B.</strong> Coverage is thin (two active brokers, DNB Carnegie and RedEye) but unambiguously positive: 2026-2028e adjusted EPS estimates were raised 5-<strong>6%</strong> immediately after the Q1 print, forward guidance credibility is rated 9.0/10 by the covering broker (management's own "sandbagging" pattern of setting &gt;=<strong>10%</strong> sales growth / &gt;=<strong>12%</strong> EBITA margin cycle targets and then beating them), and the M&amp;A pipeline (SEK 30m-250m deal-size sweet spot against ~24,000-25,000 identified SME targets in Europe) gives visible inorganic upside on top of organic estimates. The one softening note is thin broker coverage itself — two names is a groupthink risk the Change Forces report flags explicitly, capping the grade at B rather than A.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Thematic fit: C+ (blended, not run through the RESEARCHER's per-stock thematic scoring yet).</strong> Richard's active thematics file (<code>memory/thematics/active.md</code>, effective Q2 2026) does not carry a scored entry for OEM International, so this is the Investment Analyst's own first-pass read, not a lifted score. Against Thematic 1 (Bear Market / Top of Bull Market), OEM's organic sales correlate <strong>89%</strong> with capital-goods customers (Epiroc, Sandvik, ABB) — early/mid-cyclical industrial demand, not the recurring/non-cyclical revenue profile the thematic rewards, so this is closer to neutral-to-mild-headwind than beneficiary. Against Thematic 2 (AI Disruption), OEM is a downstream beneficiary at best (automation/electrification end-demand growth, McKinsey's <strong>13%</strong> p.a. industrial-electrification estimate) rather than a direct AI-infrastructure name — mild positive, not a scored A/B enabler. Against Thematic 3 (Iran War / Oil), OEM's FX and input-cost structure (<strong>80%</strong> of technical components sourced in foreign currency, <strong>59%</strong> EUR / <strong>21%</strong> USD) gives no natural hedge against an oil-driven inflation shock, and the report's own FX section flags a persistent 2-<strong>3%</strong> reported-growth headwind — mild negative. Net: a C+ blend, materially less thematically aligned than direct beneficiaries elsewhere in the pipeline (HTWS, PRY/NKT/NEX), which should factor into relative position-sizing conversations at ESA, not into the Triaging progress/park test itself.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Pillar I — Case change elements: B-.</strong> Folds up from E1 below; the only Pillar I Element in scope at Triaging.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Pillar II — Case building blocks: not finalised this pass</strong> (Section C.2 — E5, E7, E8, E11 — not yet drafted; see status note at the top of this memo). Preliminary read from the underlying research is constructive-with-flags (strong momentum and moat characteristics per Business Foundation, offset by the working-capital and leadership-transition items), consistent with a B-/C+ range once written, but the rating is not being asserted here ahead of the actual RA/CQ work.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Pillar III — Investment case components: not applicable at this stage</strong> (first appears at Early-Stage Assessment per the Triaging scope rule).</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-investment-case-attributes" data-spy><span class="id">C</span> Investment Case Attributes <span class="secn">99 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-1-pillar-i-case-change-elements" data-spy><span class="id">C</span> 1 — Pillar I: Case CHANGE Elements <span class="secn">53 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-internal-external-first-pass" data-spy><span class="id">E1</span> Required input change forces (internal / external) — FIRST PASS, ×2 double-weight (6-bullet minimum per Required Attribute and per Core Question) <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">53 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<p><strong>RA1 — Change forces?</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 summary — ANSWER: Yes, and the two change forces are compounding rather than substituting for each other. <span class="g gB">B</span></strong> OEM has both a genuine external tailwind (industrial-electrification and nearshoring demand recovery, visible in the Q1 2026 organic re-acceleration) and a genuine internal change force (EQT's ownership change actively accelerating the M&amp;A engine) landing in the same two-quarter window, which is the specific combination Richard's framework treats as the strongest Pillar I setup — change that is neither purely macro-cyclical (which would fade with the cycle) nor purely financial-engineering (which would lack organic confirmation).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Order intake rose <strong>12%</strong> in Q1 2026 to SEK 915m and the order backlog rose <strong>10%</strong> to SEK 1,543m, giving a book-to-bill of <strong>1.05x</strong> — a genuinely forward-looking demand signal, not just a trailing print, that corroborates the organic acceleration rather than relying on a single quarter's revenue line alone.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">The Eurozone S&amp;P Global Manufacturing PMI reached 52.2 in April 2026 (up from 51.6 in March), the macro backdrop against which OEM's <strong>89%</strong>-correlated capital-goods customer base (Epiroc, Sandvik, ABB) operates — a real, externally-verifiable confirming signal for the external change force, not an OEM-specific claim taken on faith.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">The EQT ownership change is not cosmetic: six acquisitions have already closed year-to-date 2026 (Motion29, Cre8 Systems, Multicomponent Norden, Ronnie Bergdahls, Kokkolan, and one further undisclosed in the SEK 400m aggregate), against a historical pace of roughly <strong>3%</strong> per annum sales growth from M&amp;A over 2015-2024 — a step-change in cadence within OEM's first full year under new ownership, not a promise still to be tested.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The two change forces are structurally linked, not coincidental: EQT's stated strategy explicitly widens the acquisition mandate to "product-owning firms" beyond pure distribution, meaning the internal change force (M&amp;A scaling) is partly a bet on capturing more of the external demand tailwind (automation, electrification) than the standalone distribution model could reach organically.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Counter-view considered: a sceptic would argue the "change forces" are really one force wearing two hats — a normal industrial-demand recovery that would have happened regardless of ownership, with EQT simply riding (and re-branding) an organic cyclical upswing. The rebuttal is only partial: the PMI recovery genuinely predates and is independent of the EQT deal, but the M&amp;A cadence increase (six deals in roughly 16 months of ownership versus a multi-year historical base rate) is a real, ownership-specific behavioural change, not a relabeling of the cycle.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>CQ1 — Strong external change forces / tailwinds? — ANSWER: Yes, moderate-to-strong, cyclically-timed rather than fully secular [B-].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Q1 2026 organic growth of <strong>5.0%</strong> (up sharply from <strong>1.0%</strong> in Q4 2025) is the clearest single confirming data point — a genuine sequential re-acceleration, not a low base-effect illusion, since it comes against a Q1 2025 comparison period that was itself part of the group's stated recovery narrative.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">Three named secular tailwinds compound the cyclical recovery: factory automation (McKinsey, <strong>6.5%</strong> p.a. growth to 2034, USD 370bn market), industrial electrification (McKinsey, <strong>13%</strong> p.a. growth), and nearshoring (Capgemini, <strong>95%</strong> of European companies planning or already executing nearshoring, nearshored-share to rise from ~<strong>74%</strong> toward higher levels over three years) — three independent research houses corroborating the same directional demand shift, reducing single-source risk on the thematic claim.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The tailwind is genuinely European and OEM-relevant, not merely global-macro noise: OEM's own customer base (30,000+ industrial clients) sits precisely at the point in the value chain — local technical distribution to manufacturers — that nearshoring is expected to re-densify, since regionalised supply chains increase, not decrease, the value of a local distributor relationship.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">The external change is corroborated at the segment level, not just group level: Finland achieved <strong>9%</strong> organic growth in Q4 2025 even while the group average was <strong>1%</strong>, and management explicitly frames the group-wide Q1 2026 acceleration as broad-based across regions rather than concentrated in one geography.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">The tailwind is not universal, however: Swedish and Finnish construction-linked demand (e.g., the Rauheat installation subsidiary) remains soft, and Sweden's own EBITA fell <strong>3%</strong> in 2025 even as the group total improved — a genuine regional divergence that tempers "strong" to "moderate-to-strong" rather than an unqualified strong external tailwind.</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Counter-view considered: PMI recoveries above 50 are historically fragile in the current European rate environment, and a single month's reading (52.2 in April) is a thin evidential base for calling a durable cyclical upswing; the correct calibration is "confirmed but young," to be re-tested at Early-Stage Assessment against a longer data run, not assumed to persist.</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>CQ2 — Strong internal change forces? — ANSWER: Yes, and unusually visible for a Triaging-stage stock [B+].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext">The ownership change itself is unambiguous and dated: EQT (via Oak BidCo) completed acquisition of <strong>73.68%</strong> of voting rights and <strong>26.19%</strong> of share capital in February 2025, ending over 50 years of family control — a hard, verifiable, board-level fact, not an inferred internal-change thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">The change is already producing measurable operational output, not just intent: six acquisitions closed within roughly 16 months of the ownership change (versus the historical ~<strong>3%</strong>-of-sales-growth-per-year M&amp;A pace over the prior decade), giving Triaging-stage confirmation that the internal change force has already translated into observable action, which is a higher bar than most Triaging-stage M&amp;A theses clear.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">Governance is being actively reshaped in parallel with ownership: a new Board Chairman (Christopher Norbye, CEO of Beijer Ref — itself a cohort peer, which is a notable cross-holding signal worth flagging for Wisdom Library) was appointed April 2025, and management incentive structures were widened (2026 scheme extends call options to ~60 senior executives, variable remuneration cap raised to <strong>200%</strong> of fixed salary) — consistent, mutually-reinforcing signals of a genuine strategic reset, not a single isolated data point.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">The internal change force has a clear, disclosed capital mechanism behind it, which de-risks the "will it continue" question: SEK 2.3bn of dry powder is available by gearing to a <strong>100%</strong> debt-to-equity ceiling, against a group that closed 2025 net cash — meaning the M&amp;A acceleration is resourced, not aspirational.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">The internal change is not without a credible offsetting risk, which the memo must carry forward rather than net out prematurely: the same ownership change that enables the M&amp;A acceleration is the proximate cause of the CEO succession (Zahlin's exit) and is the subject of the Risks report's FALSE FRIEND hypothesis — the internal change force is real, but its ultimate sign (value-creating scaling vs. cultural erosion) is not yet resolved at Triaging.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">Counter-view considered: it could be argued that private-equity-style ownership changes are inherently value-additive on a 3-5 year view (better capital discipline, faster decision cycles) and the "cultural risk" framing is generic bear-case boilerplate applicable to any PE-owned industrial; the rebuttal is that OEM's own decentralised, 26-people-HQ, 35-38-subsidiary operating model is specifically cited across three separate research reports as the source of its peer-beating returns, so a genuine culture-vs-scale trade-off is more load-bearing here than in a typical PE buyout, not a boilerplate concern.</div></div>
+<p><strong>RA2 — Robust base?</strong></p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>RA2 summary — ANSWER: Mostly yes, with one clear structural exception (working capital) [B-].</strong> The financial base OEM is changing from is genuinely strong on returns, leverage and margin trajectory, which is the correct precondition for a change thesis to compound rather than merely offset decline — but the base is not spotless, and the working-capital position is a real, quantified, cohort-relative weakness rather than a hedge-worded caveat.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext">Net cash of SEK 603m and net debt/EBITDA of -<strong>0.8x</strong> to -<strong>1.0x</strong> (versus a <strong>1.0x</strong>-<strong>2.4x</strong> peer range) gives OEM meaningfully more unencumbered flexibility than any of its three closest Swedish serial-acquirer comparators, a genuinely differentiated starting point for the change thesis to build on.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">ROCE of <strong>30.7%</strong> (2025, down from <strong>35.3%</strong> in 2024 but still well above the cohort) and ROIC of <strong>28%</strong> (2024, up from <strong>18%</strong> in 2013) show the base itself has been improving structurally over a full decade, not just cyclically recovering from a trough — a materially more robust starting point than a name whose "base" is simply "not yet broken."</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">The clear exception: NWC/sales of <strong>25.1%</strong> (2025) and 92 net working-capital days sit well outside the peer range (Lifco 65, Addtech 72, Lagercrantz 75, Indutrade 78 days) — OEM is the cohort's working-capital laggard, not its leader, and this already shows up as a <strong>41.5%</strong> Q1 2026 operating-cash-flow contraction, which is a real near-term drag on the "robust base" claim, not a hypothetical one.</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">Counter-view considered: management guides working capital to normalise toward ~22-<strong>24%</strong> of sales by 2027e, which if delivered would remove this exception entirely; Triaging-stage discipline requires treating this as a monitorable target, not a resolved fact, since it is management's own forecast rather than an externally-verified trend.</div></div>
+<div class="finding cq-level"><span class="fnum">26.</span><div class="ftext"><strong>CQ1 — Absence of external headwinds? — ANSWER: Largely, with two named exceptions that are contained rather than pervasive [B-].</strong></div></div>
+<div class="finding cq-level"><span class="fnum">27.</span><div class="ftext">The dominant demand backdrop (PMI recovery, automation/electrification/nearshoring tailwinds) is a genuine absence-of-headwind condition at the group level, corroborated by three independent macro data sources as set out under RA1 CQ1 above, rather than the analyst's own optimistic framing.</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">FX is a real, quantified headwind, not a vague risk: translation cut reported FY2025 sales by <strong>3%</strong> (intensifying to -<strong>5%</strong> in Q4 2025), with a forward 2-<strong>3%</strong> headwind guided and only <strong>68%</strong> of sales contracts carrying currency-clause protection (down from <strong>71%</strong> in 2024) — this is the clearest single "not absent" external headwind in the case.</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext">Regional construction softness (Sweden, Finland) is a named, contained headwind rather than a pervasive one: Sweden's EBITA fell <strong>3%</strong> in 2025 even as group EBITA rose, and Finland's EBITA fell <strong>17%</strong> in 2024 before recovering <strong>9%</strong> organically in Q4 2025 — evidence the softness is real but geographically and temporally bounded rather than group-wide.</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext">No tariff, regulatory, or trade-policy headwind specific to OEM's business is flagged anywhere across the four family reports, which is itself informative for a European industrial-distribution name in the current environment — an absence worth noting explicitly rather than assuming by default.</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext">Counter-view considered: FX alone, at a persistent 2-<strong>3%</strong> annual drag, is not a trivial headwind for a business with mid-single-digit organic growth — it mechanically consumes 30-<strong>50%</strong> of the organic growth rate in reported terms every year it persists, which argues the "absence of external headwinds" answer should be qualified rather than unqualified, hence B- rather than a clean pass.</div></div>
+<div class="finding cq-level"><span class="fnum">32.</span><div class="ftext"><strong>CQ2 — Well-invested base? — ANSWER: Yes, on a capital-light, high-return-per-unit-of-capital basis, though disclosure on absolute capex is thin. <span class="g gB">B</span></strong></div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext">The business model itself is structurally low-capital-intensity: OEM operates as a technical trading distributor with "extremely low fixed-asset capital requirements" per the Business Foundation report, meaning "well-invested" should be read through incremental ROIC (32-<strong>87%</strong> across various multi-year periods) rather than through absolute capex figures, which the reports do not disaggregate in detail.</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext">Lean central overhead (only 26 people at the Swedish HQ overseeing 35-38 subsidiaries) combined with a benchmarked, decentralised subsidiary structure is itself a form of organisational (not just physical) investment that has compounded returns over a decade — ROE averaged <strong>32.0%</strong> against a <strong>25%</strong> through-cycle target over 2020-2024.</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext">Investment in the acquisition pipeline itself counts as base-building under this Core Question: OEM's screening process has already identified roughly 24,000-25,000 high-quality SME targets across Europe (Germany, Italy, UK the largest pools), evidence of a maintained, resourced corporate-development capability rather than an ad hoc M&amp;A function bolted on post-EQT.</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext">The one genuine gap: none of the four family reports disclose an absolute capex figure or capex-to-sales ratio for OEM directly, which limits how precisely "well-invested" can be graded versus, for example, a capital-intensive manufacturer where the capex trend would be a hard, disclosed number — this is a coverage gap to close via a self-initiated query or at Early-Stage Assessment, not a negative finding in itself.</div></div>
+<div class="finding cq-level"><span class="fnum">37.</span><div class="ftext">Counter-view considered: elevated inventory (SEK 1,070m in 2025, <strong>30%</strong> of total assets, down from a SEK 1,183m pandemic-era peak) could be read as over-investment in working capital rather than under-investment in fixed assets — but this is the same working-capital weakness already captured under RA2 summary and RA2 CQ1, not a separate under-investment finding, so it is cross-referenced rather than double-counted here.</div></div>
+<div class="finding cq-level"><span class="fnum">38.</span><div class="ftext"><strong>CQ3 — Past/present fundamental delivery congruency with thesis? — ANSWER: Yes, with an unusually long confirming track record [A-].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext">A full-cycle, ten-year track record backs the "resilient compounder" framing directly: <strong>10.7%</strong> revenue CAGR (SEK 1.89bn to SEK 5.24bn, 2014-2024) and <strong>15.3%</strong> adjusted EBITA CAGR over the same period, with organic revenue CAGR of <strong>6.4%</strong> (2014-2024) against a <strong>3.9%</strong> industrial base rate — congruent outperformance sustained across multiple macro cycles, not a single favourable period.</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext">The company has weathered three separate historical downturns (dot-com: -<strong>30%</strong> sales, 2000-04; 2009 financial crisis: -<strong>20%</strong> sales; COVID-19: flat sales at SEK 3.30bn, 2020) and recovered each time without a permanent step-down in its structural margin trajectory — direct historical evidence the business model itself, not just the current cycle, supports the thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext">Management's own stated cycle targets (&gt;=<strong>10%</strong> sales growth, &gt;=<strong>12%</strong> EBITA margin) have been consistently exceeded — <strong>15.2%</strong> average EBITA margin over 2020-2024 against the <strong>12%</strong> target, and <strong>32.0%</strong> average ROE against a <strong>25%</strong> target — a sandbagging pattern that, per the broker credibility rating of 9.0/10, has itself become a reliable, tradeable signal rather than a one-off beat.</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext">The most recent quarter is directly congruent with the multi-year pattern rather than an outlier requiring separate explanation: Q1 2026's <strong>13%</strong> EBITA beat and <strong>130bps</strong> margin expansion sit comfortably within the historical beat-and-raise cadence rather than representing a discontinuity that would need special scrutiny.</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext">Counter-view considered: ROE has recently moved the wrong way relative to the long-run pattern (<strong>23.4%</strong> in 2025 versus the <strong>32.0%</strong> five-year average and the <strong>25%</strong> target), which is the one recent data point in tension with the "consistent congruency" claim; this is treated as a real, monitorable divergence rather than dismissed, but a single year's dip against a decade of outperformance does not yet break the historical congruency finding.</div></div>
+<div class="finding cq-level"><span class="fnum">44.</span><div class="ftext"><strong>CQ4 — Large change-from-current / mispricing? — ANSWER: Moderate, not large, and partially already closed by the recent re-rating [C+].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext">The valuation gap is real but has already begun closing: OEM's own reports place its multiple at <strong>18x</strong>-<strong>23x</strong> 2026e EV/EBITA against a <strong>23x</strong>-<strong>29x</strong> range for Addtech, Lagercrantz and Lifco — a genuine discount — but DNB Carnegie's price target was already raised from SEK 155 to SEK 180 immediately following the Q1 print, and the live share price (SEK 171.80) now sits above the blended consensus target (SEK 161.67), indicating the market has already priced in a meaningful part of the re-rating case.</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext">The "change from current" in the M&amp;A pipeline is not yet large in absolute terms: six deals adding SEK 400m of annualised sales against a SEK 5.3bn revenue base is roughly 7-<strong>8%</strong> of current sales — a real but incremental step, not yet the kind of large, valuation-transforming acceleration that would justify calling this a "large" change-from-current case at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext">The clearest large-magnitude change-from-current candidate is qualitative rather than financial: full transition from 50 years of family ownership/culture to EQT-style private-equity ownership is, if it plays out as feared in the FALSE FRIEND scenario, a large structural change — but because its ultimate direction (compounding vs. eroding value) is unresolved, it cannot yet be scored as a confirmed large positive change-from-current.</div></div>
+<div class="finding ra-level"><span class="fnum">48.</span><div class="ftext">Counter-view considered: bulls would point to the SEK 2.3bn of unused dry powder as evidence the M&amp;A change-from-current is still mostly ahead of the company, not behind it, meaning the market re-rating to date reflects organic recovery more than M&amp;A optionality — a fair distinction, and one reason this Core Question is graded C+ (meaningful, plausible upside still unpriced) rather than D (fully priced) or B (large and clearly still ahead).</div></div>
+<div class="finding cq-level"><span class="fnum">49.</span><div class="ftext"><strong>CQ5 — Low trading multiple? — ANSWER: Genuinely low versus the immediate cohort, but the picture is muddied by an internal data discrepancy that must be resolved before Early-Stage Assessment [C+, data-quality caveat].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">50.</span><div class="ftext">On the numbers as reported, OEM screens cheap: <strong>18x</strong>-<strong>23x</strong> 2026e EV/EBITA (the two internal reports disagree with each other on the precise figure — see the Section A discrepancy note) against Addtech, Lagercrantz and Lifco all trading at premiums in the low-to-high 20s and Lifco specifically cited at 27-<strong>29x</strong> in comparable cohort work (Bufab's own Triaging memo cites 27-<strong>29x</strong> for "Swedish compounder peers," corroborating the peer-premium framing independently of OEM's own reports).</div></div>
+<div class="finding ra-level"><span class="fnum">51.</span><div class="ftext">Cohort-relative anchor: Bufab's Triaging memo (03-Jun-26) graded its own valuation gap (<strong>21x</strong> EV/EBITA vs. 27-<strong>29x</strong> peers) as a supporting pillar of its overall B- verdict; OEM's discount, at the low end of <strong>18x</strong>, is if anything wider than Bufab's, which — taken at face value — would argue for at least as strong a valuation case as Bufab's, all else equal.</div></div>
+<div class="finding ra-level"><span class="fnum">52.</span><div class="ftext">The genuine complication: this memo cannot respons­ibly assign a confident grade to "low trading multiple" while its own two source reports disagree on the multiple by roughly 3-5 turns of EV/EBITA (<strong>18x</strong> per the Risks report vs. 21-<strong>23x</strong> per Business Foundation) — this is exactly the kind of discrepancy the SOP requires to be surfaced, not silently resolved, and it is logged in Section F for reconciliation (most likely via a quick self-initiated pull of the live FactSet multiple) before this Core Question can be upgraded past a caveated C+.</div></div>
+<div class="finding ra-level"><span class="fnum">53.</span><div class="ftext">Counter-view considered: even at the higher end of the reported range (<strong>23x</strong>), OEM would still trade at a discount to Lifco's 27-<strong>29x</strong>, so the qualitative "cheap versus cohort" conclusion likely survives the data discrepancy regardless of which figure is correct — but the magnitude of the discount, which matters for sizing any eventual position, does not survive it, hence the caveat rather than a clean grade.</div></div>
+<p><strong>Element rating for E1: B-.</strong> Justification against the tighter grade-discipline calibration (D-IA-4RR-11): comparison set is the SA04 cohort (Bufab as the only member with a comparable published memo) plus the broader Swedish serial-acquirer/technical-distributor set named throughout OEM's own reports (Addtech, Lagercrantz, Lifco, Indutrade). OEM ranks at or above Bufab on the strength and verifiability of its internal change force (a dated, board-level ownership change already producing six closed deals, versus Bufab's more organically-driven recovery) and above the cohort on balance-sheet robustness (net cash vs. peer leverage), which argues for at least a B- rather than a C+. It is held off a clean B by the unresolved FALSE FRIEND read on the ownership change (a real, not hypothetical, risk that a robust E1 case should not paper over) and by the working-capital exception to "robust base," which is a genuine, quantified cohort-relative weakness rather than a stylistic caveat. It is held off C by the unusually strong ten-year delivery-congruency record (CQ3) and the dual, mutually-reinforcing nature of the external and internal change forces (RA1), which are both stronger than a typical Triaging-stage E1 case.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="section-c-2-pillar-ii-case-building-blocks-4-in-scope-elemen" data-spy><span class="id">C</span> 2 — Pillar II: Case BUILDING BLOCKS (4 in-scope Elements at Triaging) <span class="secn">46 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-first-pass-light" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gNR" title="PASS">PASS</span> <span class="secn">28 findings</span></div>
+<p><strong>Element E5 — Thematic fit — SECOND PASS, ×2 double-weight (6-bullet minimum per Required Attribute)</strong></p>
+<p>Richard's active thematics file (<code>memory/thematics/active.md</code>, effective Q2 2026) carries no pre-scored entry for OEM International, so the Required Attributes below are the Investment Analyst's own first-pass application of the three named active thematics (Bear Market / Top of Bull Market; AI Disruption; Iran War + Oil Price / Value Chain) to OEM's specific business, not a lifted score. This is stated explicitly rather than implied, per the standing instruction that an unscored stock should not be presented as if it carries an established thematic verdict.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 — Suitability for bear market / economic downturn (6 bullets minimum) — ANSWER: Mixed, closer to neutral than a genuine beneficiary. <span class="g gC">C</span></strong></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">The thematic's beneficiary profile rewards recurring, non-cyclical, contracted revenue; OEM's own reports state its organic sales correlate <strong>89%</strong> with capital-goods customers (Epiroc, Sandvik, ABB) — an early/mid-cyclical industrial demand profile that is the structural opposite of the "inelastic demand for essential services" attribute the thematic treats as critical.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">OEM does genuinely match one of the thematic's "critical" financial attributes: low leverage. Net debt/EBITDA of -<strong>0.8x</strong> to -<strong>1.0x</strong> (net cash) sits comfortably inside the thematic's "&lt;<strong>2.5x</strong>, IG-equivalent" beneficiary threshold, and this is a real, not superficial, match — a genuinely under-levered balance sheet is a real defensive asset in a downturn regardless of revenue cyclicality.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Pricing power is a partial, second-order match: OEM "successfully passes on cost increases" through inflationary cycles and credit defaults are just <strong>0.01%</strong> of total sales — evidence of real customer-relationship strength, though this is pricing power within a cyclical demand base, not the thematic's preferred combination of pricing power plus non-cyclical demand.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">The clearest disconfirming evidence is OEM's own three-cycle history: the dot-com downturn cut sales <strong>30%</strong> (2000-04, with 250 of 800 employees let go and nine units closed), the 2009 financial crisis cut sales <strong>20%</strong>, and COVID-19 flatlined sales at SEK 3.30bn in 2020 — direct, company-specific historical proof that OEM's revenue is materially cyclical in a genuine downturn, not a hypothetical risk inferred from its sector.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">OEM has none of the thematic's "critical" beneficiary attributes on the strategic/competitive side — no regulatory or structural monopoly moat, no regulated pricing with mandated cost pass-through — its moat (design-in switching costs, exclusive distribution mandates) is relationship-based and durable in normal conditions, but not the kind of moat the bear-market thematic specifically rewards as recession-proof.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Counter-view considered: a bull would argue OEM's M&amp;A-driven diversification (25 countries, 38 business units) and the acyclical minority of its book (installation components, ~<strong>18%</strong> of sales, which includes some non-discretionary maintenance-type demand) provide more downside protection than a pure industrial-cyclical read implies; this is a fair mitigant but does not change the RA1 grade, since the majority of the business remains capital-goods-linked and the historical drawdown evidence is direct, not inferred.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>RA2 — Suitability for AI disruption (6 bullets minimum) — ANSWER: Mild net positive, an indirect beneficiary with no disintermediation risk [B-].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">OEM has no direct AI-infrastructure revenue line (no semiconductors, no data-centre equipment, no AI-software layer) and so does not match the thematic's top-tier "AI-specific revenue contribution" beneficiary attribute the way a name like Infineon or ASML would.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">The indirect beneficiary channel is real, not speculative: OEM distributes automation and electrification components into a market McKinsey estimates growing <strong>13%</strong> annually on industrial electrification and to USD 370bn by 2034 on factory automation — demand growth that is itself partly AI-and-robotics-driven at the end-customer level, even though OEM sits one step removed from the AI infrastructure itself.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">OEM's moat structure is specifically resistant to the thematic's named at-risk mechanism: the AI-disruption thematic's at-risk profile is built around labour-arbitrage and commoditised-software business models (staffing agencies, generic SaaS) that AI can disintermediate directly; OEM's moat (physical logistics, design-in engineering relationships, exclusive supplier mandates) has no structural equivalent to "AI replacing the labour or software function," so the thematic's at-risk mechanism simply does not transmit to this business model.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Automation/electrification revenue is already a large and growing share of OEM's own reported mix — the "Automation" category is approximately <strong>51%</strong> of total sales per the Business Foundation report — meaning the indirect AI-adjacent tailwind is not a marginal, hard-to-size effect but touches roughly half of OEM's revenue base.</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Counter-view considered: a sceptic could argue "automation demand" is being over-attributed to the AI thematic specifically, when much of it is simply ordinary industrial-automation capex that predates the current AI cycle by decades; this is a fair caution against over-crediting the thematic match, and is why the grade is a moderate B- (genuine indirect tailwind, no disintermediation risk) rather than a stronger B/A that would imply OEM is a direct AI beneficiary on the scale of an enabler name.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">No evidence anywhere in the four family reports of OEM itself adopting AI tools in a way that is margin-accretive or competitively differentiating (the kind of "AI adopter" upside some at-risk-sector incumbents pursue defensively) — this is a genuine information gap rather than a negative finding, and is a reasonable candidate for a self-initiated query at Early-Stage Assessment if the thematic weighting becomes more consequential to position sizing.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>RA3 — Suitability for Iran oil-price induced inflation or demand deterioration (6 bullets minimum) — ANSWER: Mild net negative via FX, no direct oil/defence/shipping exposure either way [C-].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext">OEM has none of the thematic's named beneficiary exposures (no upstream oil/gas production, no defence-order backlog, no specialised shipping, no cable/undersea-infrastructure revenue) — it simply sits outside the thematic's beneficiary universe entirely, rather than being a marginal beneficiary.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext">The live, already-materialising transmission channel is FX, not oil price directly: <strong>80%</strong> of technical components are sourced in foreign currency (<strong>59%</strong> EUR, <strong>21%</strong> USD) against a SEK-denominated cost base, which is structurally the same "currency mismatch" attribute the thematic's at-risk profile flags for importers facing a stronger USD in a risk-off, oil-shock scenario.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext">This is not a hypothetical risk — it is already showing up in the numbers: translation cut reported FY2025 sales by <strong>3%</strong> (intensifying to -<strong>5%</strong> in Q4 2025), and only <strong>68%</strong> of sales contracts carry currency-clause protection (down from <strong>71%</strong> in 2024), so the FX exposure is real, quantified, and the trend (declining hedge-contract coverage) is moving the wrong way.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext">OEM has no consumer-discretionary demand exposure of the kind the thematic's other at-risk channel targets (real-income erosion compressing discretionary spending) — its customer base is industrial and capital-goods-linked, so the thematic's demand-destruction mechanism for consumer names does not apply to OEM directly.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext">The FX exposure is a structural, ongoing feature of the business model (technical distribution of foreign-sourced components into a domestic-currency market) rather than a one-off event risk tied specifically to an Iran/oil scenario, meaning it would persist as a headwind under almost any scenario of USD/EUR strength versus SEK, not solely an oil-shock-driven one — worth naming explicitly so the grade is not read as "Iran-specific risk" when it is really a broader FX-structure finding that the Iran/oil thematic happens to also capture.</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext">Counter-view considered: a bull would note the currency-clause coverage, while declining, still protects <strong>68%</strong> of sales, and management has historically passed through cost inflation successfully across cycles (<strong>0.01%</strong> credit-default rate, resilient customer relationships) — a fair mitigant, but it tempers rather than reverses the finding, since the clause coverage explicitly does not cover the remaining <strong>32%</strong> of sales and is trending down.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><strong>RA4 — Paradigm fit from business perspective — summary (6 bullets minimum) — ANSWER: A genuinely mixed thematic profile; the investment case must rest on Pillar I/II fundamentals, not thematic tailwind, and that should shape position sizing later [C+].</strong></div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext">Folding RA1-RA3 together: OEM scores roughly neutral-to-mild-negative on Bear Market (C), mild positive on AI Disruption (B-), and mild negative on Iran/Oil (C-) — no thematic is a clean, strong beneficiary match, and none is a clean, strong headwind either.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext">This distinguishes OEM sharply from other names already in Richard's pipeline that score strong cross-thematic tailwinds on the same three thematics (HTWS and PRY/NKT/NEX score B/A across all three per the Portfolio Impact Matrix in <code>active.md</code>) — OEM's case, if it progresses, will need to earn its place on fundamentals and valuation, not on being "the right stock in the right regime."</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext">The one genuinely useful signal from this exercise for portfolio construction, not stock selection: OEM's FX exposure (RA3) and cyclicality (RA1) both point the same direction (a name that performs better in a risk-on, synchronised-recovery environment than in the current risk-off Iran-conflict backdrop Richard has flagged in the Current Market Context), which is a real regime-sensitivity finding worth carrying to the Assistant Portfolio Manager if this case progresses.</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext">Per the "Thematics Front of Mind" Universal Winning Behaviour, this finding should weigh on conviction and sizing even though it does not, on its own, fail the Triaging qualitative test (large amounts of positive change forces) — the change-forces case (E1) stands on its own idiosyncratic merits independent of thematic tailwind.</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext">Grade for E5 overall (folding RA1-4): <strong>C+.</strong> Held above a straight C by the genuine, quantifiable, moat-consistent AI-disruption resilience (RA2) and the real balance-sheet match to the bear-market thematic's leverage criterion (RA1); held below a B by the direct, documented historical cyclicality (RA1) and the live, trending-the-wrong-way FX exposure (RA3).</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext">Counter-view considered: it could be argued a "mixed" thematic score should not be graded at all, since neutral outcomes are common and uninformative; the counter to that is that a genuinely neutral thematic score IS informative here specifically because it means this case cannot lean on thematic tailwind to carry a weak fundamental case — a discipline point that matters directly for how hard the E1/E7/E8/E11 fundamentals need to work.</div></div>
+<p><strong>Element E4 — Technical momentum</strong> — [no change] at Triaging. Carried forward per the Generation-stage rating; see the Master Ratings MR1 note above on the local price-data coverage gap for OEM.B-SE, which should be closed before this Element is substantively re-rated at Early-Stage Assessment.</p>
+<p><strong>Element E6 — Sell-side earnings momentum</strong> — not applicable at Triaging; first written at Deep Dive.</p>
+<p><strong>Group 1 rating (Case momentum, first pass — light): C+.</strong> E5's mixed thematic profile is the dominant driver of the Group rating at this stage, since E4 carries forward unchanged and E6 is not yet in scope.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-first-pass-light" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gNR" title="PASS">PASS</span> <span class="secn">13 findings</span></div>
+<p><strong>Element E7 — Required case simplicity guardrails — FIRST PASS, ×2 double-weight (6-bullet minimum per Required Attribute and per Core Question)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 — Focused bet? (6 bullets minimum)</strong><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>ANSWER: Not a focused single-driver bet; the case rests on two entangled but distinguishable drivers [C+].</strong></div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>CQ1 — 2 or less fulcrum drivers AND 4 or less key drivers? (6 bullets minimum) — ANSWER: Effectively two fulcrum drivers (organic industrial recovery; EQT-driven M&amp;A acceleration), within the guardrail, but each carries its own sub-drivers that add real complexity [C+].</strong></div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext">The two fulcrum drivers identified under E1 (external organic recovery; internal EQT-driven M&amp;A scaling) are genuinely distinguishable rather than restatements of the same underlying force — this is a two-driver case, at the guardrail's stated limit, not a one-driver case with a cleaner simplicity profile.</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext">Each fulcrum driver has real sub-structure that a purely mechanical "count the drivers" test would miss: the organic-recovery driver decomposes into automation, electrification, and nearshoring sub-tailwinds (three named secular forces, not one), and the M&amp;A driver depends on continued access to SEK 2.3bn of dry powder, a maintained SEK 30-250m deal-size discipline, and successful integration — each a potential point of failure in its own right.</div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext">The Change Forces report's own "Key Drivers Synthesis" section names seven distinct key drivers (EQT-led M&amp;A scaling, nearshoring, automation/electrification, pricing power resilience, FX stabilisation, sandbagged guidance credibility, underleveraged balance sheet as an M&amp;A enabler) — comfortably above the "4 or less key drivers" guardrail threshold if counted literally, which argues the case is more complex than the two-fulcrum framing alone suggests.</div></div><div class="subfinding"><span class="subnum">1.6</span><div class="subtext">Counter-view considered: several of those seven "key drivers" are really supporting evidence for the two fulcrum drivers rather than independent drivers in their own right (FX stabilisation and pricing power resilience are both sub-components of "can the organic recovery hold its margin," not separate theses) — a defensible re-grouping that would bring the effective driver count back toward the guardrail, but it requires active analytical judgement to make that collapse, which is itself evidence the case is not simple on its face.</div></div><div class="subfinding"><span class="subnum">1.7</span><div class="subtext">The CEO succession (Zahlin's exit, external CFO hire) is arguably a third, partially-independent driver — not a growth or M&amp;A driver, but a governance/execution driver whose outcome could materially affect whether the other two drivers are well-executed — and should be tracked as an added complexity factor even though it is not counted as a "growth" driver under this Core Question's literal wording.</div></div><div class="subfinding"><span class="subnum">1.8</span><div class="subtext">Net: within the 2-driver guardrail on a strict count of the two fulcrum theses, but genuinely more complex than a clean single-driver Triaging case (e.g., a pure M&amp;A-acceleration story with no organic component, or a pure cyclical-recovery story with no ownership change) — graded C+ rather than a clean pass.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>RA2 — Narrow perimeter? (6 bullets minimum)</strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>ANSWER: Genuinely narrow at the top-line segment level, but the subsidiary count and geographic footprint are wide. <span class="g gC">C</span></strong></div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>CQ1 — 10 or less geographies and/or business units? (6 bullets minimum) — ANSWER: No — materially exceeds 10 on business-unit count, though segment reporting is genuinely simple [C-].</strong></div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext">At the reporting-segment level, OEM's perimeter is narrow: the Business Foundation report describes three reporting segments (Sweden ~<strong>58%</strong> of sales / ~<strong>65%</strong> of EBITA; Finland/Baltics/China ~<strong>19%</strong> of revenue; Rest of Europe ~<strong>23%</strong> of sales) — a three-segment structure that is genuinely simple to track and communicate, well within any reasonable "10 or less" reading if segments are the unit of measure.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext">At the operating-subsidiary level, the picture is materially wider: the group operates 35 to 38 business units (both figures are cited across the reports) across 16 countries — a number that fails the "10 or less" guardrail decisively if subsidiaries, not reporting segments, are the correct unit of account, and the decentralised model means each subsidiary carries real operating autonomy rather than being a purely administrative sub-division.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext">The EQT-era M&amp;A acceleration is actively adding to this count, not holding it steady: six new acquisitions closed year-to-date 2026 alone, meaning the subsidiary count this Core Question should test against is a moving target that is currently increasing, which works against the "narrow and stable" reading the guardrail is designed to reward.</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext">The decentralised model is presented across all three reports as a strength (local market responsiveness, benchmarked accountability) rather than complexity for its own sake — but from a pure case-simplicity standpoint, the guardrail is asking whether Watson (and Richard) can hold the moving parts of the case in their head, and a 35-38-unit, 16-country structure is not a simple case to monitor regardless of how well-run the underlying units are.</div></div><div class="subfinding"><span class="subnum">2.7</span><div class="subtext">Counter-view considered: the guardrail's spirit may be better served by counting reporting segments (3) than legal subsidiaries (35-38), since Richard monitors the case at the segment/group level, not subsidiary-by-subsidiary — this is a fair point and is why the RA2 summary grade (C) sits above the strict CQ1 answer (C-), rather than the Element being marked down further; but the discipline of naming both counts, rather than picking whichever is more flattering, is the correct Triaging-stage behaviour.</div></div><div class="subfinding"><span class="subnum">2.8</span><div class="subtext">Net effect on the case: this is a real simplicity cost that should inform how much monitoring bandwidth a position would require if this progresses, more than it should independently drive a park decision at Triaging.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA3 — Zero headwinds? (6 bullets minimum)</strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>ANSWER: No — real, named, quantified value-chain headwinds exist; the guardrail fails on a strict reading. <span class="g gC">C</span></strong></div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>CQ1 — Zero value-chain headwind risks to revenue? (6 bullets minimum) — ANSWER: No — at least three distinct value-chain headwinds are named and quantified across the reports. <span class="g gC">C</span></strong></div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext">FX is the clearest, most persistent named headwind: a guided 2-<strong>3%</strong> ongoing reported-growth drag, already realised as a <strong>3%</strong> FY2025 / <strong>5%</strong> Q4 2025 translation hit — this is not a hypothetical or tail risk, it is a recurring, structural feature of the current value chain.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext">Regional construction softness is a second, distinct headwind: Sweden's EBITA fell <strong>3%</strong> in 2025 and Finland's fell <strong>17%</strong> in 2024 (before a partial Q4 2025 recovery), both linked to weak Nordic construction/installation demand rather than the group's core automation/electrification growth engine — a genuinely separate risk channel from FX.</div></div><div class="subfinding"><span class="subnum">3.5</span><div class="subtext">Working-capital drag is a third, balance-sheet-adjacent headwind with a direct revenue-adjacent transmission: elevated NWC intensity (92 days vs. 65-78 peer range) contributed to the <strong>41.5%</strong> Q1 2026 operating-cash-flow contraction, which — while not a revenue headwind in the strictest sense — constrains the cash available to fund the M&amp;A driver that is central to the bull case, making it a real second-order value-chain risk.</div></div><div class="subfinding"><span class="subnum">3.6</span><div class="subtext">The supplier-concentration risk named in the Business Foundation report (losing a single key supplier is "materially more problematic than losing a customer," given reliance on Asia-based manufacturers with dual-source quality gaps) is a fourth, qualitatively distinct headwind not captured by the other three, though it is not currently a realised drag the way FX and construction softness are.</div></div><div class="subfinding"><span class="subnum">3.7</span><div class="subtext">Counter-view considered: "zero headwinds" is an unusually strict bar that very few real businesses would clear, and OEM's headwinds are arguably smaller in magnitude and more manageable (currency clauses cover most exposure, construction softness is regional and partially offset by Finland's recovery) than the headwinds facing most industrial names in the current environment; this is a fair point on relative severity, but it does not change the binary answer to a Core Question that asks specifically for zero.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA4 — Handful of change-from-current items? (6 bullets minimum)</strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>ANSWER: More than a handful if counted comprehensively — this is the guardrail most in tension with the strength of the underlying case. <span class="g gC">C</span></strong></div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>CQ1 — 2 or less change-from-current items or problems? (6 bullets minimum) — ANSWER: No — at least four distinct change-from-current items are live simultaneously [C-].</strong></div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext">Change-from-current item 1: the ownership transition itself (EQT completed February 2025) is still working through the organisation — governance, incentive structures, and capital-allocation mandate have all shifted within roughly the last 16 months, and per the Risks report's own framing, the market has not yet resolved whether this change is net value-additive.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext">Change-from-current item 2: the CEO succession (Zahlin's 26-year tenure ending by end-2026, external CFO starting August 2026) is a second, only partially overlapping change-from-current item — it is caused by the same ownership shift but represents a distinct execution risk (new leadership, new reporting relationships) rather than a restatement of item 1.</div></div><div class="subfinding"><span class="subnum">4.5</span><div class="subtext">Change-from-current item 3: the M&amp;A cadence acceleration itself (six deals in roughly 16 months versus a historical ~<strong>3%</strong>-of-sales-growth pace) is a genuine operating-model change-from-current, not merely a continuation of past behaviour at a faster pace — integrating six businesses in this compressed a window is a different operational challenge than the historical steady-state pace.</div></div><div class="subfinding"><span class="subnum">4.6</span><div class="subtext">Change-from-current item 4: the organic growth re-acceleration itself (from <strong>1%</strong> in Q4 2025 to <strong>5%</strong> in Q1 2026) is a real inflection that the market is being asked to trust will persist, rather than mean-revert — a fourth distinct "is this the new normal or a one-quarter blip" question sitting alongside the other three.</div></div><div class="subfinding"><span class="subnum">4.7</span><div class="subtext">Counter-view considered: items 1 and 2 could reasonably be collapsed into a single "EQT-era transition" change-from-current item, since the CEO succession is a direct consequence of the ownership change rather than an independent event; even under that more generous collapsing, the count is three, still above the "2 or less" threshold, so the qualitative conclusion (more than a handful of change-from-current items) survives the more charitable framing.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA5 — Conservative investor relations? (6 bullets minimum)</strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>ANSWER: Yes, clearly and consistently, on strong multi-year evidence [B+].</strong></div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>CQ1 — Company confirms guidance is conservative? (6 bullets minimum) — ANSWER: Yes — this is one of the best-evidenced findings in the whole case [A-].</strong></div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext">Management's own stated cycle targets (minimum <strong>10%</strong> sales growth, minimum <strong>12%</strong> EBITA margin) have been beaten every year over the 2020-2024 measurement window cited in the reports (<strong>15.2%</strong> average EBITA margin actual vs. <strong>12%</strong> target; <strong>32.0%</strong> average ROE vs. <strong>25%</strong> target) — a five-year track record of understated targets, not a single lucky year.</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext">The broker credibility rating of 9.0 out of 10 for forward-guidance credibility is an independent, third-party corroboration of the sandbagging pattern, not solely the Investment Analyst's own interpretation of the historical beat rate.</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext">The M&amp;A pipeline shows the same conservative-guidance pattern in miniature: an internally understated SEK 250m M&amp;A contribution target was already exceeded by six deals closed year-to-date 2026, mirroring the same "under-promise" behaviour seen in the core operating targets.</div></div><div class="subfinding"><span class="subnum">5.6</span><div class="subtext">Q1 2026 itself is a live, current-quarter instance of the pattern: a <strong>13%</strong> EBITA beat against consensus and a <strong>130bps</strong> margin surprise, in a quarter where management issued no formal 2026 guidance at all — consistent with a management team that prefers silence or conservatism over aggressive forward commitments.</div></div><div class="subfinding"><span class="subnum">5.7</span><div class="subtext">The one nuance worth naming rather than ignoring: "conservative guidance" and "guidance reliability" are related but not identical — a company that simply declines to guide (as OEM does for the current year) scores well on this Core Question almost by construction, since there is less explicit guidance to be tested against outcomes; this does not undermine the finding (the historical, dated cycle targets are a real and testable form of guidance that has been beaten repeatedly) but it is worth flagging so the grade is not read as stronger evidence than it is.</div></div><div class="subfinding"><span class="subnum">5.8</span><div class="subtext">Counter-view considered: a sceptic could argue consistent beats against self-set targets over a full decade might reflect targets set too low rather than genuine operational excellence — a fair point in the abstract, but harder to sustain given the targets are also beaten against the broker's own independent estimates (the Q1 2026 EBITA beat was versus Bloomberg consensus, not merely versus management's own bar), which is a different, less gameable form of evidence.</div></div></div></div></div>
+<p><strong>Element rating for E7: C+.</strong> Against the same cohort/comparison set as E1 (Bufab and the broader Swedish serial-acquirer group), OEM's simplicity profile is genuinely more complex than a typical Triaging "clean" case on driver count, geographic/subsidiary footprint, and change-from-current item count — all real, not hedge-worded, findings — but it is anchored by an unusually strong, multi-year-evidenced conservative-guidance culture (RA5) that is at least as strong as anything in the cohort. The grade sits at C+ rather than lower because the complexity is largely a function of scale and M&amp;A activity (a natural feature of a compounding serial acquirer, not a sign of a poorly-run or opaque business), and rather than higher because RA2-RA4 each independently and factually fail their strict guardrail tests.</p>
+<p><strong>Group 2 rating (Case simplicity, first pass — light): C+.</strong> Driven by E7; E8 (below) is the other in-scope Element for this Group.</p>
+<p><strong>Element E8 — Fit with acceptable case setups — FIRST PASS (3-bullet carve-out floor per Required Attribute and per Core Question, no multiplier)</strong></p>
+<p>RA/CQ wording below is taken verbatim from the canonical source (<code>PROJECTS/SA - Investment Analyst A&amp;J memos/briefing/04-elements-with-RAs-and-CQs-integrated.md</code>), not reconstructed from memory, per the standing instruction to gather rather than assume. Two Core Questions in this Element (RA1 CQ1, and both RA7/RA8 CQ1s) are marked <code>TBD (placeholder in old source)</code> in that canonical file itself — a genuine gap in the framework, not an omission by this memo. Where a CQ is undefined, the Investment Analyst answers the parent Required Attribute question directly and flags the gap rather than inventing CQ text.</p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>RA1 — Mis-modelled, high-quality EPS upgrader? — ANSWER: Yes, a plausible and evidenced fit — the sell-side has been under-modelling OEM's earnings power on both the organic and inorganic legs. <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">CQ1 (TBD in source framework — Investment Analyst direct assessment of the RA question): DNB Carnegie raised 2026-2028e adjusted EPS by 5-<strong>6%</strong> immediately following the Q1 2026 print (2026e from SEK 5.10 to SEK 5.40) — a revision magnitude consistent with a genuine model miss, not a marginal beat-and-raise.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext">Management's own internal M&amp;A contribution target (SEK 250m of annualised sales) was already exceeded by six deals closed year-to-date (SEK 400m annualised) — even management's own conservative internal number under-called the pace, which argues external sell-side models (built on thinner information) were likely under-modelling by more.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext">Thin coverage (two active brokers) raises the plausibility of genuine under-modelling relative to a widely-covered large-cap, though it simultaneously makes any "consensus" reading fragile and idiosyncratic rather than a broad, tested market view.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext">Counter-view considered: this could equally be read as ordinary small/mid-cap under-coverage rather than a scored "mis-modelled EPS upgrader" setup specifically; the fit is directional and plausible rather than conclusively confirmed, which is why the grade is B and not higher.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA2 — Big demand change-driven EPSU or EPT? — ANSWER: Poor fit — the setup describes market-wide demand explosion inside a dominant, scalable, oligopolistic structure, and OEM matches almost none of those structural conditions [D+].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">CQ1 Is there a market-wide demand explosion? Moderate, multi-year acceleration (automation +<strong>6.5%</strong> p.a., electrification +<strong>13%</strong> p.a., PMI recovering to 52.2) — real, but "explosion" overstates a gradual, multi-year secular trend rather than a step-change demand shock.</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext">CQ2 Does the company hold a dominant competitive position? No — OEM is one of thousands of players in a fragmented market where the top five technical traders combined hold under <strong>15%</strong> share; this is the opposite of dominance.</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext">CQ3 Is the business model one-to-many scalable? No — the decentralised model requires a new local subsidiary, warehouse, and relationship base per market; this is a replicable model, not a one-to-many scalable platform (software, licensing) model.</div></div><div class="subfinding"><span class="subnum">7.4</span><div class="subtext">CQ4 Is the market an oligopoly (structure AND behaviour)? No on structure (thousands of family-owned SMEs, fragmented); partially yes on behaviour (competitors described as exhibiting "benign margin-over-volume" discipline) — a structural mismatch even where behaviour rhymes with oligopoly discipline.</div></div><div class="subfinding"><span class="subnum">7.5</span><div class="subtext">CQ5 Is there fixed-cost leverage for margin expansion? Yes, genuinely — a lean 26-person HQ atop 35-38 subsidiaries has coincided with EBITA margin expansion from <strong>10.4%</strong> (2014) to <strong>16.2%</strong> (Q1 2026), the one sub-question where OEM fits this setup well.</div></div><div class="subfinding"><span class="subnum">7.6</span><div class="subtext">RA2 summary: four of five Core Questions point away from this setup; the case for progression rests elsewhere, not on a big-demand-explosion / dominant-position framing.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>RA3 — Strong corporate change driven EPSU / EPT? — ANSWER: Yes, clearly and this is the case's primary setup fit — most sub-drivers of "strong corporate change" are present, dated, and independently verifiable. <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext">CQ1 Financial guidance increase? No formal 2026 guidance has been issued at all (the sandbagging posture) — this specific sub-driver does not fit, though realised delivery has effectively outperformed any implied guidance.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext">CQ2 Shareholder returns increase? Unconfirmed from the current report set — historical payout of 53-<strong>54%</strong> of cash flows is disclosed, but no explicit recent increase is evidenced; treated as ungradeable-neutral rather than a negative finding.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext">CQ3 Balance sheet utilisation increase? Yes, clearly — active gearing toward the <strong>100%</strong> debt-to-equity ceiling to fund the M&amp;A programme, with SEK 2.3bn of dry powder being progressively deployed (six deals YTD) rather than held idle.</div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext">CQ4 Perimeter / composition reduction? No — the opposite is happening; OEM's perimeter is expanding via acquisition (35-38 subsidiaries and growing), not simplifying. This sub-driver genuinely does not fit and should not be forced.</div></div><div class="subfinding"><span class="subnum">8.5</span><div class="subtext">CQ5 Strategically-sensible M&amp;A step-up? Yes, unambiguously — six bolt-on acquisitions closed year-to-date 2026, each within the stated SEK 30-250m sweet spot and each strategically coherent with the core technical-distribution model.</div></div><div class="subfinding"><span class="subnum">8.6</span><div class="subtext">CQ6 Strategy / strategic priorities change? Yes — EQT has explicitly widened the acquisition mandate to include "product-owning firms," a genuine strategic broadening beyond pure distribution, not merely faster execution of the old strategy.</div></div><div class="subfinding"><span class="subnum">8.7</span><div class="subtext">CQ7 Standards improvement? Partial — first CSRD sustainability report for FY2025, roughly <strong>50%</strong> of strategic suppliers (representing <strong>82%</strong> of purchase volume) now covered by a Code of Conduct; a real but incremental governance uplift.</div></div><div class="subfinding"><span class="subnum">8.8</span><div class="subtext">CQ8 Other leadership / actor changes? Yes — new Board Chairman (Christopher Norbye, also CEO of Beijer Ref, a cohort peer — a cross-holding worth a Wisdom Library note), a new Deputy CEO (Henrik Forsberg Schoultz, effective April 2026), and an incoming external CFO (Daniel Warnholtz, August 2026).</div></div><div class="subfinding"><span class="subnum">8.9</span><div class="subtext">CQ9 CEO change? Yes, directly and imminently — Jörgen Zahlin's 26-year tenure ends by 31-Dec-2026, the single most load-bearing "corporate change" fact in the entire case.</div></div><div class="subfinding"><span class="subnum">8.10</span><div class="subtext">RA3 summary: seven of nine sub-drivers fit clearly (balance-sheet utilisation, M&amp;A step-up, strategy change, leadership changes, CEO change, partial standards uplift), two do not (guidance increase, perimeter reduction — both because the company is doing the structural opposite of what those specific sub-drivers describe). This is the strongest, most literal setup match in the whole Element.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA4 — Change-from-current clearing in a high-quality compounder? — ANSWER: Partial fit — the underlying "high-quality business" condition is very strongly met, but the "clearing a specific problem" framing this setup describes is a weaker match than RA3's framing. <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">CQ1 No CEO? Not currently (Zahlin remains in post until end-2026) — this is a forward-looking, known transition rather than a present gap, so the literal condition is not yet met.</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext">CQ2 Strategy vacuum? No — the opposite; EQT has an explicit, actively-communicated strategy (accelerated, broadened M&amp;A), so this sub-driver does not fit.</div></div><div class="subfinding"><span class="subnum">9.3</span><div class="subtext">CQ3 Investment phase (near-term financials down, mid-term up)? No — near-term financials are UP (Q1 2026 beat), not down, so the specific "invest now, harvest later" pattern this Core Question describes is not the shape of OEM's current change.</div></div><div class="subfinding"><span class="subnum">9.4</span><div class="subtext">CQ4 Guidance for mid-term up (to be determined)? No formal guidance exists to confirm this directly; broker EPS estimates have been raised, which is suggestive but is proxy evidence, not company guidance.</div></div><div class="subfinding"><span class="subnum">9.5</span><div class="subtext">CQ5 Company mis-execution (e.g. products) = guidance delivery risk down? No evidence of mis-execution exists anywhere in the four reports — the opposite, in fact (a beat-and-raise pattern) — so there is no execution problem here to be "cleared."</div></div><div class="subfinding"><span class="subnum">9.6</span><div class="subtext">CQ6 Market-level demand down (as context for a clearing event)? Partially — Q4 2025's <strong>1%</strong> organic growth was a recent soft point now being left behind (<strong>5%</strong> in Q1 2026), which is closer to "a trough recently cleared" than "demand currently down."</div></div><div class="subfinding"><span class="subnum">9.7</span><div class="subtext">CQ7 Competition down (at-the-moment pricing, mid-term relative advantage)? Mild positive — the "benign margin-over-volume" competitive discipline described across the sector is a supportive, if generic, background condition.</div></div><div class="subfinding"><span class="subnum">9.8</span><div class="subtext">CQ8 Disruption to earnings growth profile / bankability down (i.e. that disruption risk receding)? Mild positive — the Business Foundation report finds traditional distribution "highly resilient against digital disintermediation," so this specific risk is assessed as structurally low and stable rather than a recently-cleared acute threat.</div></div><div class="subfinding"><span class="subnum">9.9</span><div class="subtext">CQ9 High quality business on a mid-term / long-term basis? Yes, very strongly — ROIC of <strong>28%</strong> (2024), a decade of margin expansion (<strong>10.4%</strong> to <strong>16.2%</strong>), and peer-leading returns across every profitability metric in the Business Foundation report.</div></div><div class="subfinding"><span class="subnum">9.10</span><div class="subtext">RA4 summary: the setup's "problem being cleared" framing (CQ1, CQ2, CQ5 specifically) largely does not apply to OEM, since there is no current leadership gap, strategy vacuum, or execution failure to clear — but the standalone high-quality-business finding (CQ9) is one of the strongest single answers anywhere in this memo. Graded C because the specific <em>setup</em> is a weak match even though the underlying business quality is not in question.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA5 — Huge change-from-current clearing event in solid quality? — ANSWER: Clear non-fit — this setup describes a beaten-down, capitulated stock; OEM is the opposite, already re-rating upward on good news [D-].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext">CQ1 Bottom-quartile trading multiple (2yr forward normalised margins)? No — 18-<strong>23x</strong> EV/EBITA is a discount to premium Swedish compounder peers (23-<strong>29x</strong>) but is not a bottom-quartile, deep-value multiple in absolute terms.</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext">CQ2 Sell-side estimates cut deeply across all analysts to conservative levels? No — the opposite has just occurred (estimates raised 5-<strong>6%</strong> post-Q1).</div></div><div class="subfinding"><span class="subnum">10.3</span><div class="subtext">CQ3 Company numerical guidance rebased lower, ideally kitchen-sinked? No — no formal guidance exists to rebase, and nothing in the reports describes a guidance reset event.</div></div><div class="subfinding"><span class="subnum">10.4</span><div class="subtext">CQ4 Disruptive impact on operations / revenue in the last twelve months (cockroach / weirder)? No — the last twelve months show operational improvement (accelerating organic growth, margin expansion), not disruption.</div></div><div class="subfinding"><span class="subnum">10.5</span><div class="subtext">CQ5 "You know" / puking-and-sadness check on guidance, sell-side, share price? No — share-price and broker-target direction has been up (DNB Carnegie's target raised from SEK 155 to SEK 180), the opposite of a capitulation signal.</div></div><div class="subfinding"><span class="subnum">10.6</span><div class="subtext">RA5 summary: every Core Question points the same direction — this setup simply does not describe OEM's current situation, and forcing a fit here would misrepresent the case.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>RA6 — Trough-on-trough turn in solid quality cyclical? — ANSWER: Clear non-fit — no evidence of a multi-quarter demand trough, cost-cutting recovery, or capitulated estimates; the recovery already underway looks nothing like this setup's pattern [D-].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext">CQ1 Bottom-quartile trading multiple? No (as RA5 CQ1 above).</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext">CQ2 End-market demand decreased for 18 months or more? No — the reports show one soft quarter (<strong>1%</strong> organic growth, Q4 2025) followed immediately by a strong rebound (<strong>5%</strong>, Q1 2026), not a sustained 18-month downturn.</div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext">CQ3 Competitive behaviour calmed versus price-down for volume gain? Partially, generically — the sector-wide "benign margin-over-volume" discipline is noted, but it is not specifically tied to a documented trough-recovery narrative for OEM.</div></div><div class="subfinding"><span class="subnum">11.4</span><div class="subtext">CQ4 New contract pricing levels now stable? No data either way in the four reports — genuinely ungradeable rather than a negative finding.</div></div><div class="subfinding"><span class="subnum">11.5</span><div class="subtext">CQ5 Company has executed a right-sizing programme for six months or more? No evidence anywhere in the reports — OEM's current-period narrative is growth and M&amp;A, not cost restructuring, so this sub-driver simply does not apply.</div></div><div class="subfinding"><span class="subnum">11.6</span><div class="subtext">CQ6 Competitors / substitutes have retrenched and right-sized for six months or more? No evidence provided in the reports on peer restructuring specifically.</div></div><div class="subfinding"><span class="subnum">11.7</span><div class="subtext">CQ7 Sell-side estimates cut deeply then to conservative levels? No — opposite direction (raised).</div></div><div class="subfinding"><span class="subnum">11.8</span><div class="subtext">CQ8 Company guidance rebased lower, ideally kitchen-sinked? No — no formal guidance exists to rebase.</div></div><div class="subfinding"><span class="subnum">11.9</span><div class="subtext">CQ9 "You know" / puking-and-sadness check? No — opposite direction, as under RA5.</div></div><div class="subfinding"><span class="subnum">11.10</span><div class="subtext">RA6 summary: this setup requires a specific multi-quarter capitulation-then-recovery signature that is simply absent from OEM's data; the current acceleration is a continuation of an already-improving trend, not a trough turn.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL] — ANSWER: No unacceptable-setup pattern identified on the criteria available, but this guardrail cannot be fully tested — its Core Question is undefined in the source framework [A-, with an explicit coverage caveat].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext">CQ1 (TBD in source framework): no specific "unacceptable setups" taxonomy exists yet in <code>04-elements-with-RAs-and-CQs-integrated.md</code> against which to test OEM mechanically; this is a genuine gap in the framework itself, not a judgement call this memo is making.</div></div><div class="subfinding"><span class="subnum">12.2</span><div class="subtext">Against what IS known of Richard's stated aversions (Current Market Context in CLAUDE-CANONICAL.md: avoiding European chemicals, consumer discretionary, beverages), OEM sits outside all three named avoided categories.</div></div><div class="subfinding"><span class="subnum">12.3</span><div class="subtext">Against the general GARP-plus-event-driven philosophy (a preference for earnings-supported change, not pure multiple-re-rating stories), OEM's case is built on real, delivered earnings (Q1 beat, margin expansion), not a story with no financial confirmation — a further point against an "unacceptable setup" read.</div></div><div class="subfinding"><span class="subnum">12.4</span><div class="subtext">Flagged for the Systems Architect: RA7's Core Question should be completed (an explicit "unacceptable setups" taxonomy defined) so this guardrail can be tested with the same rigour as the others, rather than assessed by analogy to adjacent known preferences.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA8 — Fit with false friend case setups? [NEGATIVE GUARDRAIL] — ANSWER: Yes — a genuine, well-evidenced false-friend fit exists, and this is arguably the single most important finding in this Element and one of the most important in the whole memo [F — guardrail HIT, not clear].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">13.1</span><div class="subtext">CQ1 (TBD in source framework): the Risks report's own Analysis of Competing Hypotheses names "FALSE FRIEND" as the highest-plausibility read of the entire case, with <strong>zero disconfirming items</strong> against it, versus nine disconfirming items against a clean "YES" (bull) profile and four against a clean "NO" (bear) profile — an unusually stark, load-bearing statistic that this memo should not soften.</div></div><div class="subfinding"><span class="subnum">13.2</span><div class="subtext">The false-friend mechanism named in the source report is specific and plausible, not generic risk boilerplate: near-term M&amp;A acceleration and margin upticks (both real and confirmed elsewhere in this memo) could be masking a slower, harder-to-observe erosion of the 50-year decentralised, entrepreneurial operating culture as EQT's private-equity ownership beds in — precisely the mechanism E1's counter-view considerations flagged without fully resolving.</div></div><div class="subfinding"><span class="subnum">13.3</span><div class="subtext">This is not a hypothetical concern layered on by this memo; it is the Risks report's own load-bearing structural finding (§13, explicitly marked LOAD-BEARING in that report), independently arrived at through a formal ACH methodology rather than narrative bear-case writing.</div></div><div class="subfinding"><span class="subnum">13.4</span><div class="subtext">Because RA7/RA8 are negative guardrails, a "fit" here is the adverse outcome, and it is graded accordingly (F) to ensure it is not visually or analytically buried under the Element's otherwise constructive RA1/RA3 findings — this single finding should carry directly into Section E's next-stage priorities as the #1 Early-Stage Assessment question, not be treated as one risk among many.</div></div></div></div></div>
+<p><strong>End-of-E8 setup identification (per Triaging procedure):</strong> <strong>Primary setup — RA3, Strong corporate change driven EPSU/EPT</strong> (seven of nine sub-drivers fit, directly evidenced, dated). <strong>Secondary setup — RA1, Mis-modelled high-quality EPS upgrader</strong> (plausible, evidenced by the magnitude and pattern of post-Q1 estimate revisions, though less conclusively confirmed than RA3). These two setups should be the ones deepened at Early-Stage Assessment per the E8 carve-out rule; the other four acceptable setups (RA2, RA4, RA5, RA6) carry forward at this Triaging-stage light depth, unchanged, as the SOP specifies for non-fitting setups.</p>
+<p><strong>Element rating for E8: C+.</strong> This grade deliberately does NOT average cleanly across the eight Required Attributes. Two genuine, well-evidenced positive setup fits exist (RA3, RA1), which on their own would argue for a B or B+. But the Element also contains the single most consequential adverse finding in this Element and arguably this memo: a specific, load-bearing, zero-disconfirming-evidence false-friend hit at RA8. Per the design purpose of a negative guardrail (to prevent an otherwise-attractive setup story from being waved through), this finding meaningfully caps the grade rather than being netted away by the positive setup matches elsewhere. C+ reflects "a real, well-evidenced setup fit that must be read alongside an equally well-evidenced reason for caution" — not a middling, uncommitted grade.</p>
+<p><strong>Group 2 rating (Case simplicity, first pass — light) — restated with E8 included: C+.</strong> Consistent with the E7-only reading above; E8's mixed-but-real setup fit does not change the Group's overall light-pass characterisation.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-first-pass-light" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gNR" title="PASS">PASS</span> <span class="secn">5 findings</span></div>
+<p><strong>Element E11 — Value-chain dynamics — SECOND PASS at Triaging (4-bullet minimum per Required Attribute and per Core Question, no multiplier)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 — Demand side strong / fragile? (4 bullets minimum) — ANSWER: Strong on breadth and diversification, structurally exposed on cyclicality [B-].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Over 30,000 industrial customers with no single client above <strong>4%</strong> of group sales (down from <strong>5%</strong> in 2024) and the top ten customers representing just <strong>22%</strong> of consolidated sales — an unusually low concentration profile that materially de-risks any single customer relationship failing.</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>CQ (demand-side breadth)</strong> — Blue-chip account diversification across mining, energy, healthcare, automotive and forestry (ABB, Sandvik, Komatsu, Epiroc, Volvo named specifically) means no single end-market's downturn can disproportionately impact group revenue.</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>CQ (demand-side fragility)</strong> — The demand base is genuinely fragile to a single macro factor, however: organic sales correlate <strong>89%</strong> with capital-goods customer capex cycles, meaning the diversification is a diversification of <em>names</em>, not a diversification of the underlying macro driver — a broad industrial-capex downturn would hit nearly the entire customer base simultaneously despite the low single-name concentration.</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext">Credit quality on the demand side is exceptional and corroborating: credit defaults are just <strong>0.01%</strong> of total sales and over <strong>89%</strong> of trade receivables are not yet matured, evidence the diversified customer base is also a genuinely creditworthy one, not merely numerically diversified.</div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext">Counter-view considered: 30,000 customers sounds defensively diversified, but if the true risk factor is "European industrial capex," the effective diversification benefit is much smaller than the headline customer count implies — a distinction worth carrying into any position-sizing discussion.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>RA2 — Competitive supportiveness / aggression? (4 bullets minimum) — ANSWER: Genuinely supportive — a fragmented market with disciplined, margin-over-volume competitor behaviour. <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">The market is structurally fragmented (thousands of family-owned SMEs, top five technical traders combined under <strong>15%</strong> share), which historically correlates with lower price-based competition than a concentrated oligopoly would produce.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>CQ1</strong> — Direct evidence of competitor discipline: rival technical distributors (Addtech, Indutrade, Lagercrantz) are described as targeting EBITA margins above <strong>15%</strong> and prioritising margin over volume rather than engaging in share-gaining price wars — a directly supportive competitive backdrop.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>CQ2</strong> — OEM's own organic growth (<strong>7.0%</strong> over five years, 2021-25) has meaningfully outpaced these same disciplined peers (Addtech flat for eleven consecutive quarters; Indutrade <strong>0%</strong> in Q4 2025), evidence the competitive environment is rewarding OEM specifically, not merely benign for the industry as a whole.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>CQ3</strong> — OEM's exclusive-distribution-mandate model (a specific moat mechanism named in the Business Foundation report) legally constrains a subset of competitive intensity by preventing direct brand replication within OEM's own territories, a structural rather than purely behavioural source of competitive support.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>CQ4</strong> — The one aggression-side risk named across the reports is from adjacent business models, not existing technical-distribution peers directly: direct-selling globals (Omron, Schneider, Fagerhult) and serial-acquirer subsidiaries represent a slower-moving but real long-term competitive threat.</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext"><strong>CQ5</strong> — Counter-view considered: benign current behaviour among incumbent peers is not a permanent structural feature — Lagercrantz, Addtech and Indutrade are all better-capitalised and could shift toward more aggressive volume-chasing if their own organic growth continues to flatline, a genuine forward risk to this Required Attribute's current "supportive" reading.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA3 — Disruption forces? (4 bullets minimum) — ANSWER: Low near-term disruption risk; the model is structurally resistant to the disruption channels most relevant to distribution businesses [B+].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>CQ1</strong> — The Business Foundation report's own assessment is direct and unambiguous: "traditional distribution structures remain highly resilient against digital disintermediation," anchored in the design-in engineering relationships and local logistics that a pure e-commerce or direct-sales channel cannot easily replicate.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext">Managing thousands of small industrial accounts is explicitly described as "highly inefficient for global manufacturers" to do directly, meaning the disintermediation threat that might worry a simpler consumer-facing distributor does not transmit cleanly to OEM's specific customer-and-order profile.</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext">The one disruption vector genuinely flagged in the reports (standard, non-customised components, roughly <strong>9%</strong> of sales) is explicitly named as "highly exposed to transaction-only pricing pressure" — a real, bounded, quantified exception rather than a business-model-wide vulnerability.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext">Counter-view considered: "resilient so far" is not the same as "permanently immune" — large industrial customers with sufficient scale could, over a longer horizon, build direct relationships with OEM's own supplier base (the disintermediation risk named at RA5/E1's supplier-side discussion), so this Required Attribute's strong grade should be re-tested at Early-Stage Assessment against any emerging direct-sourcing trend among OEM's largest accounts, rather than assumed to hold indefinitely.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA4 — Political / regulatory? (4 bullets minimum) — ANSWER: Broadly neutral-to-supportive; no adverse regulatory finding, with an emerging compliance cost from EU sustainability rules [B-].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>CQ1</strong> — No tariff, trade-policy, or sector-specific regulatory headwind is named anywhere across the four family reports — a genuine absence of adverse finding for a European industrial-distribution business in the current environment, worth stating explicitly rather than assuming by default.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>CQ2</strong> — The one regulatory development identified is CSRD (Corporate Sustainability Reporting Directive) compliance: OEM filed its first integrated Sustainability Report for FY2025, using a permitted first-year disclosure exemption (Appendix C of ESRS 1) — a genuine but manageable new compliance cost, not a business-model threat.</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext">Nearshoring-supportive policy trends (EU industrial-strategy and supply-chain-resilience initiatives cited across Capgemini and ABB research in the Business Foundation report) are, if anything, a mild regulatory tailwind for a European local-distribution model, though this overlaps with the demand-side tailwind already captured under E1 and E5 rather than being a distinct new finding.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext">Counter-view considered: EQT's ownership itself could eventually attract closer regulatory or governance scrutiny typical of private-equity-owned formerly-family businesses (board independence is already a soft flag — only four of six board members are independent per the Risks report), a governance-adjacent regulatory risk worth monitoring rather than dismissing.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA5 — Supportive supplier side? (4 bullets minimum) — ANSWER: Structurally fragmented and supportive in aggregate, with one specific, named point of asymmetric vulnerability [B-].</strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">Over 400 manufacturers supply OEM with no single supplier above <strong>3%</strong> of consolidated group sales — a genuinely fragmented, low-concentration supplier base that mirrors the demand-side diversification and limits single-supplier bargaining power over OEM.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>CQ1</strong> — 200 strategic suppliers, representing <strong>82%</strong> of purchase volume, are actively evaluated by OEM, and roughly <strong>50%</strong> have signed a Code of Conduct — evidence of active supplier-relationship management rather than passive dependency.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext">The Business Foundation report is explicit and specific about the one genuine asymmetric risk: "losing a single key supplier is materially more problematic than losing a customer," and can cause "the consequent loss of hundreds of end-customers" if that supplier's specific product line cannot be substituted — a real, named vulnerability that the low percentage-of-sales concentration metric alone would understate.</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext">Sourcing reliance on Asia-based manufacturers introduces a dual-source quality gap risk flagged directly in the reports, a supply-chain-resilience question distinct from the pure concentration metric and one that has not been fully quantified in the current research set.</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext">Counter-view considered: the supplier base's low percentage concentration is real and genuinely de-risking in aggregate, so the RA5 grade should not be pulled down to reflect only the named tail risk; the B- reflects a generally supportive supplier side with one specific, real exception, not a generally fragile one.</div></div></div></div></div>
+<p><strong>Element rating for E11: B-.</strong> Against the SA04 cohort (Bufab is the direct comparator with a published memo; Bufab's own E11 work, per its metadata, graded its value-chain Element C+), OEM's value-chain profile reads as at least as strong if not somewhat stronger: comparably low customer and supplier concentration, a demand-side structurally exposed to the same broad industrial-capex cycle as most names in this cohort, but a distinctly well-evidenced disintermediation-resistance finding (RA3) that is more explicit in OEM's Business Foundation report than in the comparable cohort disclosure. Held at B- rather than higher because the demand-side "diversification of names, not of the underlying macro driver" finding (RA1) and the named single-supplier vulnerability (RA5) are both real, quantified constraints, not stylistic caveats.</p>
+<p><strong>Elements E9, E10, E12, E13 — not applicable at Triaging; first written at Early-Stage Assessment.</strong></p>
+<p><strong>Group 3 rating (Core philosophy, first pass — light): B-.</strong> Driven by E11, the only in-scope Element in this Group at Triaging.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-first-pass-light-no-elements-in-scope" data-spy><span class="id">Grp 4</span> Case riskiness</div>
+<p>Per the Triaging scope rule, Group 4 (E15 Invalidating attributes, E16 Strenuously seek-to-avoid attributes, E17 Capital-constraining attributes, E18 Clear transmission mechanism, E19 Monitorable transmission mechanism) carries a Group-level rating only, with no Element-level content until Deep Dive. The 100-word framing required at this stage: OEM's broad risk profile, based only on what the Risks report already surfaces without pre-empting Deep Dive's dedicated Element work, centres on the EQT ownership transition and its FALSE FRIEND read (already fully surfaced under E8 RA8 above), FX exposure from a foreign-currency-heavy cost base against a SEK reporting currency, and elevated working-capital intensity constraining near-term cash conversion. None of these are assessed as acutely capital-constraining today (the balance sheet is net cash), but the ownership-transition risk in particular is unusually well-evidenced for a Triaging-stage stock and should be the organising theme of Deep Dive's Group 4 work if this case progresses that far.</p>
+<p><strong>Group 4 rating (first pass — light): C+</strong>, with the explicit note that risk Elements are first substantively rated at Deep Dive per the SOP, and that this light-pass rating already reflects the RA8 false-friend finding rather than treating it as a surprise reserved for later stages.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-not-in-scope-at-triaging" data-spy><span class="id">Grp 5</span> Case optionality</div>
+<p>Not applicable at Triaging; first written at Early-Stage Assessment.</p>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-investment-case-components-pillar-iii" data-spy><span class="id">D</span> Investment Case Components (Pillar III)</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<p>Not in scope at Triaging. Pillar III content (position-management playbook, the 10 Invalidation thresholds, the 7-column driver tables) first appears at Early-Stage Assessment. Zero words in this section by design.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions" data-spy><span class="id">E</span> Actions</div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<p><strong>Recommendation: PROGRESS to Early-Stage Assessment.</strong> The Triaging qualitative test — does the case have large amounts of positive change forces? — is answered yes at E1: a dated, verifiable, board-level ownership change is already producing measured M&amp;A output (six deals, SEK 400m annualised sales) at the same moment a genuine, multi-source-corroborated organic demand recovery is confirmed (Q1 2026 organic growth of <strong>5%</strong> against a <strong>1.05x</strong> book-to-bill). That is the specific test this stage applies, and it is passed clearly, notwithstanding the more mixed findings elsewhere in the memo. Richard decides the final progress/park call at the Friday review meeting; this is a recommendation, not a decision.</p>
+<p><strong>This progress recommendation is not a clean "buy the story" call, and Section E should not read as one.</strong> The single most important number in this whole memo is the Risks report's ACH finding at E8 RA8: the FALSE FRIEND hypothesis wins with zero disconfirming items, versus nine against a clean bull case and four against a clean bear case. Progressing to Early-Stage Assessment is explicitly progressing <em>to test that finding</em>, not progressing despite it or ignoring it.</p>
+<p><strong>Key questions for Early-Stage Assessment, in priority order:</strong></p>
+<p>1. <strong>Resolve the false-friend hypothesis directly (highest priority).</strong> At Early-Stage Assessment, E2 (required case outputs) and the deepened Business Foundation read should specifically hunt for subsidiary-level evidence of whether the decentralised, entrepreneurial operating model is holding or eroding under EQT — subsidiary manager retention/departure rates since February 2025, whether new central mandates (reporting, procurement, governance) are being imposed on the 35-38 business units, and whether integration of the six 2026 acquisitions is preserving or overriding their local autonomy. 2. <strong>Track the CEO/CFO transition as it happens, not retrospectively.</strong> Zahlin's succession and Warnholtz's August 2026 CFO start are dated, near-term events that will occur before or during the Early-Stage Assessment window — the successor's public statements, any strategy continuity or change signalled at handover, and subsidiary-level reaction should be captured live rather than reconstructed after the fact. 3. <strong>Test whether working capital is actually normalising.</strong> Management guides NWC/sales toward 22-<strong>24%</strong> by 2027e from <strong>25.1%</strong> in 2025; the next 1-2 quarters of data should show this trending the right way, not merely being asserted — if the 92-day NWC figure has not moved by Early-Stage Assessment, that should raise rather than lower scepticism on the "robust base" finding at E1 RA2. 4. <strong>Reconcile the EV/EBITA multiple discrepancy.</strong> OEM's own Business Foundation (21-<strong>23x</strong>) and Risks (<strong>18x</strong>) reports disagree with each other by 3-5 turns; this memo could not resolve it from a single external EV/EBITDA data point (<strong>25.6x</strong>, a different metric). A direct FactSet pull or a short self-initiated query at Early-Stage Assessment should settle this before it is relied on for any valuation-upside (E3) work. 5. <strong>Close the local technical-data coverage gap.</strong> OEM.B-SE is absent from <code>master-dashboard/data/prices.json</code>; Master Rating 1 (technical momentum) and Element E4 currently rest on inferred, not measured, signals. This should be flagged to whoever maintains the master-dashboard universe list before Early-Stage Assessment's own MR1 pass. 6. <strong>Confirm the M&amp;A deals are delivering, not just closing.</strong> Six 2026 acquisitions have been announced/closed; Early-Stage Assessment should look for the first post-acquisition performance data (even preliminary) on at least the earliest of the six, since "deals closed" and "deals working" are different claims and only the former is confirmed today.</p>
+<p><strong>Expected timeline:</strong> standard — the Business Foundation report already meets the Early-Stage Assessment floor (Change Forces + Business Foundation), so no new family-report commissioning is required before that stage begins; the Leadership Foundation report (already on disk, not yet substantively used since E9 is out of scope at Triaging) should be read in full at Early-Stage Assessment for the CEO-transition and operator-quality work.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">12 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">(Memo content complete for Triaging depth. Remaining close-out steps: assemble metadata.json, run the actual <code>generate_qc_audit.py</code> script and fix any HARD FAILs it finds, then write the hot-wash and self-review debrief, and publish.)</div></div>
+<p><strong>Sources consulted for this memo:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Change Forces report (<code>Files/OEM.B-SE/41-change-forces/compact-watson.md</code>, extracted 08-Jun-26, identity-confirmed two-signal, 9,294 words raw).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Business Foundation report (<code>Files/OEM.B-SE/42-business-foundations/compact-watson.md</code>, produced 30-Jun-26, 12,229 words).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Risks report (<code>Files/OEM.B-SE/44-risks/compact-watson.md</code>, produced 10-Jun-26, 18,925 words, PDF-primary extraction, identity-confirmed two-signal).</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Leadership Foundation report on disk (<code>Files/OEM.B-SE/43-leadership-foundations/</code>, produced 30-Jun-26) — NOT substantively drawn on at Triaging, since E9/E10 are out of scope this stage; reserved for Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Bufab (BUFAB-SE) published Triaging A&amp;J memo, 03-Jun-26 — cohort peer (SA04), used throughout for cohort-relative grading per D-IA-4RR-09.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><code>databases/data/cohorts-v3.json</code> — cohort membership (SA04: Beijer Ref, Bufab, OEM International, Teqnion).</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><code>memory/thematics/active.md</code> — the three active thematics applied at E5; OEM carries no pre-scored entry in this file, so the E5 grades in this memo are the Investment Analyst's own first-pass application, stated explicitly rather than presented as an established score.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Live share price and consensus target retrieved by web search (Stockopedia / MarketScreener aggregation, retrieved 07-Jul-26) — used as a fallback because OEM.B-SE is absent from the local <code>master-dashboard/data/prices.json</code> file; flagged as a coverage gap for Early-Stage Assessment.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><code>PROJECTS/SA - Investment Analyst A&amp;J memos/briefing/04-elements-with-RAs-and-CQs-integrated.md</code> — verbatim Required Attribute / Core Question wording for E8 (two Core Questions, RA1 CQ1 and both RA7/RA8 CQ1s, are marked TBD in this source file — a framework gap, not an omission by this memo).</div></div>
+<p><strong>Data discrepancies flagged (per the "surface, don't silently resolve" discipline):</strong> 1. OEM's own Business Foundation report (21-<strong>23x</strong> 2026e EV/EBITA) and Risks report (<strong>18x</strong> 2026e EV/EBITA) disagree with each other by roughly 3-5 turns on OEM's own trading multiple. Not resolved in this memo; carried to Early-Stage Assessment as Key Question 4 above. 2. An external EV/EBITDA figure (<strong>25.6x</strong>, retrieved by web search 07-Jul-26) was checked as a potential tie-breaker but is not directly comparable (EBITDA vs. EBITA are different metrics), so it does not resolve discrepancy 1.</p>
+<p><strong>Known limitations of this Triaging pass:</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">No local technical/price time-series data for OEM.B-SE — Master Rating 1 and Element E4 rest on qualitative inference from broker commentary and a single spot price/consensus-target check, not a measured moving-average/RS-percentile read.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">E5 (thematic fit) reflects the Investment Analyst's own first-pass scoring against the three active thematics, not a pre-existing Richard-reviewed score.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">No self-initiated (IA-initiated) research queries were run for this memo; the two flagged gaps above (the multiple discrepancy and the technical-data gap) are recommended as the first candidates if a self-initiated query is judged worthwhile before Early-Stage Assessment rather than deferred to that stage's own research commissioning.</div></div>
+<p><strong>Quality Control Audit:</strong> see §7 of <code>memory/skills/investment-analyst/self-review-debriefs/oem.b-se-triaging-self-review-debrief-2026-07-07.md</code>.</p>
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};window.MEMO_GRANULAR={"master":[],"pillars":[{"roman":"I","label":"1 — Pillar I: Case CHANGE Elements","grade":null,"elements":[{"code":"E1","label":"Required input change forces (internal / external) — FIRST PASS, ×2 double-weight (6-bullet minimum per Required Attribute and per Core Question)","grade":null,"ras":[]}],"groups":[]},{"roman":"II","label":"2 — Pillar II: Case BUILDING BLOCKS (4 in-scope Elements at Triaging)","grade":null,"elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum (first pass — light)","grade":null,"elements":[]},{"code":"GROUP 2","label":"Case simplicity (first pass — light)","grade":null,"elements":[]},{"code":"GROUP 3","label":"Core philosophy (first pass — light)","grade":null,"elements":[]},{"code":"GROUP 4","label":"Case riskiness (first pass — light, no Elements in scope)","grade":null,"elements":[]},{"code":"GROUP 5","label":"Case optionality (NOT in scope at Triaging)","grade":null,"elements":[]}]},{"roman":"III","label":"Investment Case Components (Pillar III)","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

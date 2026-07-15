@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Fevertree Drinks (FEVR-GB) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">22</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings</span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-d">MR1 — Technical momentum<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-d">MR2 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-rating-pill NR">NR</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">145</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">16</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-c">Element E1 — Required input change forces<span class="nav-rating-pill C">C</span><span class="nav-fc">16</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">129</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">29</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-d">Element E4 — Technical momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">26</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">75</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">32</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">43</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">25</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">25</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-d">Group 4 — Case riskiness<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">8</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">21</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-sources">F.1 — Sources<span class="nav-fc">14</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Fevertree Drinks (FEVR-GB) | TRIAGING</div>
+      <div class="meta">Version: 2.0 — fresh replacement; v1 dated 2026-06-03 archived to recycling-bin/ Produced: 2026-06-14 | Watson (Investment Analyst role) Stage: Triaging (Stage III, first A&amp;amp;J p</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">FEVR-GB</span> A&amp;J MEMO — Fevertree Drinks (FEVR-GB) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 16-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">840p (12 Jun 2026; source: prices.json)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">19.9× (24MF EPS 41.5p; PE at 3rd percentile of own history)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">21% (very low; only 1 in 5 brokers bullish)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (+0.5%), but marginal; 200D still declining</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">FEVR-GB (Fevertree Drinks PLC)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Consumer; premium beverages (mixers, adult soft drinks)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Non-alcoholic and mixer soft drinks (premium positioning, branded soft drink formulation, UK and European distribution)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">AG Barr (BAG-GB); Coca-Cola HBC (CCH-GB)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">840p (12 Jun 2026; source: prices.json)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">711p; 1,020p</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">836p (stock marginally above 200D; 200D slope still negative)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (+0.5%), but marginal; 200D still declining</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">19.9× (24MF EPS 41.5p; PE at 3rd percentile of own history)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">943p consensus (+12% implied upside)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">22 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Fevertree is a structural transformation story embedded in a controversial valuation debate: the Molson Coors US distribution partnership has de-risked the US earnings floor, but the bull case — 33–<strong>40%</strong> EPS compounding into FY27–28 — rests entirely on MC's salesforce converting distribution reach into genuine consumer pull-through, and the Risks report confirms the FALSE FRIEND ACH profile (pipeline fill masking depletion weakness) carries zero hard inconsistencies, making it the defining monitoring obligation. At 19.9× 24MF P/E and PE at the 3rd percentile of own history, the stock prices in a high probability of execution failure rather than success; the case warrants ESA-level investigation, not immediate position entry.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">6 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Business:</strong> Fevertree Drinks PLC, UK-listed premium mixer and adult soft drinks brand, co-founded 2004 by Tim Warrillow and Charles Rolls. No manufacturing assets (fully outsourced co-packing). Revenue of £<strong>375.3m</strong> (FY25). Operates at the Brand &amp; Marketing stage only</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>US transformation:</strong> As of early 2025, US operations transferred to Molson Coors under a royalty-based profit-sharing agreement; Fevertree receives guaranteed minimum US profits 2026–2030, eliminating US working capital and transforming the business model</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Portfolio:</strong> Global #1 premium mixer brand; <strong>45%</strong> of revenue now non-tonic (ginger beer, cocktail mixers, adult soft drinks, RTD formats). UK = £<strong>108m</strong>; US ≈ £<strong>132m</strong> (<strong>35%</strong> of group); Europe + RoW = remaining ~<strong>30%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Financial character:</strong> Asset-light (zero manufacturing assets, capex ~1.5–<strong>2%</strong> of sales). Net cash £<strong>91.1m</strong>, zero debt. Operating cash conversion <strong>150%</strong> in FY24. EBITDA margin at cyclical trough of <strong>11.3%</strong> vs historical peak of <strong>35.1%</strong> (2016); recovery underway</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Investment style:</strong> Structural transformation / event-driven. The case is not steady-state quality compounding; it is a trough-valuation corporate change play anchored to the MC partnership and US production onshoring by FY2027</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Cohort context:</strong> BAG-GB (AG Barr, revenue ~£<strong>400m</strong>, targeting 14–<strong>16%</strong> EBITDA margin) is the cohort benchmark. FEVR currently grades below BAG on all financial quality metrics; the thesis is transformation upside, not current quality superiority</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong><u>FALSE FRIEND is the primary risk</u>; monitoring is non-optional.</strong> The Risks report ACH matrix gives the FALSE FRIEND profile (MC pipeline fill masking weak consumer depletion velocity) zero hard inconsistencies; the dominant analytical outcome. Until Circana US depletion data confirms genuine consumer pull-through above the <strong>5%</strong> Redburn invalidation threshold, the bull thesis is structurally unverified</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong><u>The structural mechanics are contractually anchored</u>.</strong> US guaranteed minimum profits (2026–2030), onshoring roadmap eliminating 800–1,<strong>000bps</strong> of freight/tariff drag by FY2027, and working capital transferred to MC are legal facts, not management aspirations. This de-risks the downside floor even if the upside is execution-dependent</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong><u>Valuation provides a margin of safety</u> on own history.</strong> PE at the 3rd percentile of own history, consensus TP 943p vs 840p, and <strong>21%</strong> buy% (contrarian signal) create a setup where the market is priced for a high probability of failure. The Four Patterns score approximately 2.5/4 (Massive Corporate Change confirmed; Valuation at Low Multiples confirmed; partial Animal CEO; partial Demand Explosion pending consumer data)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong><u>Technical setup is not yet investable</u>.</strong> RS 34th percentile, 200D MA still declining (slope −0.166), 2 of 6 Minervini checks passing. Stage 1/2 transition; patience required. The 97-day soft-stack consolidation and post-AGM RS improvement from 19th to 34th percentile suggest base-building is underway</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Recommendation:</strong> Progress to ESA. The case passes the Triaging qualitative test ("large amounts of positive change forces") via the MC partnership, onshoring roadmap, and valuation gap. ESA must close the FALSE FRIEND evidence gap before position entry is warranted</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings</div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Master Ratings first pass — light at Triaging. All six struck against the live cohort (BAG-GB, CCH-GB) and named UK/European mid-cap premium consumer peers.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-d" data-spy><span class="id">MR1</span> Technical momentum <span class="g gD">D</span></div>
+<p>RS 34th percentile; 200D MA declining (slope −0.166); only 2 of 6 Minervini setup checks pass; stock marginally above 200D post-AGM bounce only — Stage 1/2 transition, not a confirmed Stage 2 investable setup. <span class="g gD">D</span>vs comparison set where most names have RS above 50 and rising 200D MAs.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-d" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gD">D</span></div>
+<p>Buy% at <strong>21%</strong> (1 in 5 brokers bullish; compares to 40–<strong>50%</strong> norm for mid-cap UK consumer peers); composite SSEM momentum −1; sales revisions L12M = −7 (consensus revenue has been systematically cut); despite the +15 L3M buy rating upgrade wave and +7 TP revisions, the absolute positioning is too low for above-D. Morgan Stanley discontinued coverage September 2025 — coverage gap is itself a sentiment signal. <span class="g gD">D</span>vs comparison set.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span></div>
+<p>Strong paradigm alignment with premiumisation and moderation mega-trends (<strong>45%</strong> non-tonic, adult soft drinks pivot, <strong>7%</strong> CAGR no/low alcohol sector) = B; partially offset by mild bear market vulnerability (discretionary premium product in a late-cycle environment) and mild Iran/oil energy cost exposure (glass + freight) both at C-D. Net: <span class="g gC">C</span> — above median on paradigm, below median on defensive thematic positioning.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span></div>
+<p>The MC partnership is a genuinely transformational corporate change event — the most material structural shift in the company's 20-year history. Guaranteed US profit floor, 5× PoP expansion, onshoring roadmap all contractually anchored. FALSE FRIEND monitoring complexity and "in line with plans" (not above-plan) June 11 IR call prevent a higher grade. <span class="g gC">C</span>— real change, execution unproven.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span></div>
+<p>E5 Thematic fit <span class="g gC">C</span>, E7 Case simplicity <span class="g gD">D</span> (multiple headwinds, multiple geographies, over-promiser management pattern), E8 Setups <span class="g gC">C</span> (strong RA3 corporate change fit, negative RA8 FALSE FRIEND guardrail active), E11 Value-chain <span class="g gC">C</span> (structural premium tailwinds, competitive moat strengthening in US, cyclical pressures). <span class="g gC">C</span>aggregate — the case building blocks are adequate but not strong.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="g gNR">NR</span></div>
+<p>Not applicable at Triaging stage. First written at Early-Stage Assessment.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar I has one in-scope Element at Triaging: E1 (Required input change forces). E2 and E3 are not applicable at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1; Required input change forces. <span class="g gC">C</span></strong> The Molson Coors US distribution partnership is the dominant change force: 400 distributors, 500,000 accounts (5× prior), guaranteed minimum US profits 2026–2030, and US production onshoring eliminating 800–1,<strong>000bps</strong> of freight/tariff drag by FY2027. Non-tonic portfolio now <strong>45%</strong> of revenue. Buyback programme (£<strong>130m</strong> in FY25 + £<strong>30m</strong> FY26 extension) signals FCF confidence. June 9 AGM: "moved beyond initial transition phase." June 11 IR call: US "in line with plans"; no evidence of stronger-than-expected momentum. UK on-trade structural drag (<strong>35%</strong> below 2019) and the FALSE FRIEND monitoring obligation constrain the grade. <span class="g gC">C</span>vs cohort; change forces are real and material but execution evidence remains early-stage</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2; Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at Triaging. First written at Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3; Sufficient TSR / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at Triaging. First written at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II has four in-scope Elements at Triaging: E5 (Thematic fit), E7 (Case simplicity), E8 (Case setups), E11 (Value-chain dynamics). E4 carries forward from pre-Triaging. E6, E9, E10, E12, E13 are not applicable at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1; Case momentum. <span class="g gC">C</span></strong> E4 carries forward as <span class="g gD">D</span> (technical setup imperfect; Stage 1/2 transition). E5 Thematic fit <span class="g gC">C</span> (strong paradigm alignment offset by mild macro/thematic headwinds). E6 not in scope. Group 1 aggregate <span class="g gC">C</span>; direction is positive but momentum is not yet established</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2; Case simplicity. <span class="g gC">C</span></strong> E7 <span class="g gD">D</span>; the case is genuinely complex: multiple fulcrum drivers (MC distribution AND onshoring AND UK non-tonic AND FALSE FRIEND monitoring), multiple geographies, multiple headwinds, management over-promiser pattern. E8 <span class="g gC">C</span>; clear primary setup identification (RA3: strong corporate change EPSU) with important negative guardrail (RA8: FALSE FRIEND). Group 2 aggregate <span class="g gC">C</span>; setup identification is sound; complexity is above average</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3; Core philosophy. <span class="g gC">C</span></strong> E11 <span class="g gC">C</span>; premium mixer TAM structural tailwinds, near-duopoly US competitive moat improving, but cyclical demand headwinds and GLP-1/RTD disruption risks moderate the grade. Group 3 <span class="g gC">C</span></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4; Case riskiness. <span class="g gD">D</span></strong> First-pass observation: risk concentration is unusually high; single distribution partner (MC = &gt;<strong>10%</strong> customer), UK on-trade structural drag, FX mismatch, FALSE FRIEND monitoring obligation, <strong>17%</strong> long-run margin cap thesis (DB), EPR legal challenge. Balance sheet is clean (net cash), preventing. <span class="g gF">F</span> Full E15–E19 risk work not in scope until ESA/DD. <span class="g gD">D</span>first pass</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5; Case optionality. <span class="g gNR">NR</span></strong> Not applicable at Triaging. First written at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The Triaging qualitative test is met: the case has large amounts of positive change forces (MC partnership, onshoring mechanics, valuation at 3rd percentile PE). Progress to ESA. FALSE FRIEND monitoring is mandatory from day one — it is not a back-office tracking task but the primary analytical obligation for this investment.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> (1) No deterioration in management guidance relative to "comfortable with consensus" (June 11 IR call); any FY26 revenue/EBITDA warning before ESA is written constitutes a reassessment trigger; (2) US EBITDA delivery confirmed at or above £<strong>8m</strong> in interim results before DD entry</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Run ESA procedure at next analytical session, prioritising E2 (case outputs: specifically the £<strong>8m</strong> US EBITDA delivery evidence), E3 (valuation upside with live price anchoring), E9 (operator quality: Warrillow scaling question), E10 (business quality: margin recovery mechanics, ROIC trajectory); (2) Establish Circana US depletion monitoring pathway; if direct access unavailable, identify expert network route for quarterly depletion checks</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">145 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">At Triaging depth, the FEVR-GB case rests on a single high-conviction change thesis (Molson Coors US distribution + onshoring) embedded in a genuinely complex analytical setup (FALSE FRIEND risk, multiple geographic levers, management over-promiser pattern) and a technical/sentiment configuration that is still in Stage 1/2 transition. The structural transformation is contractually real; the consumer pull-through evidence is not yet available. The Triaging verdict is a cautious PROCEED: the change forces pass the qualitative screen, but the GNG checks (8 open or partially open) require systematic closure at ESA and DD before conviction can build.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">16 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E1 is the only in-scope Pillar I Element at Triaging. E2 and E3 are first written at ESA.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-c" data-spy>Element E1 — Required input change forces <span class="g gC">C</span> <span class="secn">16 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The Molson Coors US distribution partnership is the dominant change force: a structural, contractually anchored transformation from direct US operator to royalty-based brand franchisor. The change mechanics are de-risked (guaranteed profit floor, 5× PoP expansion, onshoring roadmap); the commercial execution evidence is early-stage (in line with plans, no above-plan data); and the FALSE FRIEND monitoring obligation is the critical ongoing analytical task. <span class="g gC">C</span>vs cohort — real and material change forces, execution yet to be proven in consumer depletion data.</div></div>
+<p><strong>E1 RA1 — Change forces summary (×2 weight — 6-bullet minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1a; Strong external tailwind (premiumisation + moderation):</strong> The <u>global premium mixer market ($<strong>16.4bn</strong> in 2024, <strong>9.3%</strong> CAGR</u> since 2020) and the no/low alcohol category (<strong>7%</strong> CAGR forecast) provide a structural multi-year backdrop. <u>US premium mixer penetration at approximately <strong>10%</strong> vs <strong>43%</strong></u> in the mature UK market defines the opportunity arithmetic: the US market is 11.5× the size of the UK market, and the penetration gap alone implies a multi-year runway for FEVR. These are verified market-size data points, not speculative projections</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ1b; US competitive tailwind (Q Brands atrophying):</strong> Q Brands, formerly FEVR's most credible US premium competitor, has shrunk to approximately one-fifth of Fevertree's size following a disputed private equity acquisition and internal turmoil. The June 11 IR call contains a stark data point: Q Brands did not exhibit mixer brands at a recent major beverage trade show. In a market that functions as a near-duopoly in the premium tier, the exit of the second-place brand is structurally significant; it reduces competitive intensity and improves FEVR's ability to capture new account openings via MC's distribution network</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ1c; Validation of premium adult soft drinks category (AG Barr / Fentimans):</strong> AG Barr's acquisition of Fentimans for £<strong>38.4m</strong> (premium botanical adult soft drinks brand) directly validates the premium adult soft drinks category FEVR is pivoting into. This is an external data point from FEVR's closest UK cohort peer confirming that well-capitalised operators believe the category supports value-accretive M&amp;A. The implication for FEVR: its early non-tonic portfolio (now <strong>45%</strong> of group revenue) is correctly positioned in a category attracting capital</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA1 CQ2a; Strong internal change force (Molson Coors US partnership; structural transformation):</strong> The January 2025 MC partnership is the dominant internal change force and the most material strategic event in Fevertree's 20-year history. MC acquired exclusive US commercialisation, production, and distribution rights; sold the Fevertree US subsidiary back for $<strong>23.9m</strong>; acquired an <strong>8.5%</strong> strategic stake for £<strong>71m</strong>; and agreed guaranteed minimum US profits for Fevertree from 2026 to 2030. The practical distribution consequence is contractual and immediate: 100,000 prior PoPs (points of presence) expand to <u>500,000 accounts served by 400 independent distributors</u> making 30,000 daily deliveries; a 5× structural expansion with no incremental Fevertree working capital requirement</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA1 CQ2b; Strong internal change force (ATL US marketing launched April 2026):</strong> For the first time in its history, Fevertree deployed mass-market US advertising-to-consumer marketing: TV placements, video-on-demand, PGA Championship sponsorship, and Aspen activations beginning April 2026. This is the US brand awareness campaign that was missing from the direct-to-trade model (where awareness relied entirely on bartender advocacy). Brand awareness in the US was only approximately <strong>5%</strong> (vs 20–<strong>25%</strong> in the UK); the April ATL campaign begins addressing the structural gap that limits premium mixer penetration</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA1 CQ2c; Strong internal change force (US production onshoring programme):</strong> US local production is planned to commence in FY2027, eliminating two mechanical margin headwinds simultaneously: (a) transatlantic freight (estimated at <strong>8.2%</strong> of US net sales, approximately £<strong>11m</strong> annually at current US revenue scale); and (b) the <strong>10%</strong> US tariff on UK imports (shared 50/50 with MC until local production, approximately £<strong>6</strong>–7m annual FEVR share). The combined saving when fully operational represents approximately <u>800–1,<strong>000bps</strong> of US EBITDA margin improvement</u>. Australia local production commenced during 2025, establishing proof-of-concept. MC provides superior US glass procurement terms, providing additional structural cost advantage</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E1 RA1 CQ2d; Portfolio diversification (non-tonic now 45% of revenue):</strong> Non-tonic products; ginger beer (world's largest brand by value in multiple geographies), cocktail mixers (Margarita, Espresso Martini), RTD formats (non-alcoholic Gin &amp; Tonic, Italian Spritz cans), and Lemon Lime Bitters (Australia, with Angostura Bitters); now represent <strong>45%</strong> of group revenue. This directly addresses the core historical vulnerability: over-dependency on the UK gin-and-tonic occasion, which is structurally declining as UK gin consumption falls. The June 11 IR call confirmed: UK off-trade is "good, especially non-tonics" while UK on-trade is "the drag." The non-tonic strategy is working in the right channel</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E1 RA1 CQ2e; Shareholder returns programme (£130m buyback + £30m extension):</strong> The £<strong>100m</strong> buyback completed in FY25 (repurchasing over 12 million shares) and the £<strong>30m</strong> extension for FY26 (£<strong>18.9m</strong> complete by the June 11 IR call, on track to complete by August 2026) are a measurable act of management confidence in the forward cash generation profile. The <u>operating cash conversion improved from <strong>15.2%</strong> in FY23 to <strong>149.8%</strong> in FY24</u> following the MC working capital transfer. At zero structural debt and £<strong>91.1m</strong> net cash, buybacks at 840p signal management believes the stock is materially undervalued. Combined with a <strong>2%</strong> dividend increase in FY25, the capital return track record is consistent with a business generating genuine surplus free cash flow</div></div>
+<p><strong>E1 RA2 — Robust base summary (×2 weight — 6-bullet minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E1 RA2 CQ1; External headwinds (what the base faces):</strong> Two structural headwinds are active. First, UK on-trade: approximately <strong>35%</strong> below 2019 volume levels, driven by sustained hospitality closures, cost-of-living pressures reducing out-of-home dining, and the structural decline of the UK gin category. UK on-trade is the most profitable FEVR channel (historically <strong>30%</strong> EBITDA margin before central cost allocation); its underperformance structurally depresses group margins. Second, US spirits market cyclical softness: Redburn's core bear thesis rests on the premise that a declining US spirits market restricts premium mixer TAM expansion. The June 11 IR call did not contradict this: May/June US ramp is "in line with plans," not ahead of them. GLP-1 moderation and RTD substitution are medium-term structural pressures on the spirits-led mixer occasion</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E1 RA2 CQ2; Well-invested base (cost hedging, brand investment):</strong> Glass and energy costs are fully hedged for FY2026 and <strong>66%</strong> hedged for FY2027, providing structural margin protection through the transition period. MC's US glass procurement terms (local sourcing, scale purchasing) improve on FEVR's prior direct import model. The April 2026 ATL marketing campaign (TV, VOD, PGA) is the first US consumer investment of scale; FEVR is now investing in the base that will be needed to sustain MC's distribution conversion. Management explicitly absorbed short-term margin pressure in FY26 (US EBITDA flat at £<strong>8m</strong> despite revenue growth) to fund this investment; an owner-mindset trade-off rather than short-term earnings management</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E1 RA2 CQ3; Past/present fundamental delivery congruency:</strong> The delivery track record shows a persistent management pattern: initial UK optimism followed by H2 guidance cuts (FY22, FY23, FY24). The FY23 EBITDA miss (£<strong>30.5m</strong> vs £<strong>32.9m</strong> consensus = −<strong>7%</strong>), the FY25 EBITDA miss (£<strong>42.4m</strong> vs £<strong>44.4m</strong> = −<strong>5%</strong>, driven by the £<strong>2.8m</strong> EPR provision), and the five-year revenue CAGR of approximately <strong>3%</strong> (FY22–FY25) constitute a record of modest delivery against a higher aspirational narrative. Partially offset: FY24 delivered exactly in line with revised consensus (£<strong>50.7m</strong> EBITDA), and the FY24 EPS of 25.1p beat consensus of 24.5p by <strong>14%</strong>; a signal of improving forecast discipline. Congruency between thesis (US structural transformation) and delivery (US EBITDA flat at £<strong>8m</strong> in transition year) is currently consistent; but the FY27 step-change (£<strong>8m</strong> → £<strong>18m</strong>) requires onshoring execution not yet tested</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E1 RA2 CQ4; Large change-from-current (mispricing):</strong> The <u>PE at the 3rd percentile of own history represents</u> a significant derating from the 2018 peak (30× forward earnings) and provides a quantifiable change-from-current opportunity if the MC transformation delivers. On FY27 SS-normalized EPS of approximately 38p (management-confirmed guidance), the current 840p represents approximately 22× P/E; attractive for a business with credible 30–<strong>40%</strong> EPS compounding potential into FY27–28. The consensus target of 943p at <strong>21%</strong> buy% implies a <strong>12%</strong> return to the average bull case; modest. However, the Jefferies TP of 1,100p (the well-specified bull case) implies <strong>31%</strong> upside, representing a genuine large change-from-current opportunity if execution validates</div></div>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E1 RA2 CQ5; Low trading multiple:</strong> Forward P/E of 19.9× (24MF EPS 41.5p; PE at 3rd percentile of own history) is the clearest quantitative evidence of value. On a cohort-relative basis: BAG-GB (AG Barr) has traded historically at 15–18× forward PE with stronger margin trajectory and is currently at approximately 16–17×; meaning FEVR does NOT trade at a discount to its higher-quality cohort peer. The FEVR premium to BAG (approximately 20–<strong>25%</strong> on forward PE) is in fact narrower than in prior years when FEVR commanded 30–40× and BAG 14–16×. The correct read is that FEVR is cheap on its own history but still trades at a small premium to the strongest cohort peer. The investment case rests on transformation upside, not pure valuation cheapness vs peers</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E1 RA2 CQ6; AGM and IR call data points (post-ESA additional sourcing):</strong> Two post-ESA data points are critical to this Triaging v2 memo. First, the June 9 AGM trading statement confirmed: "confident of achieving full-year market expectations," "moved beyond the initial transition phase," and announced a £<strong>30m</strong> buyback extension (stock +<strong>5.9%</strong> to 804p on the day). Second, the June 11 post-AGM IR call confirmed: US consensus ($<strong>200m</strong>/$<strong>240m</strong>/$<strong>280m</strong> FY26/27/28) "absolutely fine"; US EBITDA £<strong>8m</strong> FY26 "on track"; "not seeing tough environment even in UK"; UK off-trade non-tonics good; non-MC distributors "love" the product; May/June ramp "in line with plans"; IR explicitly noted "not seeing any evidence ATM that things are ramping more strongly than expected." These two data points are the most recent primary source inputs and substantially confirm the base case without providing upside evidence</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The strongest counter-view is Deutsche Bank's structural reading: the MC profit-sharing agreement permanently caps long-run group EBITDA margins at approximately <strong>17%</strong>, decisively below the prior bull case of 20–<strong>25%</strong>, making the stock a structural treadmill (adequate returns but no re-rating catalyst once market digests the cap). This is coherent and not easily dismissed. However, if DB is wrong and Jefferies' mechanics are correct (freight/tariff elimination accrues fully to Fevertree's P/E under the royalty structure), the margin recovery to <strong>20%</strong>+ remains achievable. The dispute is analytically open; ESA and DD must close it via detailed P&amp;L mechanics review with management</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) At ESA, obtain detailed <u>MC profit-sharing mechanics</u>; specifically, does the royalty structure allow full retention of freight/tariff savings in the UK royalty line, or does the profit-share agreement absorb the mechanical saving? This resolves the DB vs Jefferies margin cap dispute. (2) At ESA, obtain or commission H1 2026 Circana US depletion data via expert network; if depletion growth is below <strong>5%</strong> cc, initiate reassessment per Redburn's invalidation threshold</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">129 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Four Elements are in scope at Triaging: E5 (Thematic fit), E7 (Case simplicity guardrails), E8 (Fit with acceptable case setups), E11 (Value-chain dynamics). E4 is carried forward from pre-Triaging at. <span class="g gD">D</span> E6, E9, E10, E12, E13 are not applicable at this stage.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">29 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E4 carries forward at <span class="g gD">D</span> (technical momentum imperfect; Stage 1/2 transition). E5 grades <span class="g gC">C</span> (strong paradigm alignment, mild macro headwinds). E6 not in scope. Group 1 aggregate <span class="g gC">C</span> — directional improvement evident but momentum not established.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-d" data-spy>Element E4 — Technical momentum <span class="g gD">D</span> <span class="secn">3 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Carry-forward from pre-Triaging: RS 34th percentile, 200D MA still declining, 2/6 Minervini setup checks passing — Stage 1/2 transition, not an investable Stage 2 entry. <span class="g gD">D</span>vs comparison set. No new E4 content written at Triaging — deepens at ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E4 carry-forward:</strong> RS percentile improved from 19th (approximately ESA date June 10) to 34th (June 12) following the post-AGM bounce. 200D MA at 836p with a still-declining slope of −0.166. Long soft-stack streak of 97 days suggests consolidation underway. Full E4 analysis at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E4):</strong> Post-AGM price action (+<strong>5.9%</strong> June 9, to 840p June 12) represents the stock's strongest day in several months and the first sustained close above the 200D MA. If RS continues to improve toward 50+ over July–August 2026, the Stage 2 confirmation could occur before interim results</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E4):</strong> (1) Monitor RS percentile weekly; flag to Richard if RS exceeds 60 alongside sustained price above 200D MA; potential Stage 2 confirmation trigger. (2) At ESA, write full E4 analysis including VCP pattern assessment, volume characteristics, and MA slope trajectory</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">26 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">FEVR has <u>strong paradigm alignment with the premiumisation and moderation mega-trends</u> powering the adult soft drinks and premium mixer categories, and is partially defensible against bear market and energy-price headwinds. Thematic 2 (AI disruption) is neutral. <span class="g gC">C</span>vs comparison set — above median on paradigm alignment, below median on bear market defensibility.</div></div>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1 CQ1; Revenue characteristics in a downturn:</strong> Fevertree's revenue is not contracted or recurring; it is event-driven (hospitality occasions, grocery purchases) and therefore discretionary. In a genuine recessionary environment, premium mixer consumption is likely to fall as consumers trade down (mainstream Schweppes or own-label) or reduce alcohol consumption occasions entirely. The CF report notes UK on-trade sales are already <strong>35%</strong> below 2019; partly a COVID legacy but also a persistent macro drag. FEVR is NOT a bear market beneficiary. It is mildly defensive (affordable luxury positioning, ~£<strong>2</strong>–3 per serve) but not immune to downturns</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ2; Pricing power in a downturn:</strong> Fevertree's current price point is already <strong>20%</strong>+ above key mainstream competitors. In a bear market, this pricing premium faces compression risk; consumers and on-trade venue operators become more price-sensitive, and the <strong>33%</strong> higher cash margin argument is less persuasive when hospitality volume is declining. However, brand loyalty in the premium mixer category is moderate; UK household penetration of 3.6m (Fevertree purchasing) with more than half buying beyond tonic suggests a degree of stickiness</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA1 CQ3; Balance sheet defensibility:</strong> Zero structural debt and £<strong>91.1m</strong> net cash are genuine defensive attributes. FEVR can sustain the buyback programme and progressive dividend through a moderate downturn without covenant risk. Capex requirements are low (approximately 1.5–<strong>2%</strong> of revenue). The balance sheet provides resilience to a 1–2 year earnings headwind without existential risk. This is the strongest bear market attribute</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA1 CQ4; Geographic diversification:</strong> US is the growth engine (<strong>35%</strong> of revenue); UK is the mature market (approximately <strong>29%</strong> of revenue); Europe and RoW approximately <strong>36%</strong>. Geographic diversification means the bear market impact (primarily felt in UK on-trade) is partially offset by US growth. However, a simultaneous US spirits market downturn (which Redburn warns about) and UK recession would be a compound headwind with no easy geographic offset</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E5 RA1 CQ5; Dividend defensibility in a bear market:</strong> The 17.31p per share dividend (FY25, <strong>2%</strong> growth) represents approximately <strong>2.1%</strong> yield at 840p; not a yield stock. The dividend is progressive and maintained through the margin trough, which is positive. Management has demonstrated commitment to maintaining the dividend rather than cutting in a difficult year (maintained through FY23 EBITDA trough at <strong>8.4%</strong>). Dividend defensibility at the current level is credible; a further earnings deterioration of <strong>15%</strong>+ might test this commitment</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E5 RA1 CQ6; Bear market summary and grade:</strong> FEVR is a mild negative for the bear market thematic; it is not a beneficiary (no recurring revenues, no inelastic demand, not a utility), has some defensive characteristics (net cash, low capex, progressive dividend, affordable luxury), and faces real downside risk in a genuine recession (pricing power ceiling, UK on-trade drag, US spirits soft). Against the comparison set (BAG-GB has more UK grocery exposure and better defensive positioning; CCH-GB has infrastructure-like bottling economics), FEVR grades approximately <span class="g gD">D</span> on this RA</div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E5 RA2 CQ1; AI at-risk assessment:</strong> FEVR is not a technology company. Its core business model (brand ownership, outsourced production, distribution through third parties) has no direct AI disruption vector. The business does not employ large numbers of staff in roles susceptible to AI automation (it is a small branded goods company, not a consulting firm or staffing agency). FEVR is <span class="g gC">C</span>; neutral; on the AI disruption thematic</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E5 RA2 CQ2; AI as potential enabler for FEVR:</strong> AI could benefit FEVR in three areas: (a) consumer data analytics (understanding Circana sell-out patterns by store/region to direct MC salesforce effort); (b) targeted digital marketing (AI-optimised TV/VOD spend improving brand awareness ROI); (c) supply chain optimisation (predictive logistics for inventory management in the transition period). None of these are currently being highlighted by management or sell-side as material; they are optionality, not drivers</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E5 RA2 CQ3; Competitive impact of AI on the category:</strong> Premium mixer is a low-digital category. The product itself (glass bottle, botanical ingredients, premium carbonation) has no digital analogue. The competitive environment is determined by shelf space, bartender advocacy, and consumer brand recognition; none of which are directly threatened by AI. The most plausible AI adjacency would be AI-driven consumer behaviour modelling suggesting alternatives to premium mixers (RTD cocktails, functional beverages); but this is disruption via category shift, not AI disruption per se</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E5 RA2 CQ4; AI impact on marketing and brand-building investment:</strong> FEVR's April 2026 ATL campaign (TV, VOD, PGA) represents traditional mass-market advertising. AI-optimised programmatic advertising could make this spend more effective (targeting higher-propensity consumers). This is marginally positive for FEVR; a reduction in wasted marketing spend could improve the conversion ratio of awareness investment to trial and purchase</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E5 RA2 CQ5; AI impact on distribution partner (Molson Coors):</strong> MC is actively investing in AI-driven route optimisation, delivery scheduling, and sales force analytics. If MC's AI investment improves their salesforce effectiveness at directing FEVR products to the right accounts, this is an indirect beneficiary pathway. But MC's AI investment serves all of their brands; FEVR gets the marginal benefit of being on MC's platform, not a differentiated AI advantage</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E5 RA2 CQ6; AI thematic summary:</strong> FEVR is <span class="g gC">C</span> (neutral) on the AI disruption thematic. No material at-risk attributes; modest potential enabler upside via marketing analytics and supply chain optimisation. The AI thematic is immaterial to the investment case</div></div>
+<p><strong>E5 RA3 — Suitability for Iran war + oil price / value chain (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E5 RA3 CQ1; Glass production energy cost exposure:</strong> Glass manufacturing is energy-intensive, and Fevertree's outsourced glass supply chain (concentrated suppliers: Ardagh, Crown, Ball) creates exposure to energy price spikes. This was demonstrated empirically in 2022–2023 when energy-driven glass cost inflation contributed to the EBITDA margin collapse from <strong>35.1%</strong> to <strong>8.4%</strong>. However, for FY2026, glass and energy costs are fully hedged; the Iran/oil shock cannot damage FEVR's FY2026 EBITDA through this mechanism. For FY2027, <strong>66%</strong> hedged. For FY2028+, the onshoring programme shifts glass procurement to US local sourcing, further reducing exposure to European energy price shocks</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E5 RA3 CQ2; Transatlantic freight rates:</strong> FEVR currently ships finished glass bottles from UK manufacturing partners to the US; a route exposed to geopolitical disruption of global shipping routes (Strait of Hormuz, Red Sea). Iran conflict risk could elevate freight rates, directly impacting the approximately <strong>8.2%</strong> of US net sales currently consumed by transatlantic freight. Until onshoring completes (FY2027), this risk is active and unhedged. MC shares 50/50 in tariff costs but the freight risk sits primarily with Fevertree. This is a mild headwind under the Iran oil thematic</div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>E5 RA3 CQ3; Consumer confidence (demand destruction):</strong> Oil price shocks (Iran conflict scenario) erode consumer purchasing power, particularly in the UK (high fuel price sensitivity) and US (petrol prices visible at pump, direct consumer confidence signal). Premium mixer purchases are discretionary; a prolonged oil price shock ($<strong>120</strong>+ Brent) would suppress UK and US consumer confidence and reduce on-trade premium spending. This is the most material Iran thematic risk for FEVR: not cost but demand</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E5 RA3 CQ4; FX mismatch (USD revenues, GBP reporting):</strong> FEVR reports in GBP but generates approximately <strong>35%</strong> of revenues in the US. A strong USD environment (which may accompany an oil shock/risk-off period) would translate US revenues more favorably into GBP. However, FEVR's FX contracts mature within 12 months (sub-optimal hedging duration); a sustained USD weakening scenario would be damaging. In the Iran conflict context, the USD typically strengthens as a safe-haven currency, which would be mildly positive for FEVR's US revenue translation</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>E5 RA3 CQ5; Supply chain resilience (MC partnership as buffer):</strong> The MC partnership structurally reduces FEVR's supply chain exposure: US finished goods inventory now sits on MC's balance sheet, US glass procurement is locally sourced by MC (no transatlantic shipment requirement for US sales once onshoring completes), and MC's scale provides supply chain resilience through multiple local suppliers. The MC partnership thus acts as a partial buffer against Iran/oil supply chain disruption scenarios</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext"><strong>E5 RA3 CQ6; Iran/oil thematic summary:</strong> FEVR is <span class="g gD">D</span> on the Iran/oil thematic; mild net headwind from consumer confidence impact, freight rate exposure, and discretionary demand sensitivity, partially offset by FY2026 cost hedging, FX benefit in a strong-USD scenario, and the structural onshoring programme that eliminates the freight exposure by FY2027. The thematic headwind is real but not severe</div></div>
+<p><strong>E5 RA4 — Paradigm fit from business perspective (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>E5 RA4 CQ1; Premiumisation mega-trend alignment:</strong> Fevertree is the #1 premium mixer brand globally, operating at the precise intersection of two confirmed secular trends: (a) premiumisation (consumers trading up to higher-quality ingredients and experiences, demonstrated at <strong>9.3%</strong> CAGR in the global mixer market since 2020); and (b) moderation (consumers drinking less but better; the "drink better not more" paradigm shift that benefits premium over mainstream products). FEVR's entire business model is built around these trends</div></div>
+<div class="finding cq-level"><span class="fnum">20.</span><div class="ftext"><strong>E5 RA4 CQ2; No/low alcohol secular growth alignment:</strong> The global no/low alcohol category is forecast to grow at <strong>7%</strong> CAGR for the next five years. FEVR's non-alcoholic RTD and adult soft drinks expansion (<strong>45%</strong> non-tonic now) is directly aligned. Fevertree is not a legacy brand being disrupted by no/low alcohol; it is actively expanding into it as a core growth strategy</div></div>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext"><strong>E5 RA4 CQ3; GLP-1 paradox (disruption vs opportunity):</strong> GLP-1 weight-loss medications reduce spirits consumption (<strong>33%</strong> net reduction reported among users), which is a negative for the spirits-led mixer occasion. BUT: GLP-1 users who moderate alcohol consumption tend to migrate to premium non-alcoholic alternatives; exactly FEVR's adult soft drinks and RTD portfolio. The GLP-1 threat to tonics/spirits mixers may be offset by an opportunity in the adult soft drinks category. This creates a portfolio-level natural hedge within FEVR's own product range</div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext"><strong>E5 RA4 CQ4; At-home consumption (post-pandemic structural shift):</strong> Approximately <strong>80%</strong> of US consumers report preferring to drink at home due to cost and convenience. This structural shift from on-trade to off-trade benefits FEVR's grocery channel sales (where non-tonic and premium mixer SKUs are growing) and is confirmed by the June 11 IR call (UK off-trade good, non-tonics strong). FEVR's UK grocery penetration (3.6m households) and MC's US off-premise reach (500,000 accounts including major grocery chains) are well-positioned for this trend</div></div>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext"><strong>E5 RA4 CQ5; Category leadership + first-mover defensive moat:</strong> Fevertree's position as the world's #1 premium mixer brand in value terms across multiple geographies (including <strong>27%</strong> US tonic share, <strong>32%</strong> ginger beer share) represents the accumulated benefit of 20 years of category creation. The first-mover advantage in premium mixers creates brand equity, on-trade advocate relationships (bartenders), and shelf position that new entrants cannot easily replicate. This is a paradigm-consistent moat in a growing category</div></div>
+<div class="finding cq-level"><span class="fnum">24.</span><div class="ftext"><strong>E5 RA4 CQ6; Paradigm fit summary:</strong> FEVR is <span class="g gB">B</span> on paradigm fit from the business perspective; the company is structurally aligned with multiple secular growth trends (premiumisation, moderation, no/low alcohol, at-home consumption) and holds a defensible #1 category position. The constraint preventing an <span class="g gA">A</span> grade is the over-dependence on the premium spirits occasion (GLP-1 and RTD substitution risks) and the maturity/decline of the UK gin category</div></div>
+<p><strong>Element E5 rating: <span class="g gC">C</span></strong> Strong paradigm alignment <span class="g gB">B</span> offset by bear market vulnerability <span class="g gD">D</span> and Iran/oil mild headwind. <span class="g gD">D</span> Net <span class="g gC">C</span> vs cohort.</p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> The strongest counter-view on thematic fit is that the premiumisation trend is already fully embedded in FEVR's current valuation (even at 19.9× 24MF PE), meaning the thematic is priced in and cannot drive incremental re-rating. The incremental re-rating catalyst must come from execution (MC distribution conversion), not from the theme itself maturing. This is a valid point; the thematic gives FEVR a growing market, not a guaranteed EPS growth outcome</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) At ESA, update the bear market resilience assessment with H1 2026 consumer confidence and UK on-trade volume data; determine whether the June 11 IR call's bullish tone ("not seeing tough environment") is sustained or revised; (2) At ESA, cross-reference the GLP-1 consumer behaviour data with FEVR's non-alcoholic RTD portfolio performance to assess whether the paradox (GLP-1 threat to spirits mixers, opportunity in adult soft drinks) is materialising</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">75 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 grades <span class="g gD">D</span> (the case is not simple — multiple fulcrums, multiple headwinds, multiple geographies). E8 grades <span class="g gC">C</span> (clear setup identification: RA3 corporate change primary; RA8 FALSE FRIEND negative guardrail active). Group 2 aggregate. <span class="g gC">C</span></div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 — Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">32 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The FEVR investment case fails on three of five simplicity guardrails: it has more than <u>two fulcrum drivers</u>, multiple material headwinds, and management with a persistent over-promiser pattern. The case is analytically complex and requires vigilant monitoring discipline — it is not a simple, trackable bet on one variable. <span class="g gD">D</span>vs cohort — case complexity is above the peer median.</div></div>
+<p><strong>E7 RA1 — Focused bet? (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1 CQ1a; Fulcrum driver count:</strong> The case has at minimum three fulcrum drivers that must all succeed for the full bull case to materialise: (1) MC US distribution execution; salesforce conversion of 500,000 accounts into genuine consumer pull-through above <strong>5%</strong> cc depletion growth; (2) US production onshoring by FY2027; contractually planned but operationally unproven; (3) UK non-tonic portfolio growth outpacing UK on-trade tonic decline; currently not delivering net positive UK revenue growth. A fourth complexity layer is the FALSE FRIEND monitoring obligation (distinguishing pipeline fill from genuine depletion velocity), which is technically a monitoring requirement rather than a fulcrum but adds analytical complexity</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ1b; Driver interdependence:</strong> The three fulcrums are partially interdependent: US marketing investment (fulcrum 2 enabler) is funded by the guaranteed US profit floor (MC partnership), which also depends on MC distribution execution (fulcrum 1). If MC execution disappoints, the profit floor provides some protection, but the onshoring programme (fulcrum 2) becomes less valuable (lower US EBITDA means smaller absolute percentage savings). The UK recovery (fulcrum 3) is largely independent of the US. The interdependence is moderate; not fully correlated, but not fully independent either</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA1 CQ1c; Two-fulcrum ideal vs three-plus actual:</strong> The ideal setup (per investment process standards) is two or fewer fulcrum drivers. FEVR has three+ with the additional complexity of the FALSE FRIEND monitoring obligation. Against the comparison set (BAG-GB has one primary fulcrum; Euan Sutherland's transformation plan; and one secondary fulcrum; Fentimans integration), FEVR is more complex. This is a legitimate case simplicity concern, not a reason to park, but a risk management constraint</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA1 CQ1d; Key tracking metric concentration:</strong> Can the investment thesis be reduced to one or two trackable numbers? Yes, partially: (1) US EBITDA delivery vs £<strong>8m</strong> FY26 guidance (quarterly H1 result); (2) US Circana cc depletion growth vs <strong>5%</strong> Redburn threshold. These two metrics jointly capture approximately <strong>80%</strong> of the bull/bear outcome determination. If both are positive, the case strengthens significantly. If either is negative, the case requires reassessment. This partial metric concentration is the most encouraging simplicity attribute</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E7 RA1 CQ1e; Management communication clarity:</strong> The June 11 IR call demonstrates management's willingness to be specific: "£<strong>8m</strong> US EBITDA FY2026, mid-£60s FY2027, £<strong>80m</strong>+ FY2028." These specific commitments create clear goalposts. However, the history of UK guidance (over-promising initial UK guidance, cutting in H2) moderates confidence in management specificity. The FY2026 guidance is anchored by the MC guaranteed minimum floor, making it more credible than UK guidance</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA1 CQ1f; Bet simplicity verdict:</strong> <span class="g gD">D</span> on this RA; the case is not a "focused bet" in the ideal investment process sense. It has three active fulcrums plus a monitoring obligation, and the key tracking metric (Circana depletion) is not publicly available. Against BAG-GB (simpler execution story: new CEO, margin targets, Fentimans integration) and CCH-GB (simpler bottler economics), FEVR grades <span class="g gD">D</span> on focus/simplicity</div></div>
+<p><strong>E7 RA2 — Narrow perimeter? (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E7 RA2 CQ1a; Geographic perimeter:</strong> FEVR operates materially in four geographic segments: US (<strong>35%</strong> of revenue), UK (<strong>29%</strong>), Europe (approximately <strong>16%</strong>), and Rest of World (approximately <strong>20%</strong>; includes Australia, Germany, France). This is a 4-geography operational footprint; above the "two geographies" ideal. However, the US and UK together represent <strong>64%</strong> of revenue, providing concentration. The Australia local production commencement (FY2025) adds an additional operational geography requiring management attention</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E7 RA2 CQ1b; Business unit perimeter:</strong> FEVR operates across multiple product categories: tonics (<strong>55%</strong> of global revenue), ginger beer (approximately <strong>25%</strong>), cocktail mixers (emerging), adult soft drinks (emerging), and RTD formats (launch phase). The product portfolio is expanding, not contracting. Against the ideal of a narrow perimeter, FEVR is spreading across categories. The risk is that management attention and marketing budget are spread across too many bets simultaneously</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E7 RA2 CQ1c; Distribution channel perimeter:</strong> Pre-MC, FEVR operated through a complex multi-channel US structure (own salesforce + independent distributor relationships). Post-MC, the US is structurally simplified to a single distribution partner (MC). However, UK operates through both on-trade and off-trade channels (structurally different dynamics), Europe through multiple country-specific distributor relationships (transitioning to larger FMCG operators in France and Greece), and RoW through various local arrangements. Channel complexity is moderate across the portfolio</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E7 RA2 CQ1d; Strategic partner concentration:</strong> The MC relationship represents FEVR's single largest partner (&gt;<strong>10%</strong> of revenue at £<strong>68.3m</strong>), strategic investor (8.5–<strong>9.4%</strong> shareholding), and sole US distribution route. This concentration is simultaneously the investment case's greatest strength (guaranteed floor, distribution scale) and its greatest perimeter risk (what happens if MC prioritises other brands or the relationship deteriorates). The three-year standstill clause on MC's stake (until 2028) provides some structural assurance but not indefinitely</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E7 RA2 CQ1e; R&amp;D and innovation perimeter:</strong> FEVR continuously launches new SKUs (Lemon Lime Bitters with Angostura Bitters in Australia, new RTD formats, new cocktail mixer variants). Innovation is core to the brand but creates perimeter complexity; new launch investments require marketing spend and can dilute focus from the core tonic and ginger beer categories that still constitute 55-<strong>70%</strong>+ of revenues</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E7 RA2 CQ1f; Narrow perimeter verdict:</strong> <span class="g gD">D</span>; the perimeter is broader than ideal (4 geographies, 4–5 product categories, multiple channel structures). BAG-GB's perimeter is also multi-geography but operationally concentrated in UK manufacturing, giving it more operational simplicity. FEVR's perimeter has improved (US simplified via MC) but remains complex globally</div></div>
+<p><strong>E7 RA3 — Zero headwinds? (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E7 RA3 CQ1a; UK on-trade structural headwind:</strong> UK on-trade revenue approximately <strong>35%</strong> below 2019 levels, and the gin category continues to structurally decline. This is the most persistent headwind in the FEVR investment case; not a cyclical bump, but a structural channel and category deterioration. The June 11 IR call confirms this is "the drag." Until non-tonic off-trade growth overwhelms this structural headwind and produces net positive UK revenue, it will weigh on group profitability (UK has the highest channel margins)</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E7 RA3 CQ1b; FALSE FRIEND depletion velocity headwind:</strong> The risk that reported US shipment growth masks weak consumer depletion velocity is an active, unresolved headwind. This is not a hypothetical; it is the dominant ACH profile in the Risks report. The operational consequence of a FALSE FRIEND resolution (i.e., the pipeline fill is unmasked by weak Circana depletion data) would be immediate: management would need to revise US revenue guidance downward, the bull case EPS trajectory would break, and the stock would re-rate sharply toward Redburn's 630p target</div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>E7 RA3 CQ1c; Molson Coors permanent margin cap headwind:</strong> Deutsche Bank's reading of the MC profit-sharing structure implies a <strong>17%</strong> long-run group EBITDA margin ceiling; permanently below the historical peak (<strong>35.1%</strong>) and below the prior bull-case recovery target (20–<strong>25%</strong>). If this reading is correct, it eliminates approximately 35–<strong>50%</strong> of the upside embedded in Jefferies' 1,100p TP. This is not resolved at Triaging; it is an open analytical dispute between DB (Hold, <strong>17%</strong> cap) and Jefferies (Buy, full margin recovery)</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E7 RA3 CQ1d; GLP-1 and RTD substitution medium-term headwinds:</strong> <u>GLP-1 medications reduce spirits consumption (<strong>33%</strong> net reduction</u> among users), directionally reducing the premium spirits mixer occasion. RTD cocktails (Altos/Malibu/Aperol pre-mixed cans) are capturing the "long mixed drink" occasion at a structural level; if the consumer doesn't need a separate mixer, FEVR's core product premise is challenged. These are medium-term (3–5 year) headwinds, not immediate, but they must be monitored</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>E7 RA3 CQ1e; UK EPR legal challenge headwind:</strong> The £<strong>2.8m</strong> FY25 provision for the UK EPR levy (on-trade glass bottles) represents a £<strong>3m</strong> potential annual ongoing cost if the legal challenge fails. This is approximately <strong>6%</strong> of FY26 consensus EBITDA; a material headwind if unresolved. Timeline unknown</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext"><strong>E7 RA3 CQ1f; Zero headwinds verdict:</strong> <span class="g gF">F</span> on this specific RA; there are multiple material headwinds (UK on-trade structural drag, FALSE FRIEND risk, <strong>17%</strong> margin cap thesis, GLP-1/RTD substitution, EPR levy). No zero-headwinds condition is met. This is a case with meaningful headwinds requiring active management, not a clean runway</div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items? (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>E7 RA4 CQ1a; Primary change-from-current item (MC distribution execution):</strong> The MC partnership is the dominant change-from-current item. The question is whether 500,000 US accounts can deliver above-<strong>5%</strong> cc depletion growth; this is the single most important binary for the case, and it is a trackable (if non-public) metric via Circana</div></div>
+<div class="finding cq-level"><span class="fnum">20.</span><div class="ftext"><strong>E7 RA4 CQ1b; Secondary change-from-current (US ATL marketing consumer awareness):</strong> The April 2026 ATL campaign is the first mass-market US investment. The change-from-current is brand awareness growing from <strong>5%</strong> toward a meaningful level that supports consumer pull-through without relying solely on bartender/distributor push</div></div>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext"><strong>E7 RA4 CQ1c; Tertiary change-from-current (onshoring by FY2027):</strong> US local production is the structural margin step-change. This is not ambiguous in timing (FY2027 targeted, contractually planned with MC) but is operationally unproven</div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext"><strong>E7 RA4 CQ1d; Fourth change (UK non-tonic outpacing on-trade tonic decline):</strong> The UK business needs non-tonic category growth to outrun the structural on-trade tonic decline to return to net positive UK revenue growth. Currently this is not achieved (UK revenue −<strong>2%</strong> in FY25)</div></div>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext"><strong>E7 RA4 CQ1e; Change-from-current count assessment:</strong> At approximately <u>four distinct change-from-current items</u>, FEVR is above the "handful" (two or fewer) ideal. The items are directionally consistent (all pointing toward US scale-up and margin recovery) but represent sequential execution requirements rather than one simple bet</div></div>
+<div class="finding cq-level"><span class="fnum">24.</span><div class="ftext"><strong>E7 RA4 CQ1f; Handful verdict:</strong> <span class="g gC">C</span> on this RA; four items is above the ideal two but the items are coherent and directionally aligned. The case is not fragmented</div></div>
+<p><strong>E7 RA5 — Conservative investor relations? (6 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">25.</span><div class="ftext"><strong>E7 RA5 CQ1a; Management guidance track record:</strong> Management has a <u>persistent pattern of initial optimism followed by H2 guidance cuts</u>: FY22 over-optimism, FY23 EBITDA miss (£<strong>30.5m</strong> vs £<strong>32.9m</strong> = −<strong>7%</strong>), FY24 H2 guidance cut, FY25 EBITDA miss (£<strong>42.4m</strong> vs £<strong>44.4m</strong> = −<strong>5%</strong>, though driven by the EPR provision). The CF report labels this explicitly: "management has historically started the year too optimistic on UK sales prospects."</div></div>
+<div class="finding cq-level"><span class="fnum">26.</span><div class="ftext"><strong>E7 RA5 CQ1b; June 2026 guidance language:</strong> The June 11 IR call uses "comfortable with consensus" rather than "guidance is conservative." This is neutral language; it affirms that current consensus is achievable, not that it is sandbagged. In contrast, BAG-GB's new CEO (Euan Sutherland) uses explicit target ranges (14–<strong>16%</strong> EBITDA margin, 19–<strong>21%</strong> ROCE) that communicate ambition with defined boundaries</div></div>
+<div class="finding cq-level"><span class="fnum">27.</span><div class="ftext"><strong>E7 RA5 CQ1c; Positive signal (FY26 US EBITDA floor):</strong> For FY2026, the guaranteed MC minimum profit floor provides structural protection for the US EBITDA £<strong>8m</strong> guidance. This is the most conservative aspect of FY2026 guidance; it literally cannot miss by more than the amount that would breach the contractual minimum. This is a qualitatively different guidance dynamic from prior years when all guidance was unprotected</div></div>
+<div class="finding cq-level"><span class="fnum">28.</span><div class="ftext"><strong>E7 RA5 CQ1d; Negative signal (UK guidance pattern unchanged):</strong> The IR has not indicated any change in UK guidance approach. The June 11 IR call's bullish "not seeing tough environment" language is exactly the kind of initial-year optimism that has historically preceded H2 UK disappointments. UK off-trade good (non-tonics) may be the saving grace, but on-trade decline is structural and ongoing</div></div>
+<div class="finding cq-level"><span class="fnum">29.</span><div class="ftext"><strong>E7 RA5 CQ1e; Investec EPS distortion (guidance transparency issue):</strong> Management specifically warned the IR advised "Investec PBT/NI/EPS = ignore." This creates a guidance transparency issue: the primary house broker publishes EPS figures that management disavows, making it difficult for investors to track guidance versus delivery. For a company with a history of guide-then-miss patterns, this additional complexity reduces confidence in IR conservatism</div></div>
+<div class="finding cq-level"><span class="fnum">30.</span><div class="ftext"><strong>E7 RA5 CQ1f; Conservative IR verdict:</strong> <span class="g gD">D</span> on this RA; management has a demonstrated over-promiser pattern that has not yet been structurally resolved. The FY2026 US floor provides partial protection, but UK guidance conservatism is not demonstrated and the Investec distortion creates transparency noise</div></div>
+<p><strong>Element E7 rating: <span class="g gD">D</span></strong> — the case fails on three of five simplicity guardrails (headwinds, focused bet, conservative IR). The two partially-met guardrails (narrow perimeter <span class="g gC">C</span> and handful of change items <span class="g gC">C</span>) are insufficient to offset the clear deficiencies. <span class="g gD">D</span>vs cohort — BAG-GB scores more favourably on case simplicity (simpler geography, clearer management targets, less FALSE FRIEND complexity).</p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The most optimistic reading of the simplicity question is that the MC partnership has actually SIMPLIFIED the case: one contractual framework (royalty + guaranteed floor) replaces the prior complex web of direct distributor relationships, US working capital management, transatlantic logistics, and direct sales force management. Under this reading, the post-MC FEVR is simpler than the pre-MC FEVR. The counter-argument: the MC partnership introduces its own complexity layer (dependence on MC's internal prioritisation, profit-sharing mechanics, FALSE FRIEND monitoring) that replaces operational complexity with monitoring complexity</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) At ESA, resolve the MC profit-sharing mechanics (DB vs Jefferies margin cap dispute) to clarify whether the <strong>17%</strong> structural ceiling is real; this is the primary complexity-reducing question; (2) At ESA, obtain UK off-trade non-tonic revenue trajectory to test whether fulcrum 3 (UK non-tonic outpacing tonic decline) is resolving or persisting</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">43 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Fevertree best fits setup RA3 (Strong corporate change driven EPSU/EPT) as the primary setup — the MC partnership is the defining corporate change event. The FALSE FRIEND negative guardrail (RA8) is active and confirmed, requiring monitoring discipline. <span class="g gC">C</span>vs comparison set — strong primary setup identification, important negative guardrail creates complexity.</div></div>
+<p><strong>E8 RA1 — Mis-modelled, high-quality EPS upgrader (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA1a; EPS mis-modelling evidence:</strong> The Investec EPS distortion (management explicitly says "Investec PBT/NI/EPS = ignore") creates a genuine mis-modelling dynamic in the official consensus. The SSEM raw NTM EPS of 38.2p substantially exceeds management's SS-normalized FY26 EPS of approximately 28.6p; a <strong>33%</strong> difference driven by Investec's royalty income treatment. For investors relying on SSEM consensus EPS, the stock appears optically more earnings-supported than it actually is, which is a subtle reverse mis-modelling (consensus over-states EPS, not under-states it, making the stock appear cheaper than it is)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1b; Quality assessment:</strong> FEVR is currently a <span class="g gC">C</span>-quality business (MR4 = C at Triaging); brand moat is genuine, ROIC is recovering (<strong>15.5%</strong>), but margins remain structurally depressed vs historical peaks and vs cohort peers. It <u>does not currently meet the "high quality" threshold</u> for RA1 setup. It is transitional; potentially upgrading to <span class="g gB">B</span> if onshoring delivers margin recovery, but not yet there</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA1c; Verdict on RA1 fit:</strong> Partial and weak fit. The EPS mis-modelling exists but works in the wrong direction (consensus too high, not too low). Quality is transitional. RA1 is not the primary setup for FEVR</div></div>
+<p><strong>E8 RA2 — Big demand change-driven EPSU or EPT (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA2a; Demand change evidence:</strong> The US premium mixer TAM is structurally large (<strong>10%</strong> penetration vs <strong>43%</strong> UK; US market 11.5× UK). The MC partnership unlocks a 5× PoP expansion (100k → 500k accounts) that increases the addressable demand footprint massively. April 2026 ATL marketing creates consumer awareness growth from <strong>5%</strong> toward higher levels</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA2b; Demand change quality and speed:</strong> The key uncertainty is whether the demand change is actually happening (FALSE FRIEND risk) or whether MC's initial distributor load-in has inflated sell-in metrics without genuine consumer pull-through. The demand change is structurally real (the TAM exists, the penetration gap is real) but the execution timeline is uncertain (could take 5–10 years to replicate UK penetration in the US)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA2c; Verdict on RA2 fit:</strong> Moderate partial fit. There IS a big demand change opportunity (US TAM), but the speed and confirmation of that demand change is uncertain. RA2 is a secondary consideration for FEVR, not the primary setup</div></div>
+<p><strong>E8 RA3 — Strong corporate change driven EPSU/EPT (3 bullets minimum, PRIMARY SETUP):</strong></p>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA3 CQ1; Massive corporate restructuring:</strong> The January 2025 MC partnership is textbook "massive corporate restructuring"; transfer of the US subsidiary ($<strong>23.9m</strong>), transfer of US working capital to MC, transformation of US business model from direct operator to royalty-based franchise, strategic partnership with <strong>8.5%</strong> stake exchange, five-year guaranteed minimum profit floor. This satisfies the RA3 definition completely</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA3 CQ2; Structural change in competitive position:</strong> The MC partnership changes FEVR's US competitive position from a small direct-to-trade operator (100k accounts, own salesforce) to a major brand franchise embedded in the largest US beer distribution network (400 distributors, 500k accounts). This is a structural step-change in distribution reach that competitors cannot easily replicate. Q Brands' simultaneous atrophying further strengthens the competitive position</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E8 RA3 CQ3; Business model simplification:</strong> The asset-light transformation (US working capital off balance sheet, US production moving to MC-managed local facilities) simplifies the FEVR balance sheet and reduces capital intensity. Working capital fell from <strong>28.5%</strong> of revenue (2023) to <strong>16.7%</strong> (2025). The business is becoming less capital-intensive and more cash-generative structurally</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 RA3 CQ4; Step-change margin improvement:</strong> The onshoring programme (FY2027) is a contractually planned step-change: <strong>8.2%</strong> US freight elimination + <strong>5%</strong> tariff sharing elimination = approximately 800–1,<strong>000bps</strong> of US EBITDA margin improvement. This is mechanical, not discretionary; once onshoring is complete, the saving is locked in. US EBITDA guided to step from £<strong>8m</strong> (FY2026) to £<strong>18m</strong> (FY2027) and £<strong>28m</strong> (FY2028); approximately £<strong>10m</strong> incremental each year</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E8 RA3 CQ5; Insider alignment signals:</strong> Non-executive director Kevin Havelock purchased 37,000 shares for £<strong>313</strong>,020 in September 2025 during the strategic transition; board conviction signal at a difficult period. Complete absence of director/officer sales in the trailing 12 months. Founder-CEO retains <strong>4.8%</strong> stake. Co-founder Charles Rolls retains <strong>4.4%</strong>. MC itself holds 8.5–<strong>9.4%</strong> strategic stake. Insider ownership alignment is strong</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E8 RA3 CQ6; Management incentive alignment:</strong> CEO base salary increased only <strong>3.4%</strong> in 2026 (in line with workforce). Executive shareholding guidelines raised from <strong>200%</strong> to <strong>300%</strong> of base salary. Malus and clawback provisions enforceable for five years post-grant. No excessive dilutive options programme. The incentive structure does not create perverse short-term earnings management incentives</div></div>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E8 RA3 CQ7; Peer valuation opportunity (corporate change creating discount):</strong> PE at 3rd percentile of own history represents the cumulative valuation impact of three years of execution disappointment. If the MC partnership transforms the earnings trajectory, the re-rating is mathematically large; from 19.9× 24MF to 22–25× FY27 EPS (38p) = approximately 840–950p, implying 0–<strong>13%</strong> return at base. If FY28 EPS of 48p is the anchor with 20–22× multiple = 960–1,056p, implying 14–<strong>26%</strong> return. Full Jefferies scenario (50p+ EPS, 22× = 1,100p) = <strong>31%</strong> return. The valuation setup is inherently tied to the corporate change delivery</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E8 RA3 CQ8; Sophisticated investor endorsement:</strong> MC's strategic £<strong>71m</strong> investment at a <strong>9%</strong>+ stake is the most powerful sophisticated-investor signal available; the partner with the deepest information access has explicitly committed capital and strategic resources. Havelock's open-market purchase is a secondary signal. <strong>21%</strong> buy% is contrarian (most of the market disagrees), which in a corporate change setup where the market is awaiting execution proof, may represent a sentiment opportunity</div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>E8 RA3 CQ9; EPS upgrade potential:</strong> The FY26 → FY27 EPS step (approximately 28.6p → 38p = +<strong>33%</strong>) represents a <strong>33%</strong> upgrade in the EPS base, driven by onshoring mechanics (mechanical, not discretionary). If FY26 interim results confirm tracking, EPS upgrade from sell-side follows mechanically. This is a credible, near-term EPS upgrade catalyst with a defined timing (H2 2026 interim results for FY26 data, FY2026 full-year results for FY27 guidance)</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E8 RA3 CQ10; Transmission mechanism clarity (distribution → depletion → earnings):</strong> The causal chain from the MC partnership to EPS upgrade has three testable links: (1) MC distribution reach (contractually confirmed at 500,000 accounts; verified via management disclosure); (2) consumer depletion velocity at the point of distribution expansion (tracked via Circana; currently opaque to public investors); (3) revenue and EBITDA conversion from depletion velocity to reported financials (visible in H1/FY results with an approximately 6-week reporting lag). Links 1 and 3 are structurally observable; link 2 is the epistemic gap. This is unusual clarity for an early-stage corporate transformation; the monitoring architecture is well-defined even if one key metric is temporarily opaque</div></div>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>E8 RA3; Setup weight and conviction summary:</strong> RA3 is the primary setup with high conviction on six of nine CQs (CQ1 massive restructuring; CQ2 competitive position change; CQ3 business model simplification; CQ4 step-change margin; CQ5 insider alignment; CQ9 EPS upgrade potential). The three partial CQs (CQ6 CEO scaling; CQ7 peer valuation; CQ8 sophisticated investor endorsement beyond MC) all reach adequate thresholds but do not reach maximum conviction. The overall RA3 fit is the strongest primary setup profile Watson has seen in this cohort; it substantially outweighs the residual setup uncertainty</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>E8 RA5 continued; Change-from-current clearing specifics:</strong> The "change-from-current" metric for FEVR is unusually precise. At 840p current price and 19.9× 24MF PE: (a) the theoretical trough earnings (£<strong>8m</strong> US EBITDA FY2026 + UK/Europe normalized) already justifies approximately 19–20× forward multiple given balance sheet strength; (b) the FY2027 onshoring step-change (£<strong>8m</strong> → £<strong>18m</strong> US EBITDA) is worth approximately 10p additional EPS (from 28.6p to approximately 38p) = <strong>25%</strong> EPS lift from one mechanical operational change; (c) the FY2028 US EBITDA target (£<strong>28m</strong>) adds another 10p EPS = total 48p EPS on FY2028 at a 20× multiple = 960p, vs 840p today. The "clearing" in this setup is the onshoring completion; when FY2027 US local production commences, the remaining change-from-current collapses to the execution risk of sustaining distribution momentum, not an open question about whether the savings will materialise</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><strong>E8 aggregate setup read (RA1/RA2/RA6 supporting evidence):</strong> The three weaker setup fits (RA1 mis-modelled quality EPS upgrader; RA2 big demand change; RA6 trough cyclical) all contribute supporting evidence without being the primary thesis. RA1 is partially relevant because the Investec EPS distortion creates genuine consensus confusion; analysts who read Investec's numbers without management's correction will systematically mis-track the stock. RA2 is partially relevant because the US penetration gap is real and the MC distribution reach does create a demand delivery mechanism. RA6 is partially relevant because the <strong>11.3%</strong> EBITDA margin is a verifiable trough (vs <strong>35.1%</strong> peak and recovering) that creates a mean-reversion read even without the transformation story. These three partial fits create a multi-dimensional setup that is more robust than a single-narrative bet; even if the primary RA3 narrative is delayed, the secondary reads provide valuation support</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><strong>E8 RA8 monitoring protocol:</strong> Given the confirmed RA8 FALSE FRIEND profile, the minimum monitoring protocol for progressing to ESA is: (1) establish a quarterly Circana US depletion check (either via management commentary in results, expert network, or direct Circana data access if commercially obtainable); (2) set the explicit invalidation threshold as Redburn's <strong>5%</strong> constant-currency depletion growth benchmark; (3) assign the monitoring obligation to Watson as a scheduled task before ESA entry (not to Richard); (4) ensure the H1 2026 results (expected approximately August 2026) include US volume commentary that can be cross-referenced against management's "in line with plans" June statement; (5) treat any H1 2026 US revenue miss vs consensus ($<strong>100m</strong>) of more than <strong>8%</strong> as a presumptive FALSE FRIEND signal requiring immediate reassessment before ESA close-out</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>E8 full setup confidence verdict:</strong> Primary setup RA3 (Strong corporate change driven EPSU/EPT); HIGH conviction, 6/9 CQs at maximum. Secondary setup RA5 (Huge change-from-current clearing); MEDIUM conviction, clearing mechanics precisely defined. Tertiary RA2 (Big demand change); LOW/MEDIUM conviction, TAM real but depletion evidence pending. Negative guardrails: RA7 yellow flags (concentration, over-promiser); ACTIVE, monitoring required; RA8 FALSE FRIEND; CONFIRMED ACTIVE, mandatory monitoring protocol specified above. Net setup verdict: PROCEED to ESA with structured monitoring; the setup profile is constructive (strong primary + defined secondary + known guardrails) rather than unclear or fragmented</div></div>
+<p><strong>E8 RA4 — Change-from-current clearing in high-quality compounder (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><strong>E8 RA4a; Quality compounding assessment:</strong> FEVR is not currently a high-quality compounder in the BAG-GB or CCEP sense. EBITDA margin of <strong>11.3%</strong> vs 14–<strong>16%</strong> for higher-quality peers, ROIC of <strong>15.5%</strong> vs <strong>20%</strong>+ for BAG, revenue growth of approximately <strong>3%</strong> L3Y CAGR vs <strong>4%</strong>+ for sector average. The "change-from-current clearing" applies (transformation underway) but the "high quality" element does not yet apply</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><strong>E8 RA4b; Potential for quality upgrade:</strong> If onshoring delivers 800–1,<strong>000bps</strong> of US margin improvement by FY2028 and UK non-tonic growth offsets on-trade decline, EBITDA margins could reach 18–<strong>20%</strong>; within the "high quality" range. The quality trajectory is upward. RA4 is a possible future setup rather than the current setup</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>E8 RA4c; RA4 verdict:</strong> Partial and emerging fit. Not the primary setup at current quality level but could become the primary setup if FY27 delivery is clean</div></div>
+<p><strong>E8 RA5 — Huge change-from-current clearing event in solid quality (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>E8 RA5a; "Huge change-from-current" assessment:</strong> The MC partnership qualifies as a "huge change-from-current" event; it fundamentally restructures the US business model. The change-from-current on the valuation side (PE at 3rd percentile) is also substantial</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><strong>E8 RA5b; "Solid quality" assessment:</strong> FEVR is at the threshold of "solid quality"; brand moat exists (#1 category globally), balance sheet is strong (net cash), cash generation is improving. But the <strong>11.3%</strong> EBITDA margin and ROIC recovery trajectory make "solid" a fair but not enthusiastic description. BAG-GB is more clearly "solid quality."</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><strong>E8 RA5c; RA5 verdict:</strong> Secondary/partial fit. The "huge change-from-current" qualifies; the quality is borderline "solid." RA5 is a secondary setup alongside RA3</div></div>
+<p><strong>E8 RA6 — Trough-on-trough turn in solid quality cyclical (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><strong>E8 RA6a; Cyclical trough assessment:</strong> FEVR has characteristics of a cyclical trough (EBITDA margin at <strong>11.3%</strong>, recovering from the <strong>8.4%</strong> low in FY23; PE at 3rd percentile vs own history). The trough narrative is partly applicable</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><strong>E8 RA6b; Solid quality cyclical assessment:</strong> FEVR is branded consumer goods, not a commodity cyclical. The drivers are more structural (MC partnership, onshoring) than cyclical (freight rates have already normalised from pandemic peaks). Classifying FEVR as a "cyclical" understates the structural transformation underway</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><strong>E8 RA6c; RA6 verdict:</strong> Weak fit. The trough dynamics are present but the primary driver is structural corporate change (RA3), not cyclical mean reversion</div></div>
+<p><strong>E8 RA7 — Fit with unacceptable case setups [NEGATIVE GUARDRAIL] (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><strong>E8 RA7a; Single customer concentration risk:</strong> MC at &gt;<strong>10%</strong> of revenue (£<strong>68.3m</strong>) is a concentration threshold that, in a standard risk framework, would qualify as elevated dependency. However, MC is a strategic partner with equity ownership, contractual commitment through 2030, and operational leverage (the partnership is value-creating for MC, not just Fevertree). This is monitored risk, not disqualifying risk</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><strong>E8 RA7b; Management over-promiser pattern:</strong> The persistent UK over-optimism pattern (FY22, FY23, FY24 H2 guide-then-miss) is a meaningful unacceptable setup characteristic. However, the FY2026 base is partially protected by the MC profit floor, which structurally limits the magnitude of a UK miss</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><strong>E8 RA7c; RA7 verdict:</strong> Yellow flags present (single customer concentration, over-promiser pattern) but neither is definitive enough to classify FEVR as an unacceptable setup. Active monitoring required. The MC partnership's contractual protections mitigate the most severe concentration scenarios</div></div>
+<p><strong>E8 RA8 — Fit with false friend case setups [NEGATIVE GUARDRAIL] (3 bullets minimum):</strong></p>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><strong>E8 RA8a; FALSE FRIEND ACH matrix result:</strong> The Risks report explicitly gives the FALSE FRIEND profile zero hard inconsistencies in the ACH matrix; it is the dominant analytical outcome. The specific mechanism: MC's 400 distributors received initial inventory (pipeline fill) in H1 2025; this mechanically inflated US revenue in FY2025 and possibly H1 FY2026. Once distributors are stocked, they order at the rate of consumer depletion; which may be materially below the initial fill rate. Reported US shipment growth would then decelerate sharply and reveal that consumer pull-through is below expectation</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><strong>E8 RA8b; Monitoring gap (Circana opacity):</strong> Molson Coors uses Circana data (not Nielsen) for US depletion tracking. <u>Circana data is not publicly available</u>. For a public investor, this means the primary depletion tracking metric is opaque. The only public data points are: (1) management's "in line with plans" statements; (2) shipment revenue in quarterly results; (3) any voluntary Circana commentary management provides. The monitoring gap is structurally problematic; it is not possible to independently verify whether consumer depletion is healthy until management discloses it or an expert network channel check is obtained</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><strong>E8 RA8c; FALSE FRIEND implications for position management:</strong> The FALSE FRIEND risk does NOT eliminate the investment case; it imposes monitoring discipline. The case remains valid IF consumer depletion is healthy. But it means: (a) entry sizing must reflect the monitoring uncertainty (no maximum position at Triaging); (b) the first clean US depletion data point (H1 2026 results, which will include management commentary on US volume trends) is a binary read-across point; (c) Redburn's <strong>5%</strong> cc depletion threshold is the explicit invalidation gate; (d) the monitoring burden itself increases the analytical cost of maintaining this investment idea vs a simpler setup with the same return potential; and (e) any position entry before the FALSE FRIEND is resolved must be sized conservatively (no more than <strong>25%</strong> of full target position) and must be accompanied by a pre-committed exit discipline if H1 2026 US depletion data disappoints. The FALSE FRIEND framework is not a reason to avoid the case; it is a reason to be disciplined about when and at what size to enter it</div></div>
+<div class="finding cq-level"><span class="fnum">37.</span><div class="ftext"><strong>E8 RA3 CQ11; Reversibility and downside containment:</strong> A critical property of the RA3 setup is the reversibility profile of the thesis. If the MC partnership is working, the guaranteed minimum profits provide a floor: US EBITDA cannot fall below the contractually specified minimum from 2026–2030. If the partnership is not working (FALSE FRIEND confirmed), Fevertree retains the right to renegotiate or exit after the contractual term. This is fundamentally different from a company that has destroyed its own moat; FEVR's transformation is implemented through a partner contract that has both upside optionality and downside protection. The reversibility characteristic is rare in corporate change setups and is a meaningful quality differentiator for the RA3 thesis</div></div>
+<div class="finding cq-level"><span class="fnum">38.</span><div class="ftext"><strong>E8 RA3 CQ12; Management alignment with the corporate change thesis:</strong> Tim Warrillow's <strong>4.8%</strong> shareholding (worth approximately £<strong>40m</strong> at 840p) is the most direct management alignment signal. Charles Rolls' continued <strong>4.4%</strong> stake post-founding provides founder continuity. MC's 8.5–<strong>9.4%</strong> stake (worth approximately £<strong>75m</strong> at 840p) creates a powerful second-degree alignment: MC's equity value is directly linked to FEVR's share price performance, giving MC a financial incentive (beyond the partnership economics) to execute the US distribution strategy effectively. This creates a rare three-way alignment structure: founder-CEO (Warrillow), founding co-creator (Rolls), and strategic partner (MC) all holding material equity stakes simultaneously</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext"><strong>E8 additional RA3 evidence; UK distribution economics as proof-of-concept:</strong> The UK business provides a 20-year proof-of-concept for the distribution economics that the US is replicating at larger scale. FEVR achieved <strong>27%</strong> UK tonic value share (vs approximately 3–<strong>5%</strong> starting share in 2004) by building bartender advocate networks and securing retailer listings. The UK EBITDA margin at peak (<strong>35.1%</strong>) demonstrates what the economics look like when brand equity, distribution reach, and customer advocacy align. The US thesis is essentially replicating this playbook via MC's infrastructure rather than FEVR's own salesforce; the proof-of-concept is empirically demonstrated, not hypothetical</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext"><strong>E8 RA6 extension; Cyclical trough additional evidence:</strong> At <strong>11.3%</strong> EBITDA margin vs <strong>35.1%</strong> historical peak, FEVR is operating at approximately one-third of its peak profitability. The margin compression was driven by identifiable, one-off or reversing factors: (a) glass and energy cost inflation in 2022–2023 (now largely reversed via hedging); (b) US direct distribution complexity (now transferred to MC); (c) transition-year marketing investment in FY2026 (ATL campaign funded by the MC profit floor). Each of these drivers has either reversed or is reversing on a defined timetable. The trough-on-trough characteristics are more pronounced for FEVR than for any other name in the cohort; BAG-GB operates near its margin ceiling, not its margin trough. This creates an asymmetric margin recovery opportunity that pure quality (non-trough) names in the cohort do not offer</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext"><strong>E8 cumulative setup strength assessment:</strong> Reviewing all eight RAs together: PRIMARY fit (RA3) with high conviction; SECONDARY fit (RA5) with medium conviction; WEAK fit (RA2, RA6) with partial evidence; PARTIAL negative guardrails (RA7 yellow; RA8 confirmed active). The setup profile is: four RAs contributing positive evidence, two RAs at neutral, two RAs flagging risk. In a standard investment committee context, a 4:2:2 setup distribution where the two negative guardrails are known and monitorable (not disqualifying) would be rated as a workable setup with above-average risk complexity. The PROCEED to ESA decision reflects this distribution: the positive evidence outweighs the guardrail concerns, but not by enough to justify position entry without the ESA risk resolution work. Comparatively, BAG-GB at the same stage of Watson's assessment had a cleaner 5:1:2 setup distribution (stronger RA2 demand evidence, no active RA8 FALSE FRIEND guardrail). FEVR's setup complexity is real and should not be minimised; the monitoring obligations are the price of entry into this case at the current evidence level</div></div>
+<p><strong>E8 primary setup identification:</strong> <u>RA3 (Strong corporate change driven EPSU/EPT) is the primary setup</u>; RA5 (Huge change-from-current clearing) is the secondary setup. The negative guardrails (RA7 yellow flags; RA8 FALSE FRIEND confirmed active) shape the monitoring discipline.</p>
+<p><strong>Element E8 rating: <span class="g gC">C</span></strong> — primary setup identified with high conviction; negative guardrail (RA8) confirmed, imposing mandatory monitoring; overall setup is workable but not clean. <span class="g gC">C</span>vs comparison set.</p>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> The most sceptical read of E8 is that RA8 should disqualify the case entirely; if the FALSE FRIEND profile is the dominant ACH outcome with zero hard inconsistencies, a disciplined process would not progress to ESA until the false friend is either confirmed (park) or definitively refuted (invest with conviction). The counter-counter argument: the FALSE FRIEND profile has zero hard inconsistencies because the evidence is insufficient to rule it out, not because the evidence confirms it. Absence of evidence (no consumer depletion data yet available) is not the same as evidence of absence (consumer depletion confirmed weak). The June 11 IR call's "in line with plans" is not consistent with a confirmed false friend; it is consistent with either genuine demand or a still-disguised false friend. This is the epistemic uncertainty that ESA and DD must resolve</div></div>
+<div class="finding cq-level"><span class="fnum">43.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) Identify expert network contact with access to Circana US depletion data for Fevertree in premium mixer category; this is the single highest-priority action for FALSE FRIEND resolution; (2) At ESA, run the full RA3 carve-out (deepen to 4 bullets per CQ on the 2 fitting CQs identified above: CQ4 step-change margin improvement and CQ9 EPS upgrade potential)</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">25 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E11 grades <span class="g gC">C</span> — structural premiumisation tailwinds, improving US competitive moat, but cyclical demand headwinds and disruption risks. Group 3. <span class="g gC">C</span></div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">25 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Premium mixer value-chain dynamics are structurally positive — the category is growing, FEVR holds #1 position, and distribution economics are favourable. Cyclical demand softness (US spirits market, UK on-trade), competitor evolution (Q Brands atrophying; AG Barr/Fentimans strengthening), and medium-term disruption risks (GLP-1, RTD substitution) moderate the grade to. <span class="g gC">C</span></div></div>
+<p><strong>E11 RA1 — Demand side strong / fragile? (4 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E11 RA1 CQ1a; Structural demand strength:</strong> Premium mixer demand is structurally growing (<strong>9.3%</strong> global market CAGR since 2020, <strong>7%</strong> no/low alcohol CAGR forecast). US premium mixer penetration at <strong>10%</strong> vs <strong>43%</strong> UK confirms a long structural runway. Consumer premiumisation trend (drink less but drink better) is a secular tailwind across developed markets. The demand side is structurally strong</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA1 CQ1b; Cyclical demand weakness (US spirits market):</strong> US spirits consumption is experiencing prolonged softness driven by macroeconomic pressures (consumer affordability), cultural moderation, and GLP-1 drug adoption. Redburn's core argument is that consensus <strong>18%</strong> US sales growth is mathematically unachievable in a declining spirits market because mixer volume correlates with spirits serve occasions. The demand fragility is most acute in the spirits-led premium mixer occasion</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA1 CQ1c; At-home consumption structural shift:</strong> <strong>80%</strong> of US consumers report preferring at-home drinking due to affordability. The channel shift (on-trade to off-trade) benefits FEVR in grocery and off-premise retail, which MC's distribution network reaches effectively. Off-trade premium mixer consumption is more resilient than on-trade because the per-serve cost is lower and the occasion (home entertaining) is more durable</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA1 CQ1d; Demand side verdict:</strong> <span class="g gC">C</span>; structurally positive backdrop (growing category, US TAM) offset by cyclical US spirits softness and medium-term GLP-1/RTD substitution risks. The demand side is constructive but not unambiguously strong</div></div>
+<p><strong>E11 RA2 — Competitive supportiveness / aggression? (4 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA2 CQ1a; US competitive dynamics (supportive):</strong> <u>Q Brands' atrophying (shrank to approximately 1/5 of FEVR</u>'s size, absent from beverage trade shows) represents a material competitive moat strengthening. Large beverage companies (AB InBev, CCEP) have repeatedly failed to gain premium mixer traction. FEVR's US market position is improving: <strong>27%</strong> tonic value share, <strong>32%</strong> ginger beer share, now with <u>5× the distribution reach via MC</u>. US competitive dynamics are unusually supportive at this moment</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA2 CQ1b; UK competitive dynamics (new threat):</strong> AG Barr's acquisition of Fentimans for £<strong>38.4m</strong> represents a well-capitalised new entrant into premium adult soft drinks; FEVR's key non-tonic growth category in the UK. Fentimans is an established botanical drinks brand with on-trade presence. Against FEVR's 3.6m UK household penetration and "world's largest ginger beer brand" positioning, Fentimans is a credible but manageable competitor</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E11 RA2 CQ1c; Private label and mainstream competitive pressure in Europe:</strong> Netherlands premium mixer market faces approximately <strong>45%</strong> private label share; Spain approximately <strong>38%</strong>. These markets represent meaningful geographic expansion constraints. European competitive dynamics are more adversarial than UK or US</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E11 RA2 CQ1d; Competitive dynamics verdict:</strong> <span class="g gB">B</span> on US competitive dynamics (improving sharply); <span class="g gC">C</span> on UK (new competitive heat); <span class="g gD">D</span> on continental Europe (private label pressure). Net aggregate <span class="g gC">C</span>; the most important geography (US) is improving, which drives the overall grade up from a pure average</div></div>
+<p><strong>E11 RA3 — Disruption forces? (4 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E11 RA3 CQ1a; GLP-1 disruption:</strong> GLP-1 users report <strong>33%</strong> net reduction in spirits consumption. US GLP-1 prescription rates are growing rapidly (40m+ prescriptions annually in the US). If <strong>15%</strong>+ of the US adult population reduces spirits consumption by <strong>30%</strong>+, the premium spirits mixer occasion is structurally impacted. Timing: meaningful adoption at scale is 3–5 year horizon</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E11 RA3 CQ1b; RTD cocktail substitution:</strong> Ready-to-drink cocktails (pre-mixed canned Long Island Iced Tea, Moscow Mule, Aperol Spritz, Margarita) are substituting the separate-spirit-plus-mixer occasion at a structural level. If the consumer shifts to RTD formats, they no longer need a premium mixer. RTD is the most immediate structural disruption risk</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E11 RA3 CQ1c; FEVR's portfolio response:</strong> FEVR is actively developing RTD and non-alcoholic formats (non-alcoholic Gin &amp; Tonic, Italian Spritz cans, Lemon Lime Bitters); positioning the company on the beneficiary side of the moderation/RTD trend. This portfolio evolution partially offsets the disruption risk</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E11 RA3 CQ1d; Disruption forces verdict:</strong> <span class="g gD">D</span> on net disruption forces; the GLP-1 and RTD risks are real and medium-term, even if FEVR has a partial portfolio response. Against a disruption-free baseline, the disruption environment is negative</div></div>
+<p><strong>E11 RA4 — Political / regulatory? (4 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E11 RA4 CQ1a; UK EPR levy:</strong> £<strong>2.8m</strong> FY25 provision; potential £<strong>3m</strong> annual recurring cost if legal challenge fails (approximately <strong>6%</strong> of FY26 EBITDA consensus). Ongoing legal dispute with UK Environment Agency over classification of on-trade glass bottles as household waste. Binary risk: win (zero cost) or lose (£<strong>3m</strong> annual)</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E11 RA4 CQ1b; UK Deposit Return Scheme (DRS):</strong> DRS excludes glass, which is a structurally positive outcome for FEVR; the price gap between glass premium mixer formats and PET-packaged mainstream alternatives narrows when PET carries a DRS deposit premium. This is a mild regulatory tailwind</div></div>
+<div class="finding cq-level"><span class="fnum">15.</span><div class="ftext"><strong>E11 RA4 CQ1c; US 10% tariff on UK imports:</strong> Currently shared 50/50 with MC until onshoring. Approximately £<strong>6</strong>–7m annual FEVR share at current US revenue scale. Eliminates when US production is local (FY2027 targeted). Tariff policy risk remains if Trump-era tariff escalation resumes, but the onshoring programme mitigates structural exposure</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E11 RA4 CQ1d; Regulatory verdict:</strong> <span class="g gC">C</span>; the regulatory environment contains both headwinds (EPR levy, US tariffs) and tailwinds (DRS glass exemption). On balance, net neutral/mild negative</div></div>
+<p><strong>E11 RA5 — Supportive supplier side? (4 bullets minimum):</strong></p>
+<div class="finding cq-level"><span class="fnum">17.</span><div class="ftext"><strong>E11 RA5 CQ1a; Glass supplier concentration and pricing power:</strong> Fevertree's key input (glass bottles) is supplied by a concentrated supplier base (Ardagh, Crown, Ball globally). These suppliers exerted severe pricing power in 2022–2023 (energy-driven glass cost inflation contributed to EBITDA trough at <strong>8.4%</strong>). Currently: fully hedged FY2026, <strong>66%</strong> hedged FY2027. The structural vulnerability remains; after the hedge window expires, glass cost inflation risk returns</div></div>
+<div class="finding cq-level"><span class="fnum">18.</span><div class="ftext"><strong>E11 RA5 CQ1b; MC glass procurement advantage:</strong> MC's US local production (FY2027) will be supported by MC's own US glass procurement leverage; a structurally advantaged supply chain relationship compared to FEVR's prior direct import arrangements. This is a meaningful supplier-side improvement from the MC partnership</div></div>
+<div class="finding cq-level"><span class="fnum">19.</span><div class="ftext"><strong>E11 RA5 CQ1c; Botanical ingredient supply:</strong> Natural botanical ingredients (quinine, ginger, elderflower) are sourced globally from specialist suppliers. Geopolitical risks (Middle East conflict, climate change) create supply disruption risk for rare botanicals. However, FEVR has multi-supplier arrangements for key botanicals and the supply chain is sufficiently diverse that single-source risk is limited</div></div>
+<div class="finding cq-level"><span class="fnum">20.</span><div class="ftext"><strong>E11 RA5 CQ1d; Supplier side verdict:</strong> <span class="g gC">C</span>; glass supplier concentration is a structural vulnerability (proven empirically in 2022–2023), partially mitigated by current hedging and future onshoring. Net neutral/mild negative</div></div>
+<p><strong>Element E11 rating: <span class="g gC">C</span></strong> — structurally positive premiumisation demand dynamics and improving US competitive moat are offset by cyclical demand softness, medium-term GLP-1/RTD disruption, regulatory headwinds, and glass supplier vulnerability. <span class="g gC">C</span>vs cohort — better than average on competitive dynamics (US moat strengthening) but below average on disruption resilience and regulatory clarity.</p>
+<div class="finding cq-level"><span class="fnum">21.</span><div class="ftext"><strong>E11 RA1 CQ1e; Household penetration trajectory (UK benchmark for US potential):</strong> UK premium mixer household penetration reached 3.6m households (approximately <strong>13%</strong> of UK households), establishing a proven demand ceiling from a mature market. US household penetration is estimated at approximately 4–<strong>5%</strong> currently. The gap between <strong>5%</strong> US and <strong>13%</strong> UK penetration, applied to a US household base approximately 2.5× the size of the UK, implies a potential US addressable household base of over 10m incremental households as the category matures. This is the structural demand arithmetic underlying management's confident US long-run guidance, and it is arithmetically achievable even in a conservative spirits market scenario</div></div>
+<div class="finding cq-level"><span class="fnum">22.</span><div class="ftext"><strong>E11 RA2 CQ1e; Bartender advocacy network (competitive moat specifics):</strong> FEVR's distribution advantage in the on-trade (historically) and now the off-trade (via MC) is reinforced by an advocacy network of trained bartenders who actively recommend FEVR by name. The "FEVR Free Pour" professional bartender programme trains approximately 25,000 UK bartenders annually. In the US, the "Fevertree Tasting Room" on-premise activations (now being expanded via MC's 400-distributor network) create local bartender advocates at each new account. This advocacy network constitutes a soft competitive moat that private label and mainstream competitors (Schweppes, Canada Dry) cannot replicate; it is brand equity embedded in professional recommendation networks, not just shelf positioning</div></div>
+<div class="finding cq-level"><span class="fnum">23.</span><div class="ftext"><strong>E11 RA5 CQ1e; Co-packer relationship quality:</strong> Fevertree's outsourced co-packing model (zero owned manufacturing assets) creates dependency on co-packer relationships in the UK (primary bottlers), Europe, and Australia (now local production). The CF report identifies that FEVR has long-standing relationships with its key co-packers and has not suffered a material supply disruption in its 20-year history. This track record supports the assessment that the outsourced model is operationally resilient, even if it creates a theoretical single-source risk per geography. The MC partnership adds an additional co-packing layer for the US (MC-managed local facilities from FY2027), further distributing supplier risk</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The most bullish read of E11 is that the premium mixer category is uniquely well-positioned against the GLP-1 disruption because GLP-1 users who reduce alcohol consumption tend to migrate TO premium non-alcoholic beverages; FEVR's adult soft drinks portfolio is exactly what they reach for. If this paradox plays out at scale, GLP-1 is actually a net positive for FEVR's non-tonic portfolio. Counter-counter: the scale of GLP-1 adoption required to materially boost adult soft drink volumes is several years away, and the spirits-led tonic mixer occasion (<strong>55%</strong> of FEVR revenue) suffers first</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) At ESA, model the GLP-1 paradox quantitatively; if US GLP-1 penetration reaches <strong>15%</strong> of adults, what is the net impact on FEVR tonic revenue (negative) vs non-alcoholic RTD/adult soft drinks revenue (positive)? Determine the crossover point; (2) At ESA, obtain AG Barr Fentimans post-acquisition trading update to assess the competitive intensity in UK premium adult soft drinks</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-d" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gD">D</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">First-pass light observation at Triaging. Elements E15–E19 are not in scope; full risk work is at ESA/DD. The risk concentration in this case is unusually high: single distribution partner concentration (MC = &gt;<strong>10%</strong> revenue), UK on-trade structural drag, FX mismatch, FALSE FRIEND monitoring obligation, <strong>17%</strong> long-run margin cap thesis (DB), EPR legal challenge, and GLP-1/RTD disruption. Zero structural debt prevents. <span class="g gF">F</span> <span class="g gD">D</span>first pass — full risk element work at ESA will likely confirm or deepen this assessment.</div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR]</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. First written at Early-Stage Assessment.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">8 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The Triaging qualitative test is met: the case has large amounts of positive change forces, anchored by the Molson Coors US structural transformation. The case passes to ESA. <u>FALSE FRIEND monitoring is the mandatory ongoing obligation</u>; it shapes every subsequent analytical decision, including the timing and sizing of any initial position entry.</div><div class="lead-prose">Section E italic summary: FEVR-GB progresses to ESA. The dominant analytical obligation before ESA entry is resolving the FALSE FRIEND diagnostic; the dominant valuation question is whether the MC royalty structure allows full margin recovery (Jefferies) or permanently caps group EBITDA at <strong>17%</strong> (Deutsche Bank). Both questions are answerable at ESA depth with the right primary source access.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment. The MC partnership, onshoring mechanics, and valuation at own-history 3rd percentile PE justify ESA examination. The technical setup (Stage 1/2 transition) and monitoring uncertainty (FALSE FRIEND) prevent immediate position entry</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Triaging verdict in full:</strong> The FEVR-GB case meets the Triaging standard on four of five dimensions: (1) material positive change forces (E1: MC partnership, onshoring roadmap, US ATL marketing); (2) acceptable thematic fit for the current investment environment (E5: strong paradigm alignment, manageable macro headwinds); (3) identifiable primary setup (E8: RA3 corporate change, confirmed at HIGH conviction on 6/9 CQs); (4) constructive value-chain dynamics (E11: structural premiumisation tailwinds, improving US competitive moat). The one dimension that fails Triaging standards is case simplicity (E7: three-plus fulcrum drivers, multiple material headwinds, over-promiser management pattern); this does not prevent ESA progression but it does impose monitoring discipline that a simpler case would not require</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Triaging qualitative test confirmation:</strong> The Triaging qualitative test ("does this case have large amounts of positive change forces?") is answered YES. The MC partnership is the most material corporate restructuring event in FEVR's 20-year history. The onshoring programme is contractually planned with defined timing (FY2027) and a precisely-quantified margin impact (800–1,<strong>000bps</strong>). The valuation gap (PE at 3rd percentile of own history vs a transformation story with credible <strong>33%</strong>+ EPS CAGR potential) creates a genuine change-from-current opportunity. These facts together constitute "large amounts of positive change forces" per the process standard</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Conditions for progression to ESA:</strong> (1) No deterioration in management guidance relative to "comfortable with consensus" (June 11 IR call); any FY26 revenue/EBITDA warning before ESA is written constitutes a reassessment trigger; (2) H1 2026 US EBITDA tracking confirmed at or above £<strong>3.5</strong>–4m (approximately half of the £<strong>8m</strong> FY26 target); (3) No escalation of RA8 FALSE FRIEND evidence (i.e., no management admission that H1 US revenue includes significant distributor inventory build beyond initial load-in estimates)</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Key questions for ESA investigation:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">(1) <u>MC profit-sharing mechanics</u>: does the royalty structure allow full retention of freight/tariff savings (Jefferies model) or do profits share to MC in a way that caps long-run margins at <strong>17%</strong> (DB model)? This is the primary valuation determinant and the most important analytical question in the entire case</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext">(2) <u>US consumer depletion velocity</u>: can Circana data be obtained via expert network? H1 2026 Circana depletion growth vs <strong>5%</strong> Redburn threshold is the binary FALSE FRIEND diagnostic; until this is resolved, the bull thesis cannot be validated</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext">(3) <u>CEO scaling quality (E9)</u>: can Warrillow; a founder-entrepreneur with zero large-scale corporate track record; manage the operational complexity of a global brand operating through a mass-market beer distributor? The Leadership report's concerns (former US Strategy Manager; key-person dependency) must be evaluated at ESA depth; this is the primary leadership risk</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext">(4) <u>Business quality trajectory (E10)</u>: what is the normalized ROIC trajectory from FY2026 to FY2028 under both the DB (<strong>17%</strong> margin cap) and Jefferies (full margin recovery) scenarios? Does MC help or hurt FEVR's pricing power and premium positioning in the US market?</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext">(5) <u>Valuation upside (E3)</u>: on FY27 EPS of 38p (management-confirmed SS basis), what is the warranted PE multiple given the transformation risk? Is 22× (840p / 38p = current valuation) the right floor, mid, or premium for a brand-franchisor model in transition?</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Evidence threshold for position entry:</strong> Watson will not recommend position entry until: (a) at least one clean H1 Circana US depletion data point above the <strong>5%</strong> cc threshold has been obtained; (b) the MC royalty structure margin mechanics have been clarified (resolving the DB vs Jefferies dispute); (c) the stock has achieved Stage 2 technical confirmation (RS above 60, 200D MA slope positive, Minervini 4/6 or better). These three conditions may or may not be met simultaneously; the weakest of the three at any point in time is the binding constraint</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">(1) Watson to identify expert network contact with Circana US depletion data access for Fevertree in the premium mixer category and initiate contact before ESA write; this is the single highest-priority pre-ESA action</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext">(2) Watson to obtain and read the full Jefferies and Deutsche Bank research reports on the MC profit-sharing mechanics; specifically the royalty structure revenue recognition; before ESA; to resolve the DB <strong>17%</strong> margin cap vs Jefferies full recovery analytical dispute</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Wisdom Library models applied in this memo:</strong> Four Patterns (FEVR scores approximately 2.5/4: Patterns 2 and 4 confirmed, Patterns 1 and 3 partial); Right-to-Left Thinking (invalidation gate = Redburn <strong>5%</strong> cc depletion threshold defines the right-to-left anchor); Flywheel vs Treadmill (MC partnership as flywheel test: does distribution scale generate self-reinforcing consumer demand, or is it a treadmill requiring continuous MC salesforce effort?); Goldilocks Growth (US TAM growth must be "just right": fast enough to validate investment but not so fast that it attracts private-label replication); Pricing Power (glass bottle premium positioning creates <strong>20%</strong>+ price premium vs mainstream; tested under bear market thematic analysis)</div></div>
+<div class="memo-closing">Closing memo verdict: proceed to ESA with the FALSE FRIEND monitoring protocol active. The transformation mechanics are real and contractually anchored; the commercial proof is pending. This is a case to investigate further at depth, not to size today.</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">21 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-sources" data-spy><span class="id">F.1</span> Sources <span class="secn">14 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Change Forces family report (highlighted.md, 9,530 words, submitted 02 Jun 2026, extracted 02 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Business Foundation family report (highlighted.md, 9,384 words, submitted 02 Jun 2026, extracted 02 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Leadership Foundation family report (highlighted.md, extracted 02 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Risks family report (highlighted.md, extracted 02 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">BAG-GB Change Forces family report (highlighted.md, 18,245 words, submitted 31 May 2026, extracted 31 May 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Notion IR call notes: "[?] FEVR - Summary - RB NTS from IR call after AGM @ 11-Jun-26" (11 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Notion IR call notes: "[+] FEVR - RB call notes for IR call #1 after FY 2025 results @ 26-Mar-26"</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">AGM trading statement (June 9, 2026); web search</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">prices.json (live price, 52-week range, MAs, RS percentile; data date 12 Jun 2026)</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">factset-valuation.json (PE <strong>19.9x</strong>, EPS 24MF 41.5p, PE percentile 3rd; data date confirmed internally)</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">factset-ssem.json (buy% <strong>21%</strong>, L3M buy revisions +15, L12M sales revisions -7, TP 943p)</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">cohorts-v3.json (cohort confirmed: non-alcoholic and mixer soft drinks; BAG-GB, FEVR-GB, CCH-GB)</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext">Wisdom Library models applied: Four Patterns, Right-to-Left Thinking, Flywheel vs Treadmill, Goldilocks Growth, Pricing Power</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext">Active thematics: active.md (Thematic 1: Bear Market; Thematic 2: AI Disruption; Thematic 3: Iran Oil)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">7 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Old Triaging memo (dated 2026-06-03) archived to recycling-bin/ before this memo was created</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Self-review debrief file created at: memory/skills/investment-analyst/self-review-debriefs/fevr-gb-triaging-self-review-debrief-2026-06-14.md</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">QC audit: run generate_qc_audit.py after this memo is written; fix all hard fails before close-out</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">ratings.json created in Files/FEVR-GB/Triaging/ alongside this memo (plain filename, no ticker prefix)</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">GNG Checks: FEVR-GB-Triaging-GNG-Checks-2026-06-14.md in the same folder</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Data discrepancy: SSEM NTM EPS 38.2p vs management SS-normalized FY26 EPS approximately 28.6p; Investec distortion confirmed by management (June 11 IR call); Investec figures excluded from this analysis</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Wisdom Library models consulted pre-memo: Four Patterns, Right-to-Left Thinking, Flywheel vs Treadmill, Goldilocks Growth, Pricing Power</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see self-review debrief at memory/skills/investment-analyst/self-review-debriefs/fevr-gb-triaging-self-review-debrief-2026-06-14.md</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"D","label":"Technical momentum"},"MR2":{"grade":"D","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"MR6":{"grade":"NR","label":"Pillar III: Investment case components [NR]"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"C","label":"Core philosophy"},"Group 4":{"grade":"D","label":"Case riskiness"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"D"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"D"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"C"},{"code":"MR5","label":"Case building blocks","grade":"C"},{"code":"MR6","label":"Investment case components","grade":"NR"}],"pillars":[{"roman":"I","label":"Case change elements","grade":"C","elements":[{"code":"E1","label":"Required input change forces","grade":"C","ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":"D","ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"C","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"D","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"C","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"C","elements":[{"code":"E11","label":"Value-chain dynamics","grade":"C","ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"D","elements":[]},{"code":"GROUP 5","label":"Case optionality","grade":null,"elements":[]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

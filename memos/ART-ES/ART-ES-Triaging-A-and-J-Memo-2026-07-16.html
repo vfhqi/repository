@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ART-ES — Triaging A&amp;J Memo — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-technical-and-quantitative-setup">SECTION A — TECHNICAL AND QUANTITATIVE SETUP</span>
+<span class="nav-item nav-subsection" data-anchor="a-1-technical-momentum-mr1">A.1 Technical Momentum (MR1)</span>
+<span class="nav-item nav-subsection" data-anchor="a-2-sell-side-earnings-momentum-mr2">A.2 Sell-Side Earnings Momentum (MR2)</span>
+<span class="nav-item nav-subsection" data-anchor="a-3-thematic-fit-mr3">A.3 Thematic Fit (MR3)</span>
+<span class="nav-item nav-subsection" data-anchor="a-4-valuation-context">A.4 Valuation Context</span>
+<span class="nav-item nav-section" data-anchor="section-b-pillar-i-case-change-elements-e1-e5-e7-e8">SECTION B — PILLAR I: CASE CHANGE ELEMENTS (E1, E5, E7, E8)<span class="nav-fc">21</span></span>
+<span class="nav-item nav-element" data-anchor="e1-case-change-forces-first-pass-2-format-floor-6-per-ra-cq">E1 — Case Change Forces<span class="nav-rating-pill B">B</span> <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-first-pass-2-format-floor-6">E5 — Thematic Fit<span class="nav-rating-pill A">A</span> <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e7-case-simplicity-and-legibility-first-pass-2-format-floor-">E7 — Case Simplicity and Legibility<span class="nav-rating-pill B">B</span> <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="e8-setup-fit-first-pass-floor-3">E8 — Setup Fit<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-ii-case-building-blocks-e9-e11-e12-e13">SECTION C — PILLAR II: CASE BUILDING BLOCKS (E9, E11, E12, E13)<span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e9-operator-quality-first-pass-floor-3">E9 — Operator Quality<span class="nav-rating-pill A">A</span></span>
+<span class="nav-item nav-element" data-anchor="e11-value-chain-position-first-pass-light-floor-3">E11 — Value Chain Position<span class="nav-rating-pill A">A</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="e12-industry-structure-first-pass-4-on-ra1-floor-12">E12 — Industry Structure <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-quadruple">×4</span></span></span>
+<span class="nav-item nav-element" data-anchor="e13-secular-growth-first-pass-floor-3">E13 — Secular Growth<span class="nav-rating-pill A">A</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-first-pass">SECTION D — PILLAR III: INVESTMENT CASE<span class="nav-fc">4</span></span>
+<span class="nav-item nav-section" data-anchor="section-e-false-friend-ach-evaluation-and-esa-conditions">SECTION E — FALSE FRIEND ACH EVALUATION AND ESA CONDITIONS</span>
+<span class="nav-item nav-subsection" data-anchor="e-1-false-friend-ach-assessment">E.1 — False Friend ACH Assessment</span>
+<span class="nav-item nav-subsection" data-anchor="e-2-three-confirmatory-conditions-for-esa-progression">E.2 — Three Confirmatory Conditions for ESA Progression</span>
+<span class="nav-item nav-section" data-anchor="section-f-ratings-summary-and-next-steps">SECTION F — RATINGS SUMMARY AND NEXT STEPS<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-six-master-ratings-triaging-first-pass">F.1 — Six Master Ratings</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-research-gaps">F.2 — Research Gaps</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-report-coverage">F.3 — Report Coverage</span>
+<span class="nav-item nav-subsection" data-anchor="f-4-monitoring-gates-triaging-esa-period">F.4 — Monitoring Gates (Triaging → ESA Period)</span>
+<span class="nav-item nav-subsection" data-anchor="f-5-wisdom-library-hot-wash">F.5 — Wisdom Library Hot-Wash<span class="nav-fc">3</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">ART-ES — Triaging A&amp;J Memo</div>
+      <div class="meta">Arteche Group S.A. | ART-ES | Triaging Stage Date: 29 June 2026 Analyst: Watson (Investment Analyst) Status: Triaging — Proceed to ESA</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">ART-ES</span> ART-ES — Triaging A&amp;J Memo — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 16-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<p><strong>Overall Triaging Grade: [B+]</strong> <strong>Verdict: Proceed to ESA — medium-high conviction</strong></p>
+<p>Arteche is a niche-dominant grid equipment maker — #2 HV instrument transformers globally, #1 auxiliary relays — with 1,500+ utility homologations that create durable barriers to entry. The 2025 results are exceptional: revenue +<strong>16%</strong> to €<strong>590m</strong>, EBITDA margin +<strong>310bps</strong> to <strong>15.80%</strong>, strategic targets hit one year early, leverage at <strong>0.28x</strong>. The SEG Electronics acquisition (June 2026, €<strong>50.6m</strong>, &gt;<strong>20%</strong> EBITDA) adds smart grid relay capability at an accretive margin profile. The structural demand driver — global grid investment to 2050 — is unambiguous.</p>
+<p>Against this, three flags merit ESA scrutiny: (1) FCF conversion compressed to <strong>32%</strong> from <strong>45%</strong> on working capital build — may foreshadow earnings quality deterioration; (2) combined CEO-Chair with <strong>52.4%</strong> family control and <strong>12.5%</strong> free float creates governance and liquidity risk; (3) sell-side coverage is thin and expert call pool is near-zero, limiting external validation. The FALSE FRIEND ACH (optical top-line masking underlying deterioration) is LOW probability at Triaging given consistent EBITDA delivery, but the FCF flag keeps it live for ESA testing.</p>
+<p>The investment case is simple and legible: niche moat + secular tailwind + honest-tracker management + clean balance sheet. ESA is the right next stage to verify FCF trajectory, governance tolerance, and valuation.</p>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-pillar-i-case-change-elements-e1-e5-e7-e8" data-spy><span class="id">B</span> PILLAR I: CASE CHANGE ELEMENTS (E1, E5, E7, E8) <span class="secn">21 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-case-change-forces-first-pass-2-format-floor-6-per-ra-cq" data-spy><span class="id">E1</span> Case Change Forces <span class="g gB">B</span> <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<p><strong>[E1] Overall: [B+]</strong></p>
+<p><strong>RA1 — Change Thesis (Is there genuine, material, durable change?)</strong></p>
+<p><strong>ANSWER: Yes — three interlocking change vectors with high plausibility; the thesis is real and not speculative.</strong></p>
+<p>The primary change is financial: Arteche has crossed a profitability inflection point. EBITDA margin moved from <strong>10.1%</strong> in FY2023 to <strong>15.8%</strong> in FY2025 — a <strong>570bps</strong> structural shift driven by operating leverage on growing revenue, active pricing discipline, and product mix rotation toward higher-margin renewables work. This is not a one-year event; the trajectory held across three consecutive years of delivery. The 2025 EBITDA of €<strong>80.5m</strong> is <strong>43.6%</strong> above FY2024's €<strong>56.0m</strong>, itself <strong>39%</strong> above FY2023.</p>
+<p>The secondary change is strategic: the company accelerated its 2024-2026 plan targets by one year. This signals execution discipline above the median; the management team is operating ahead of their own roadmap rather than behind it. The honest-tracker archetype is confirmed — management has beaten the upper bound of revenue guidance for four consecutive years, with EBITDA beat magnitude widening from <strong>0.33%</strong> in FY2022 to <strong>4.35%</strong> in FY2025.</p>
+<p>The tertiary change is inorganic: the SEG Electronics acquisition (June 2026, €<strong>50.6m</strong>) adds smart grid protection relay capability at &gt;<strong>20%</strong> EBITDA margins and <strong>15%</strong> organic growth. This is accretive to both margin and growth rate. Three earlier bolt-ons (RTR Energía for power quality capacitors, AMETS JV for Statcoms, Arin Technologies JV for substation virtualisation) broaden the addressable market without diluting the core balance sheet (leverage <strong>0.28x</strong>).</p>
+<p>The order backlog confirms forward momentum: €<strong>355m</strong> in FY2025 at a <strong>1.16x</strong> book-to-bill, covering ~<strong>64%</strong> of FY2026E guided revenue. The pipeline is not speculative — it is contracted.</p>
+<p><strong>CQ1.1 — Is the margin expansion structural or one-cycle?</strong> <strong>ANSWER: Structural, with three independent proof points.</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Direct margin expanded from <strong>32.1%</strong> in FY2023 to <strong>37.3%</strong> in FY2025 — consistent multi-year improvement driven by pricing discipline and lean manufacturing (<strong>170bps</strong> per year average), not commodity tailwinds.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Product mix shift: Network Reliability (higher margin renewables work) grew <strong>26.2%</strong> in FY2025 vs total group +<strong>16%</strong>; the faster-growing segment carries structurally superior margin.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Operating leverage: EBITDA grew <strong>43.6%</strong> on <strong>15.3%</strong> revenue growth — disproportionate profit capture confirming fixed-cost dilution, not variable cost reduction.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">Counter-signal: FCF conversion fell to <strong>32%</strong> from <strong>45%</strong> — working capital absorbed €<strong>11m</strong> (receivables +<strong>26%</strong>, inventories +<strong>11%</strong>). If this is investment-phase WC rather than structural deterioration, the margin thesis holds. ESA must resolve this.</div></div>
+<p><strong>CQ1.2 — Is the demand environment durable or a peak cycle?</strong> <strong>ANSWER: Durable — structural grid investment; backlog confirms it.</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">Global net-zero transition requires €<strong>21.4 </strong>trillion of grid investment by 2050 (ARS). Data-centre electricity demand growth adds a second independent demand vector.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Book-to-bill <strong>1.16x</strong> at record €<strong>355m</strong> backlog is not a peak-cycle artefact — it reflects committed utility capex programmes rather than spot demand.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">Renewable energy projects in Australia (delayed 2024) are recovering in 2025; regional lumpiness does not negate the structural direction.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext">Expert call coverage is zero — a data scarcity risk that leaves the demand view unvalidated by primary research. This is the most significant epistemic gap in the thesis.</div></div>
+<p><strong>CQ1.3 — Does the inorganic programme create or destroy value?</strong> <strong>ANSWER: Net value-creating at current evidence, but integration complexity is real.</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext">SEG Electronics: &gt;<strong>20%</strong> EBITDA, <strong>15%</strong> organic growth, expands smart relay capability; accretive to group margins and strategically coherent.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext">RTR Energía (€<strong>10.6m</strong>): added 10,000m² manufacturing, access to 70 countries, contributed €<strong>6.13m</strong> reliability sales in first partial year — a small but clean bolt-on.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext">AMETS JV (€<strong>527k</strong> cash outlay): negligible capital, optionality on Statcom market.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext">Risk: four concurrent inorganic programmes (SEG, RTR, AMETS, Arin) operating simultaneously may strain a management team running a €<strong>590m</strong> group with a ~110 FTE leadership layer. This is real. ESA should probe management bandwidth.</div></div>
+<p><strong>RA2 — Thesis Fragility (What breaks the thesis?)</strong></p>
+<p><strong>ANSWER: Two primary break points; both manageable but requiring ESA verification.</strong></p>
+<p><strong>CQ1.4 — What is the FCF deterioration telling us?</strong> <strong>ANSWER: Ambiguous — investment-phase WC or quality deterioration; must resolve at ESA.</strong></p>
+<p>FCF conversion at <strong>32%</strong> vs <strong>45%</strong> prior year is the single most important unanswered question in the ART-ES case. The components: receivables +€<strong>19.3m</strong> (<strong>26%</strong> rise on <strong>16%</strong> revenue growth — faster than revenue), inventories +€<strong>8.3m</strong> (<strong>11%</strong> rise). Two interpretations: (i) Tepeji del Rio ramp-up and SEG integration are consuming pre-shipment WC — common in capex-intensive expansion phases; or (ii) the business is extending credit to close deals and building inventory against a demand slowdown not yet visible in order data. The factoring (non-recourse) partly transfers insolvency risk, but the gross receivables build requires explanation. FCF of €<strong>25.8m</strong> held flat despite EBITDA growing from €<strong>56m</strong> to €<strong>80m</strong> — the delta (€<strong>24m</strong>) went entirely into WC and higher capex (€<strong>25m</strong>, +<strong>29.5%</strong>).</p>
+<p><strong>CQ1.5 — Is the governance discount structurally priced or a real risk?</strong> <strong>ANSWER: Real risk, but mitigated by long-term alignment and conservative capital allocation.</strong></p>
+<p>The combined CEO-Chair structure (Alexander Artetxe Panera, third-generation family member), <strong>52.4%</strong> family stake, and <strong>12.5%</strong> free float create a governance discount that is unusual by European standards. Mitigants: (i) the family's interests are aligned with long-term value (generational stewardship incentive); (ii) the Coordinating Director role exists explicitly to counter combined CEO-Chair power; (iii) capital allocation has been conservative (<strong>0.28x</strong> leverage, self-funded model, dividend discipline). The governance risk is real for a minority investor but is unlikely to be the thesis-killer — it is more a valuation ceiling than a binary risk. The free-float target of <strong>20%</strong> from <strong>12.5%</strong> is a positive directional signal.</p>
+<p><strong>E1 Grade: [B+]</strong> — change thesis is real, multi-dimensional, and substantiated; FCF/WC and governance are the two live questions for ESA.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-first-pass-2-format-floor-6" data-spy><span class="id">E5</span> Thematic Fit <span class="g gA">A</span> <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">3 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<p><strong>[E5] Overall: [A-]</strong></p>
+<p><strong>[THEMATICS PAUSE — stale-frame caveat applies]</strong></p>
+<p><strong>RA1 — Primary Thematic Alignment</strong></p>
+<p><strong>ANSWER: Strong alignment across three primary grid themes; the thematic fit is one of the cleanest in the universe.</strong></p>
+<p><strong>CQ5.1 — Where does Arteche sit in the grid-hardening value chain?</strong> <strong>ANSWER: Upstream equipment layer — instrument transformers and relays — the enabling infrastructure without which grid expansion cannot happen.</strong></p>
+<p>Arteche makes the instruments that measure, protect, and control power flow through HV and MV substations. Without instrument transformers and protective relays, substations cannot safely operate — this is a prerequisite product category for every substation expansion globally, not a discretionary add-on. Every new transmission line, renewable connection, and data-centre grid connection requires Arteche's product set. The thematic fit is structural, not incidental.</p>
+<p><strong>CQ5.2 — How broad is the thematic exposure?</strong> <strong>ANSWER: Three independent demand vectors; diversified thematic exposure.</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Grid hardening / energy transition: <strong>35%</strong>+ of revenues from renewable integration projects; HV instrument transformers in every new substation.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Grid digitalisation: Arin Technologies JV (substation virtualisation), Grid Automation segment (€<strong>86m</strong>, <strong>17%</strong> of revenue), Uptech Sensing stake (optical monitoring).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">Emerging market electrification: <strong>19%</strong> APAC revenue growth in 2025 (€<strong>88.8m</strong>); Indonesia, Turkey market entry via Esitas/SDO acquisitions; Latin America <strong>14%</strong> of sales.</div></div>
+<p><strong>CQ5.3 — How does the SF6-free transition affect thematic credibility?</strong> <strong>ANSWER: Positive differentiator; accelerates regulatory-driven switching.</strong></p>
+<p>The SF6-free product roadmap (<strong>39%</strong> of mix achieved vs <strong>22.8%</strong> in prior year; <strong>100%</strong> target by 2030) is a genuine first-mover advantage as European regulators phase out fluorinated gases. Utilities facing SF6 mandates have a concentrated set of approved alternatives suppliers; Arteche's 24kV medium-voltage family is already commercially available. This is a share-gain driver within the existing customer base.</p>
+<p><strong>RA2 — Thematic Risk Assessment</strong></p>
+<p><strong>ANSWER: No material thematic risk; ART-ES is a structural beneficiary not a cyclical play on energy transition sentiment.</strong></p>
+<p><strong>CQ5.4 — Is the thematic exposure to sentiment or to physical infrastructure spending?</strong> <strong>ANSWER: Physical infrastructure — utility capex commitments, not sentiment.</strong></p>
+<p>Unlike pure-play thematic ETF plays, Arteche's revenue is tied to actual substation construction and grid connection capex — not investor sentiment about clean energy. The €<strong>355m</strong> backlog represents contracted orders, not pipeline sentiment. Utility capex programmes are multi-year commitments that do not reverse with interest rate or sector rotation moves. This makes the thematic exposure durable.</p>
+<p><strong>E5 Grade: [A-]</strong> — one of the cleaner thematic fits in the universe; three independent demand vectors; all structural not cyclical. Paused caveat applies to grade.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-case-simplicity-and-legibility-first-pass-2-format-floor-" data-spy><span class="id">E7</span> Case Simplicity and Legibility <span class="g gB">B</span> <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<p><strong>[E7] Overall: [B+]</strong></p>
+<p><strong>RA1 — Thesis Simplicity</strong></p>
+<p><strong>ANSWER: The core thesis is legible in one sentence; the complications are real but not core.</strong></p>
+<p>The one-line thesis: Arteche is the niche-dominant maker of grid measurement and protection equipment — a product category required by every substation globally — benefiting from a structural multi-decade grid investment cycle, with a proven management team and a clean balance sheet.</p>
+<p>This is a simple structural beneficiary case. The demand driver is non-optional. The moat is verifiable (1,500+ utility homologations, 30+ year customer relationships, #2 HV instrument transformer market position globally). The management track record is public and consistent (honest-tracker archetype confirmed across four years). The balance sheet is conservative (<strong>0.28x</strong> leverage).</p>
+<p><strong>CQ7.1 — What are the complicating factors that reduce legibility?</strong> <strong>ANSWER: Three — governance structure, thin liquidity, and the SEG integration — none core to the thesis.</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Governance: combined CEO-Chair and <strong>52.4%</strong> family stake are unusual but do not change the fundamental business quality analysis.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext">Liquidity: <strong>12.5%</strong> free float means building a meaningful position requires patience and price sensitivity; the stock is thinly traded. This is a position-sizing constraint, not a thesis question.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext">SEG Electronics integration: the most recent major move (June 2026, €<strong>50.6m</strong>) is not yet in reported numbers; its margin accretion is guided but not proven. This is the one genuine open question on the inorganic programme.</div></div>
+<p><strong>CQ7.2 — Does the multi-JV inorganic programme cloud the story?</strong> <strong>ANSWER: Moderately — four concurrent inorganic moves is more complex than ideal, but each is small relative to the group.</strong></p>
+<p>RTR (€<strong>10.6m</strong>), AMETS (€<strong>0.5m</strong>), Arin (minor), SEG (€<strong>50.6m</strong>). Total cumulative inorganic spend ~€<strong>62m</strong> against a group with €<strong>80m</strong> annual EBITDA and <strong>0.28x</strong> leverage. The moves are sized appropriately — none individually threatens the balance sheet. The risk is execution complexity, not financial stress.</p>
+<p><strong>RA2 — Legibility for Monitoring</strong></p>
+<p><strong>ANSWER: Easy to monitor — two or three metrics cover the thesis.</strong></p>
+<p><strong>CQ7.3 — What is the minimum-viable monitoring set?</strong> <strong>ANSWER: FCF conversion, EBITDA margin trajectory, and order intake/book-to-bill.</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext">FCF conversion recovery toward <strong>40%</strong>+ would confirm the WC build was investment-phase; failure to recover would activate the earnings quality alert.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext">EBITDA margin holding at <strong>15%</strong>+ on growing revenue confirms the structural expansion thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext">Book-to-bill above <strong>1.0x</strong> confirms demand durable; below <strong>1.0x</strong> for two consecutive periods would be an early warning.</div></div>
+<p><strong>E7 Grade: [B+]</strong> — thesis is legible and monitorable; the complicating factors (governance, liquidity, SEG integration) are real but peripheral to the core case.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-setup-fit-first-pass-floor-3" data-spy><span class="id">E8</span> Setup Fit <span class="g gC">C</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<p><strong>[E8] Overall: [C+]</strong></p>
+<p><strong>ANSWER: Setup fit is the weakest element of the Triaging case; thin liquidity and full valuation constrain the setup.</strong></p>
+<p>Three setup considerations:</p>
+<p><strong>Liquidity:</strong> Free float at <strong>12.5%</strong> of a ~€<strong>700m</strong> market cap implies ~€<strong>87m</strong> of freely tradeable stock. For a meaningful position, this creates execution risk — building or exiting over months rather than weeks. Management has guided toward <strong>20%</strong> free float expansion, but no timeline is given.</p>
+<p><strong>Valuation timing:</strong> P/E at <strong>31.5x</strong> at the 100th universe percentile means there is no valuation cushion. The market is already pricing in execution of the FY2026 guidance (€<strong>87.7</strong>-95.4m EBITDA). Any FY2026 delivery shortfall — particularly if WC deterioration continues — would compress the multiple sharply. The entry point is full; there is no obvious near-term catalyst to revalue higher (SEG is already announced; FY2025 results are digested).</p>
+<p><strong>Monitoring accessibility:</strong> The lack of sell-side coverage and zero expert calls means Arteche requires proprietary primary research to stay current. The AS pool is thin. This is a high-effort, low-external-validation setup — appropriate for a specialist investor but demanding on research infrastructure.</p>
+<p><strong>E8 Grade: [C+]</strong> — setup is workable for a patient, specialist investor but not opportunistic; liquidity and valuation are genuine constraints.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-ii-case-building-blocks-e9-e11-e12-e13" data-spy><span class="id">C</span> PILLAR II: CASE BUILDING BLOCKS (E9, E11, E12, E13) <span class="secn">3 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e9-operator-quality-first-pass-floor-3" data-spy><span class="id">E9</span> Operator Quality <span class="g gA">A</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<p><strong>[E9] Overall: [A-]</strong></p>
+<p><strong>ANSWER: Management quality is high — honest-tracker archetype confirmed, four consecutive years of delivery, conservative capital allocation, track record of early target achievement.</strong></p>
+<p>Three dimensions assessed:</p>
+<p><strong>Forecasting credibility:</strong> Four consecutive years meeting or exceeding the upper bound of revenue guidance, with EBITDA beat magnitude widening from <strong>0.33%</strong> to <strong>4.35%</strong>. This is the definitional honest-tracker. No evidence of sandbagging (beats are narrow to modest, not systematically large). No evidence of aggressive over-promising (guidance ranges are realistic and achieved).</p>
+<p><strong>Capital allocation:</strong> Self-funded model (capex from operating cash flow). Conservative leverage trajectory (<strong>1.63x</strong> in 2022 → <strong>0.28x</strong> in 2025). Dividend up <strong>93%</strong> mirroring net income growth — no leverage-funded shareholder returns. R&amp;D at <strong>3.5%</strong> of revenue. The allocation decisions reflect long-term stewardship consistent with founding-family incentives.</p>
+<p><strong>Governance flag:</strong> CEO Artetxe holds combined Chairman and CEO roles (combined since at least 2021). This creates a single point of decision risk and limits Board independence on management oversight. The Coordinating Director provides partial mitigation. The governance flag lowers the ceiling on the operator grade but does not negate the execution track record.</p>
+<p><strong>E9 Grade: [A-]</strong> — strong execution and capital discipline; governance concentration is the primary flag.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-value-chain-position-first-pass-light-floor-3" data-spy><span class="id">E11</span> Value Chain Position <span class="g gA">A</span> <span class="secn">3 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<p><strong>[E11] Overall: [A-]</strong></p>
+<p><strong>ANSWER: Arteche occupies a high-value, well-defended position in the middle of the grid equipment value chain; it avoids both the commodity upstream and the commoditising downstream.</strong></p>
+<p>Value chain map:</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Upstream (raw materials):</strong> Copper, aluminium, steel — commodity inputs with pricing volatility. Arteche manages via contractual pass-through clauses on the majority of supply contracts; hedging derivatives for residual FX/commodity exposure.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Arteche's position:</strong> Measurement &amp; Monitoring (<strong>72.5%</strong> of revenue) sits at the instrument/sensor layer — custom-engineered, utility-homologated, safety-critical. Grid Automation (<strong>17%</strong>) — protection relays and control systems — sits at the intelligence layer. Network Reliability (<strong>11%</strong>) — capacitors, harmonic filters — sits at the power quality layer. All three segments are mid-chain: above raw material volatility, below commoditised installation services.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream (utilities/EPCs):</strong> Arteche sells to utilities (<strong>27%</strong>), EPCs (<strong>25%</strong>), OEMs (<strong>20%</strong>), and distributors. Customer concentration is not disclosed as a specific risk — the 1,500+ utility homologation base implies broad customer distribution.</div></div>
+<p><strong>Moat depth:</strong> The homologation barrier (2-5 years to qualify a new supplier per utility) creates switching costs that are structurally durable. Once homologated, Arteche's products are embedded in utility procurement frameworks under multi-year agreements (Iberdrola relationship &gt;30 years). The <strong>30%</strong> US HV market share reinforces concentration in a high-barrier segment.</p>
+<p><strong>E11 Grade: [A-]</strong> — excellent value chain position; pricing power confirmed by direct margin expansion to <strong>37.3%</strong> despite copper/aluminium inflation; moat is structural.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e12-industry-structure-first-pass-4-on-ra1-floor-12" data-spy><span class="id">E12</span> Industry Structure <span style="font-size:10px;opacity:.75;font-weight:600">(×4)</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<p><strong>[E12] Overall: <span class="g gA">A</span></strong></p>
+<p><strong>RA1 — Industry Concentration and Competitive Dynamics (×4, floor 12)</strong></p>
+<p><strong>ANSWER: The instrument transformer and protective relay industry is a benign oligopoly with high entry barriers; Arteche's niche positions are defensible.</strong></p>
+<p><strong>CQ12.1 — Who are the global competitors in HV instrument transformers?</strong> <strong>ANSWER: A short list of 4-6 credible global players; Arteche at #2 is structurally secure.</strong></p>
+<p>The global HV instrument transformer market is served by: ABB/Hitachi Energy (#1), Arteche (#2), Trench Group (Siemens Energy subsidiary), GE Vernova, and a handful of Asian regional specialists (China, India domestic). This is not a fragmented market. Arteche's <strong>30%</strong> US HV market share is remarkable for a Spanish company of this scale — it reflects decades of homologation investment and customer relationship management that a new entrant cannot replicate quickly. The Hitachi partnership (Arteche Energy Manufacturing, <strong>51%</strong> Arteche) provides additional access to Hitachi's technology and distribution without ceding control.</p>
+<p><strong>CQ12.2 — What prevents Tier-1 giants (ABB, Siemens, GE) from taking share?</strong> <strong>ANSWER: They operate different market segments; Arteche's hybrid Tier-1/Tier-2 model occupies a differentiated niche.</strong></p>
+<p>The Tier-1 giants operate at scale — they cannot profitably serve the custom, low-volume, high-specification end of the instrument transformer market that Arteche has built its homologation base around. Arteche's "hybrid model" (Tier-1 global reach, Tier-2 operational agility) allows it to serve complex customer specifications that large-scale players struggle to accommodate. The 1,500+ utility homologations reflect individual customer certifications — the Tier-1 giants have far fewer, not more, in the mid-market segment.</p>
+<p><strong>CQ12.3 — Is the auxiliary relay market similarly concentrated?</strong> <strong>ANSWER: Yes — Arteche is global leader; protective relay market is technically complex with long qualification cycles.</strong></p>
+<p>Auxiliary relays (control, signalling, and protection in substation automation) is a technical niche where Arteche's #1 global position is reinforced by the Grid Automation segment's 30-year customer relationships. SEG Electronics (acquired June 2026) adds smart grid protection relays — an adjacent product with similar moat characteristics but growing faster (<strong>15%</strong> organic growth vs group <strong>14%</strong>).</p>
+<p><strong>CQ12.4 — What is the pricing power evidence?</strong> <strong>ANSWER: Confirmed by direct margin expansion of 170bps to 37.3% despite commodity inflation; contractual pass-through clauses protect against input cost cycles.</strong></p>
+<p>The direct margin expansion from <strong>35.6%</strong> (FY2024) to <strong>37.3%</strong> (FY2025) in an environment of documented copper and aluminium cost pressure is the strongest evidence of structural pricing power. Pass-through clauses on the majority of supply contracts protect the gross margin from commodity cycles. Individual pricing strategies (per customer segment) allow Arteche to capture margin on its most differentiated products without across-the-board price increases.</p>
+<p><strong>RA2 — Structural Growth and Secular Demand</strong></p>
+<p><strong>ANSWER: Industry structure is reinforced by a multi-decade demand tailwind; the market will grow structurally, not cyclically.</strong></p>
+<p><strong>CQ12.5 — What is the long-term demand outlook for grid equipment?</strong> <strong>ANSWER: Unambiguous structural growth — the question is execution speed, not direction.</strong></p>
+<p>The grid investment theme is backed by: €<strong>21.4 </strong>trillion net-zero grid investment through 2050; data-centre electricity demand potentially doubling global power consumption by 2050; renewable integration requiring substation expansion at every grid connection point. Arteche is not making a cyclical bet on short-term utility capex; it is positioned at the foundation of a 25-year structural infrastructure build.</p>
+<p><strong>CQ12.6 — Is there a disruption risk to the instrument transformer model?</strong> <strong>ANSWER: Low — optical sensing and digital substations are adjacent expansions, not threats to the measurement layer.</strong></p>
+<p>Arteche has proactively invested in the next layer: the Uptech Sensing stake (<strong>35%</strong>, €<strong>11m</strong>, optical monitoring) and the Arin Technologies JV (substation virtualisation) position it to participate in the digital substation transition rather than be disrupted by it. The Guayubin 345kV digital substation commissioning proves real-time signal transmission capability. The disruption risk is low for a company actively investing in the disruptor technologies.</p>
+<p><strong>E12 Grade: <span class="g gA">A</span></strong> — benign oligopoly structure; #2 global position; durable pricing power confirmed; secular tailwind structurally intact.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e13-secular-growth-first-pass-floor-3" data-spy><span class="id">E13</span> Secular Growth <span class="g gA">A</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<p><strong>[E13] Overall: [A-]</strong></p>
+<p><strong>ANSWER: Secular growth driver is one of the strongest in the Viewforth universe; grid investment is a 25-year theme with confirmed near-term order momentum.</strong></p>
+<p>Three growth vectors are independently validated:</p>
+<p><strong>Grid transition:</strong> Every new renewable connection, EV charging hub, and data-centre power supply requires substation equipment. Arteche's products are in the critical path. This is not optional spending; utilities must expand grid capacity to meet regulatory targets and demand growth. The 2025 book-to-bill of <strong>1.16x</strong> at €<strong>355m</strong> backlog confirms this is translating into orders, not just commentary.</p>
+<p><strong>Electrification:</strong> Global electricity consumption growth (data centres, EVs, industrial electrification) accelerates the grid investment cycle that was already underway from the energy transition. This is an additive demand driver, not a substitute.</p>
+<p><strong>Geographic expansion:</strong> <strong>19%</strong> APAC growth in 2025 (€<strong>88.8m</strong>) and <strong>30%</strong> US HV market share confirm the secular growth is multi-regional. The Tepeji del Rio facility expansion (<strong>25%</strong> North American capacity increase, commissioned November 2025) positions Arteche to capture the US infrastructure investment cycle (Inflation Reduction Act-driven utility capex).</p>
+<p><strong>E13 Grade: [A-]</strong> — secular growth driver is confirmed, multi-regional, and backed by contracted backlog.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-first-pass" data-spy><span class="id">D</span> PILLAR III: INVESTMENT CASE <span class="secn">4 findings</span></div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<p><strong>D.I — Business Quality Summary</strong></p>
+<p>Arteche's business quality is high:</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Industry structure:</strong> Benign oligopoly (#2 HV instrument transformers globally, #1 auxiliary relays). <span class="g gA">A</span></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Moat:</strong> Utility homologation barrier (1,500+ certifications, 2-5 year qualification cycles); 30+ year customer relationships; #2 global market position that took decades to build. [A-]</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Operator:</strong> Honest-tracker archetype confirmed over four years; conservative capital allocator; governance flag (combined CEO-Chair, <strong>52.4%</strong> family). [A-]</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Financial quality:</strong> Revenue CAGR ~<strong>16%</strong> FY2023-25; EBITDA margin +<strong>570bps</strong> over two years; leverage <strong>0.28x</strong>; clean balance sheet. FCF conversion flag (<strong>32%</strong> vs <strong>45%</strong>) is the one open quality question.</div></div>
+<p><strong>Pillar III.I Grade: [A-]</strong></p>
+<p><strong>D.II — Change Thesis Assessment</strong></p>
+<p>The change thesis (E1) is real and multi-dimensional: profitability inflection (<strong>10.1%</strong> → <strong>15.8%</strong> EBITDA margin), strategic plan ahead of schedule, accretive inorganic expansion (SEG Electronics). The thesis is not dependent on a single macro event — it is an execution story on a structural demand platform.</p>
+<p>The primary fragility: FCF conversion compression. If WC build is structural (receivables permanently growing faster than revenue, inventories building without turnover), the margin expansion is partially offset by earnings quality deterioration. This must be the central question at ESA.</p>
+<p><strong>Pillar III.II Grade: [B+]</strong></p>
+<p><strong>D.III — Risk-Reward Assessment (Triaging First Pass)</strong></p>
+<p><strong>Price context:</strong> ART-ES P/E <strong>31.5x</strong>, EPS (24mf) €<strong>1.29</strong>. No price data from pipeline. Valuation is at the 100th percentile of the Viewforth universe.</p>
+<p><strong>Bull scenario:</strong> EBITDA margin holds <strong>15.5%</strong>+ through FY2026 on guided €<strong>87.7</strong>-95.4m EBITDA; FCF conversion recovers toward <strong>40%</strong>; SEG Electronics integrates cleanly; North American capex cycle sustains order growth. The business de-rates to <strong>25x</strong> P/E on a higher earnings base — total return positive over 2-3 years.</p>
+<p><strong>Bear scenario:</strong> WC build continues into FY2026; EBITDA guidance of €<strong>87.7</strong>-95.4m is missed; FCF compression forces a dividend cut or M&amp;A pause; multiple de-rates to <strong>20x</strong> on earnings quality concern. With €<strong>1.29 </strong>EPS consensus, a <strong>20x</strong> multiple implies ~<strong>30%</strong> downside from the current valuation.</p>
+<p><strong>Triaging risk-reward:</strong> Asymmetric setup is not yet established at current valuation. The case requires ESA to assess: (a) whether FCF recovery is on track, (b) whether governance tolerance is acceptable, (c) whether SEG integration is proceeding to plan. These are knowable at ESA.</p>
+<p><strong>Pillar III.III Grade: <span class="g gB">B</span></strong> — risk-reward is not clearly positive at current valuation; ESA must sharpen it.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-false-friend-ach-evaluation-and-esa-conditions" data-spy><span class="id">E</span> FALSE FRIEND ACH EVALUATION AND ESA CONDITIONS</div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-1-false-friend-ach-assessment" data-spy><span class="id">E.1</span> False Friend ACH Assessment</div>
+<div class="desc">Overall Assessment -- The headline ESA grade, key pillar ratings driving it, and a plain-English verdict: go to Deep Dive, monitor, or close.</div>
+<p><strong>FALSE FRIEND ACH: LOW-MEDIUM probability at Triaging stage</strong></p>
+<p>The False Friend ACH asks: is the reported top-line growth masking underlying deterioration?</p>
+<p><strong>Evidence AGAINST the FALSE FRIEND (disconfirming items):</strong> 1. EBITDA margin expanded <strong>310bps</strong> — structural improvement confirmed by three-year trajectory, not a one-period anomaly. 2. Honest-tracker archetype confirmed across four years — management does not manufacture beats by sandbagging; the guidance-to-actual pattern is narrow and consistent. 3. Direct margin expansion to <strong>37.3%</strong> on commodity cost headwinds — pricing power confirmed independently of revenue growth. 4. Backlog at €<strong>355m</strong>, <strong>1.16x</strong> book-to-bill — forward demand is contracted, not aspirational. 5. Leverage declined from <strong>0.47x</strong> to <strong>0.28x</strong> — balance sheet quality improving, not degrading.</p>
+<p><strong>Evidence FOR the FALSE FRIEND (confirming items):</strong> 1. FCF conversion fell from <strong>45%</strong> to <strong>32%</strong> — EBITDA growing but cash not following at the same rate; the largest single warning signal. 2. Trade receivables +<strong>26%</strong> on +<strong>16%</strong> revenue — growth faster than revenue; could indicate extended credit to push sales or slow collections. 3. Zero expert calls in 36-month AS pool — thin external validation; the false friend hypothesis has not been challenged by independent expert diligence.</p>
+<p><strong>Verdict:</strong> At Triaging, the balance of evidence is against the False Friend — three years of consistent margin expansion, an honest-tracker management archetype, and a contracted backlog make it unlikely that the top line is masking underlying deterioration. However, the FCF signal is real and must be resolved at ESA. The False Friend hypothesis is LOW probability but LIVE.</p>
+<p><strong>Disconfirming item count: 5 against, 3 for — hypothesis not falsified; monitoring required at ESA.</strong></p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-2-three-confirmatory-conditions-for-esa-progression" data-spy><span class="id">E.2</span> Three Confirmatory Conditions for ESA Progression</div>
+<div class="desc">Pre-Conditions Before Acting -- The specific gating events or conditions that must be satisfied before initiating or sizing a position.</div>
+<p><strong>CONDITION 1 — FCF quality verification</strong> ESA must obtain FY2026 H1 (or Q1 2026 if available) working capital data to determine whether receivables and inventory normalise as a % of revenue. A FCF conversion recovery toward <strong>40%</strong> in the next reporting period would confirm the WC build was investment-phase. Failure to recover would activate an earnings quality review.</p>
+<p><strong>CONDITION 2 — SEG Electronics integration tracking</strong> SEG Electronics closed June 2026. ESA must assess: (a) the acquisition rationale vs the Grid Automation segment's existing relay business (avoid duplication); (b) first-half integration progress; (c) whether &gt;<strong>20%</strong> EBITDA margin and <strong>15%</strong> organic growth guidance is confirmed or revised. A smooth integration supports the inorganic thesis; any early profit-warning or integration complexity signals would require re-evaluation.</p>
+<p><strong>CONDITION 3 — Governance tolerance assessment</strong> ESA must explicitly assess whether the combined CEO-Chair structure, <strong>52.4%</strong> family control, and <strong>12.5%</strong> free float are within the investment mandate's governance tolerance. This requires a clear determination of: (a) whether the Viewforth universe criteria accommodate this governance profile; (b) whether the liquidity profile is compatible with position sizing; (c) what the realistic entry and exit horizon looks like at <strong>12.5%</strong> free float. If governance or liquidity falls outside tolerance, ART-ES should be parked regardless of business quality.</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-ratings-summary-and-next-steps" data-spy><span class="id">F</span> RATINGS SUMMARY AND NEXT STEPS <span class="secn">3 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-six-master-ratings-triaging-first-pass" data-spy><span class="id">F.1</span> Six Master Ratings</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Rating</th><th>Grade</th><th>Notes</th></tr></thead><tbody><tr><td><strong>MR1</strong> Technical Momentum</td><td>[N/A]</td><td>Pipeline data not available; flag for ESA</td></tr><tr><td><strong>MR2</strong> Sell-Side Earnings Momentum</td><td>[B]</td><td>L6M positive (+14 EPS, +38 TP); L1M flat; 67% buy</td></tr><tr><td><strong>MR3</strong> Thematic Fit</td><td>[PAUSED]</td><td>Likely [A] under active assessment; stale frame applies</td></tr><tr><td><strong>MR4</strong> Pillar I — Case Change</td><td>[B+]</td><td>Real multi-dimensional change; FCF/WC flag active</td></tr><tr><td><strong>MR5</strong> Pillar II — Case Building</td><td>[A-]</td><td>Strong industry structure, operator, value chain</td></tr><tr><td><strong>MR6</strong> Pillar III — Investment Case</td><td>[B+]</td><td>Business quality high; risk-reward tighter than ideal at 31.5x</td></tr></tbody></table>
+<p><strong>Overall Triaging Grade: [B+]</strong> <strong>Decision: Proceed to ESA — medium-high conviction</strong></p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-research-gaps" data-spy><span class="id">F.2</span> Research Gaps</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>1. <strong>Prices and RS percentile:</strong> No pipeline data; requires direct market data sourcing at ESA. 2. <strong>Zero expert calls (36-month AS pool):</strong> The thin expert coverage is the most significant epistemic gap. ESA should initiate primary research sourcing (industry experts, former Arteche employees, utility procurement managers) to triangulate the competitive position claims. 3. <strong>SEG Electronics Q1 integration data:</strong> Acquisition closed June 2026; no reported financial data yet. ESA must wait for H1 2026 results (typically August/September 2026) for initial integration read. 4. <strong>FY2026 H1 order intake:</strong> Confirms whether book-to-bill <strong>1.16x</strong> trend holds; key demand verification datapoint. 5. <strong>FCF trajectory (Q1/H1 2026):</strong> Central open question; requires next reporting period data.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-report-coverage" data-spy><span class="id">F.3</span> Report Coverage</div>
+<table><thead><tr><th>Report</th><th>File</th><th>Status</th></tr></thead><tbody><tr><td>41-CF (Change Forces)</td><td><code>41-change-forces/raw-AS.md</code></td><td>Read — full coverage</td></tr><tr><td>42-BF (Business Foundations)</td><td><code>42-business-foundations/raw-AS.md</code></td><td>Read — full coverage</td></tr><tr><td>43-LF (Leadership Foundations)</td><td><code>43-leadership-foundations/</code></td><td>Not found in directory — gap</td></tr><tr><td>44-RK (Risks)</td><td><code>44-risks/</code></td><td>Not found in directory — gap</td></tr><tr><td>Old-era Triaging files</td><td><code>ART-ES_04/05/06/07_*_AS.md</code></td><td>Available; not read (superseded by CF/BF 2025 data)</td></tr></tbody></table>
+<p><strong>Note:</strong> 43-LF and 44-RK files are absent from the directory tree. The leadership and risk assessment in this memo is derived from CF and BF sources, which contain relevant leadership and risk commentary. Formal 43-LF and 44-RK reports should be commissioned and read before DD P1 (not blocking for ESA).</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-4-monitoring-gates-triaging-esa-period" data-spy><span class="id">F.4</span> Monitoring Gates (Triaging → ESA Period)</div>
+<p>Three monitoring gates to watch before ESA begins:</p>
+<p>1. <strong>H1 2026 results (August/September 2026):</strong> FCF conversion trajectory, SEG Electronics first contribution, EBITDA margin vs €<strong>87.7</strong>-95.4m guidance range. 2. <strong>Order intake update:</strong> Next book-to-bill reading; confirms <strong>1.16x</strong> is sustained. 3. <strong>Free float expansion news:</strong> Any announcement of share placement or family sell-down toward <strong>20%</strong> free float target.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-5-wisdom-library-hot-wash" data-spy><span class="id">F.5</span> Wisdom Library Hot-Wash <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Watson — Investment Analyst | ART-ES Triaging Memo | 29 June 2026</div><div class="lead-prose">Proceed to ESA: YES | Conviction: Medium-High | Next review: H1 2026 results (Aug/Sep 2026)</div></div>
+<p><strong>Applicable models consulted:</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Honest-Tracker Archetype:</strong> Confirmed for Arteche — four-year track record of guidance-to-actuals with widening beat. Consistent with the archetype's prediction that management provides realistic guidance with modest positive surprise rather than sandbagging or over-promising.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Niche Moat via Regulatory Barrier:</strong> The homologation model is the textbook regulatory-barrier moat — not created by government protection of Arteche directly, but by the technical certification requirements that utilities impose on all suppliers. 1,500+ certifications = 1,500+ individual switching cost instances.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>FCF Divergence Warning:</strong> The EBITDA-to-FCF gap (EBITDA grew €<strong>24m</strong>; FCF flat at €<strong>25.8m</strong>) is the classic earnings-quality early warning signal. History suggests this resolves either by WC normalisation (investment-phase) or by progressive FCF deterioration (quality issue). The resolution determines whether the margin expansion thesis is real or partially illusory.</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"E1":{"grade":"B","label":"Case Change Forces (First Pass, ×2 format, floor 6 per RA/CQ)"},"E5":{"grade":"A","label":"Thematic Fit (First Pass, ×2 format, floor 6)"},"E7":{"grade":"B","label":"Case Simplicity and Legibility (First Pass, ×2 format, floor 6)"},"E8":{"grade":"C","label":"Setup Fit (First Pass, floor 3)"},"E9":{"grade":"A","label":"Operator Quality (First Pass, floor 3)"},"E11":{"grade":"A","label":"Value Chain Position (First Pass light, floor 3)"},"E13":{"grade":"A","label":"Secular Growth (First Pass, floor 3)"}};window.MEMO_GRANULAR={"master":[],"pillars":[{"roman":"I","label":"CASE CHANGE ELEMENTS (E1, E5, E7, E8)","grade":null,"elements":[{"code":"E1","label":"Case Change Forces (First Pass, ×2 format, floor 6 per RA/CQ)","grade":"B","ras":[]},{"code":"E5","label":"Thematic Fit (First Pass, ×2 format, floor 6)","grade":"A","ras":[]},{"code":"E7","label":"Case Simplicity and Legibility (First Pass, ×2 format, floor 6)","grade":"B","ras":[]},{"code":"E8","label":"Setup Fit (First Pass, floor 3)","grade":"C","ras":[]}],"groups":[]},{"roman":"II","label":"CASE BUILDING BLOCKS (E9, E11, E12, E13)","grade":null,"elements":[{"code":"E9","label":"Operator Quality (First Pass, floor 3)","grade":"A","ras":[]},{"code":"E11","label":"Value Chain Position (First Pass light, floor 3)","grade":"A","ras":[]},{"code":"E12","label":"Industry Structure (First Pass, ×4 on RA1, floor 12)","grade":null,"ras":[]},{"code":"E13","label":"Secular Growth (First Pass, floor 3)","grade":"A","ras":[]}],"groups":[]},{"roman":"III","label":"INVESTMENT CASE (First Pass)","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

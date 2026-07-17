@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — DCC plc (DCC-GB) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">34</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">12</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-c">MR1 — Technical momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-b">MR2 — Sell-side earnings momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-b">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">71</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">15</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">13</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-change-forces-b" data-element-id="element-e1-required-input-change-forces-b">E1 RA1 — Change forces?<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-robust-base-b" data-element-id="element-e1-required-input-change-forces-b">E1 RA2 — Robust base?<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr">Element E2 — Required case outputs [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr">Element E3 — Sufficient TSR / valuation upside [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">55</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">17</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr-carried-forward">Element E4 — Technical momentum [NR — carried forward]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">15</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr">Element E6 — Sell-side earnings momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-b">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill B">B</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-nr-light-framing-only">Group 4 — Case riskiness [NR — light framing only]<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-3-pillar-iii-investment-case-components-nr">C.3 — Pillar III: Investment Case Components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components-nr">Section D — Pillar III: Investment Case Components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">7</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices</span>
+<span class="nav-item nav-subsection" data-anchor="f-1-grade-summa">F.1 — Grade Summa</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — DCC plc (DCC-GB) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">DCC-GB</span> A&amp;J MEMO — DCC plc (DCC-GB) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 17-Jul-26 06:01</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">GBP 60.90 (6090.0p)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">10.7x (33rd percentile)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">69% Overweight / 31% Equal-weight (Refinitiv mix, Feb-26)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Below</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">DCC-GB (DCC plc)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Energy, downstream distribution</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Irish and UK diversified distribution services conglomerates (B2B energy and technology product distribution, multi-sector)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">None anchored (cold-start cohort, zero peer memos on disk)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">GBP 60.90 (6090.0p)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">Not locally sourced this pass (prices.json truncated, flagged in F.2)</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">GBP 61.82 (6182.0p, prior-close proxy from sidecar)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Below</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">10.7x (33rd percentile)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">GBP 60.00 (Deutsche Bank, most recent)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="memo-note">Page-level BLUF (Bottom Line Up Front): progress to Early-Stage Assessment with moderate-to-high conviction.</div>
+<div class="memo-note">Strong, financially-manifesting change forces and a clean setup fit outweigh the Energy Services setback and the cold-start cohort anchor at this stage.</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">34 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall verdict. <span class="g gB">B</span></strong> <em>DCC plc's pure-play energy pivot is a</em> <u>high-materiality, largely self-funded transformation</u> <em>with strong internal change forces, but</em> <span class="s-neg">Energy Services' <strong>67.5%</strong> profit collapse</span> <em>and a cold-start cohort anchor cap conviction below an A</em></li><li><strong>Key risk.</strong> <span class="s-neg">Energy Services operating profit fell <strong>67.5%</strong> to GBP 15.7m</span>, with a GBP 43.16m Dutch solar impairment signalling the energy-transition leg of the story is <em>not yet delivering</em></li><li><strong>Key support.</strong> <span class="s-pos">Free cash flow conversion reached <strong>108%</strong></span>, up from <strong>84%</strong>, and net debt to EBITDA held at a <u>conservative <strong>0.9x</strong></u>, funding GBP 700m of FY2026 shareholder returns without balance-sheet strain</li><li><strong>Recommendation.</strong> Progress to Early-Stage Assessment with <u>moderate-to-high conviction</u>: the case clears the Triaging bar on change forces and setup fit, but needs the Business Foundation report before a firmer view</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">12 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Downstream energy distributor mid-transformation.</strong> DCC plc sells and distributes liquid petroleum gas, other energy products, and mobility fuel across Europe and North America, having exited Healthcare and now exiting Technology to become a <u>pure-play multi-energy group</u></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Two-division structure post-simplification.</strong> <u>Operations now split into Solutions (Energy Products</u>, <strong>68%</strong> of group profit, plus Energy Services) and Mobility (roughly 1,200 retail forecourts and commercial refuelling sites)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Large revenue base, thin reported margin.</strong> <u>Continuing revenue of GBP 15</u>,440m in FY2026 (down <strong>2.9%</strong>) carries an EBIT margin of <em>only <strong>4.11%</strong></em> (calculated), typical of a low-margin, high-volume distribution model</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Adjusted operating profit growing faster than revenue.</strong> <span class="s-neg">Continuing adjusted operating profit rose <strong>3.6%</strong> to GBP 634.0m despite the revenue decline</span>, reflecting <u>unit-margin expansion</u>, operating profit per litre up <strong>15.1%</strong> to 3.8 pence, rather than volume growth</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Negative working-capital, cash-generative model.</strong> <u>Group working capital days improved to 0.4 days sales</u>, <span class="s-pos">down from 5</span>.7 days, driving free cash flow conversion of <strong>108%</strong>, a structurally advantaged cash profile for a distribution business</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Low balance-sheet leverage.</strong> <u>Net debt to EBITDA of <strong>0.9x</strong></u>, well inside the <strong>1.0x</strong>-<strong>2.0x</strong> internal target range, leaves capacity for further bolt-on mergers and acquisitions alongside the GBP 700m FY2026 capital return</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Geography.</strong> <u>Roughly <strong>70%</strong> of group profit is generated outside the UK</u>, with meaningful exposure to continental Europe and North America; a <strong>10%</strong> foreign-exchange move affects group pre-tax profit by GBP 28.6m</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Unbroken 32-year dividend record.</strong> <span class="s-pos">The final dividend rose <strong>5.0%</strong> to 147.22 pence</span>, underscoring a <u>cash-compounder self-image</u> that management is protecting through the transition</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Investment style implication.</strong> The case reads as a <em>self-help cost and portfolio programme plus capital-redeployment compounder</em>, GARP-adjacent, <span class="s-pos">event-driven on the pending Nexora technology divestment</span></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Sector classification.</strong> <u>Viewforth taxonomy places DCC in Energy</u>, downstream distribution; the cohort (HLD08, Irish and UK diversified distribution conglomerates) is currently a cold-start with zero peer A&amp;J memos on disk</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Divisional profit split detail.</strong> Energy Products, Energy Services and Mobility deliver very different trajectories, a three-way split that matters for how the group's overall change-forces read is weighted<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>Energy Products:</strong> <u>GBP 404.1m operating profit in FY2026</u>, up <strong>11.1%</strong>, the largest single profit pool</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>Energy Services:</strong> <u>GBP 15.7m operating profit</u>, down <strong>67.5%</strong>, <span class="s-neg">the segment dragging on the group read</span></div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext"><strong>Mobility:</strong> <u>GBP 134.4m operating profit</u>, up <strong>8.6%</strong>, <span class="s-pos">the second-strongest performer after Energy Products</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Capital allocation track record.</strong> <u>DCC has completed approximately 400 acquisitions historically</u>, <span class="s-pos">typically at 6-<strong>8x</strong> EV/EBITDA for European bolt-ons</span>, evidencing a long-run, repeatable capital-deployment discipline that underpins the compounder self-image</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change forces verdict. <span class="g gB">B</span></strong> <em>DCC's twelve-month portfolio simplification</em>, two multi-billion-pound divestments completing a pivot to pure-play energy, represents <span class="s-pos">one of the highest-materiality corporate changes</span> triaged this cycle</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Key support.</strong> <span class="s-pos">Cash conversion structurally re-rated to <strong>108%</strong></span> from <strong>84%</strong>, funding GBP 700m of buybacks and a tender offer without new debt, evidences the change is <em>already showing up in the financials</em></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key risk.</strong> <span class="s-neg">Energy Services collapsed <strong>67.5%</strong> to GBP 15.7m</span> with a GBP 43.16m impairment, meaning the "50-<strong>60%</strong> of Energy EBITA from services by 2030" ambition is <u>running well behind plan</u> one year in</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Case-setup fit.</strong> The stock fits <strong>Strong corporate change driven EPSU/EPT <span class="g gB">B</span></strong> and <strong>Change-from-current clearing in a high-quality compounder <span class="g gB">B</span></strong> setups; <span class="s-pos">all eight setups were swept</span>, and the two above carry forward to Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Recommendation.</strong> <em>Progress to Early-Stage Assessment</em> with moderate-to-high conviction; <span class="s-pos">the base case is undemanding on a 10</span>.<strong>7x</strong> forward P/E (33rd percentile) but the thematic frame is stale and must be refreshed before Early-Stage Assessment relies on it</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-c" data-spy><span class="id">MR1</span> Technical momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Momentum reading:</strong> Price at 6090.0p sits <u>below</u> its prior-close proxy of 6182.0p, down 1.<span class="s-neg"><strong>6%</strong> on the day</span><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Relative strength:</strong> A relative-strength percentile of 82 versus the broader universe signals the stock has been a strong performer over the wider lookback, despite the latest one-day pullback</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-b" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Revision picture:</strong> <u>Target-price revisions are net positive at 1-month (+1) but negative at 6-month (-7)</u>, and EPS revisions are net negative across the 3-12 month windows, though the most recent post-results tone from Deutsche Bank was an upgrade</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Stale-frame caveat:</strong> The canonical thematics file <code>memory/thematics/active.md</code> is stale since 16-Apr and auto-load is suspended; this grade is provisional and must be re-struck once thematics refresh, per the coverage report's decision to proceed with the caveat flagged</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Pillar I read:</strong> Element E1 (Required input change forces) grades B on the strength of the portfolio-simplification change forces and a robust, negative-working-capital base, the only Pillar I element in scope at Triaging</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-b" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Pillar II read:</strong> <span class="s-pos">Group 2 (Case simplicity) and Group 3 (Core philosophy) both grade in the B/C band</span>; Element E8 (Fit with acceptable case setups) is the strongest building block at this stage</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Pillar III first appears at Early-Stage Assessment</u></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> <span class="s-pos">DCC's change forces are real and financially manifesting</span>, not merely a strategic narrative, but the base's robustness carries one meaningful blemish in Energy Services</li><li><strong>Element E1 headline.</strong> Strong external and internal change forces (portfolio simplification, leadership renewal) sit alongside a robust, cash-generative, negative-working-capital base at an undemanding <strong>10.7x</strong> forward multiple</li><li><strong>Elements E2 and E3 headline.</strong> Not yet in scope at Triaging, carried to Early-Stage Assessment</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Element E1 — Required input change forces. <span class="g gB">B</span></strong> <em>DCC has completed the GBP 1,050m Healthcare disposal</em> at <strong>12.2x</strong> adjusted operating profit and the GBP 100m Info Tech sale<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Nexora sale active:</strong> The Nexora sale process is <u>actively underway</u>, targeting a definitive agreement by calendar 2026 year-end, the single largest near-term catalyst in the case</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Leadership renewal:</strong> <u>An orderly chief financial officer succession (Conor Murphy</u>, July 2025) and a newly created chief operating officer role for Kevin Lucey, both energy-division veterans, sit alongside board refreshment adding global-energy expertise</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Cash conversion inflected:</strong> <u>Free cash flow conversion reached <strong>108%</strong> from <strong>84%</strong></u>, and net debt fell to GBP 690.5m (<strong>0.9x</strong> EBITDA) even after GBP 700m of FY2026 shareholder returns</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext"><strong>Base not unblemished:</strong> <span class="s-neg">Energy Services operating profit collapsed <strong>67.5%</strong></span> to GBP 15.7m on weak UK/Ireland solar demand, with a GBP 43.16m Dutch goodwill impairment, meaning one plank of the "well-invested base" argument is under real strain</div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext"><strong>Entry point undemanding:</strong> <u>DCC trades on a <strong>10.7x</strong> forward P/E (33rd percentile)</u>, a roughly <strong>20%</strong> discount to its own historical average and to the <strong>11.5x</strong> median of listed international energy peers per Deutsche Bank</div></div><div class="subfinding"><span class="subnum">1.6</span><div class="subtext"><strong>Private-market signal:</strong> A live private-equity approach (KKR/ECP) reportedly values the energy platform at <strong>7.9x</strong> EBITDA versus DCC's public multiple, evidence of a genuine change-from-current mispricing gap</div></div><div class="subfinding"><span class="subnum">1.7</span><div class="subtext"><strong>Held at B, not A:</strong> <u>The Energy Services setback and the still-unresolved Nexora sale timing leave the</u> "robust base" claim short of top-decile</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Element E2 — Required case outputs. <span class="g gNR">NR</span></strong> <em>Not applicable at this stage:</em> Element E2 (Required case outputs) is first assessed at Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Element E3 — Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> <em>Not applicable at this stage:</em> Element E3 (Sufficient total-shareholder-return / valuation upside) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> <span class="s-mid">DCC's building blocks are mixed</span>, strong on case-setup fit and thematic exposure to energy security, but only middling on simplicity given the group still runs three reportable perimeters through the transition</li><li><strong>Group headline.</strong> Group 3 (Core philosophy, carrying Element E11 Value-chain dynamics) is the strongest group at this stage; Group 2 (Case simplicity) is held back by the unresolved Nexora perimeter</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gC">C</span></strong> <em>Element E4 (Technical momentum)</em> carries forward unchanged from Generation stage and is only lightly re-touched here (see the counter-view note under Element E4 below)<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Element E5 (Thematic fit) grades C:</strong> <span class="s-neg">DCC's defensive energy-distribution characteristics look well-suited to a bear-market and geopolitical-risk paradigm on a first-principles read</span>, but the canonical thematics file is stale since 16-Apr, so the grade is provisional</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Element E6 (Sell-side earnings momentum):</strong> <u>Not in scope at Triaging</u></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gC">C</span></strong> <em>Element E7 (Required case simplicity guardrails) grades C:</em> the case still runs three reportable perimeters, Solutions, Mobility, and the residual Technology/Nexora business awaiting sale<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Change-from-current count exceeds guardrail:</strong> <u>Three material live items (Nexora timing</u>, Energy Services recovery, continued M&amp;A pace) exceed the "2 or less" comfort level</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Element E8 (Fit with acceptable case setups) grades B:</strong> <u>The strongest single element in Group 2</u>; DCC cleanly fits the Strong corporate change driven EPSU/EPT and Change-from-current clearing in a high-quality compounder archetypes</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gB">B</span></strong> <em>Element E11 (Value-chain dynamics) grades B</em> on resilient, price-inelastic demand and a commanding <strong>30%</strong> share in core European liquid-gas markets, offset by real disruption risk in the Energy Services/solar sub-segment<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Elements not yet in scope:</strong> <u>Elements E9 (Great operator)</u>, E10 (Advantaged business and widening competitive advantage), E12 (Supportive industry structure) and E13 (High secular growth potential) are not applicable at this stage; first assessed at Early-Stage Assessment</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gC">C</span></strong> <em>Light first-pass framing only at Triaging:</em> the visible risk signature includes weather-driven earnings seasonality (<strong>67%</strong> of profits second-half weighted), foreign-exchange translation exposure, and execution risk on the Nexora sale timeline<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Deep risk work deferred:</strong> <u>Deep element-level risk work (Elements E15-E19) is Early-Stage Assessment/Deep-Dive scope</u></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> <em>Not yet in scope at Triaging:</em> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gB">B</span></strong> <span class="s-pos">Progress to Early-Stage Assessment</span> with moderate-to-high conviction; the change-forces and case-setup fit read is strong enough to justify the next stage's deeper Business Foundation work</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> <u>Progress to Early-Stage Assessment</u></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> <u>Three conditions gate a clean Early-Stage Assessment start</u><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Business Foundation report:</strong> <u>Must be requested and read before Early-Stage Assessment opens</u>; currently absent from the confirmed research floor</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Thematics refresh:</strong> <u>The thematics file should be refreshed</u>, or the Element E5/MR3 grade explicitly re-struck against a live model</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Nexora monitoring:</strong> <u>Sale-process news should be monitored given its role as the dominant near-term catalyst</u></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> <u>Both actions sit with different owners and different deadlines</u><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Chief of Staff action:</strong> <u>Generate the Business Foundation family report for DCC-GB</u>, front-of-queue, ahead of Early-Stage Assessment pickup</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Investment Analyst action:</strong> Re-pull <code>master-dashboard/data/prices.json</code> once the file's truncation issue resolves, confirming the 52-week range and moving averages this pass could not extract</div></div></div></div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">71 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gB">B</span></strong> <span class="s-pos">DCC's pure-play energy pivot clears the Triaging bar comfortably</span>: strong, financially-manifesting change forces and a clean case-setup fit, but a cold-start cohort anchor and one weak operating segment hold the case below an A</li><li><strong>Load-bearing tension.</strong> The central tension sits between <span class="s-pos">structurally improving cash conversion and unit margins in Energy Products and Mobility</span> and <span class="s-neg">a collapsing Energy Services division</span> that is meant to carry half the group's 2030 ambition</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">15 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> DCC's Pillar I read is dominated by one very large, largely-completed change, the Healthcare/Info Tech/Nexora portfolio simplification, sitting on top of a genuinely improved financial base</li><li><strong>Element E1 headline.</strong> Strong external and internal change forces, a materially improved cash-conversion and leverage profile, and an undemanding entry multiple, offset by the Energy Services setback</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 — Required input change forces <span class="g gB">B</span> <span class="secn">13 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E1 (Required input change forces) verdict. <span class="g gB">B</span></strong> <span class="s-pos">Strong, financially-manifesting change forces</span> (portfolio simplification, cash conversion, leadership renewal) sit on a <u>largely robust base</u>, held back one notch by Energy Services' collapse and residual Nexora-timing uncertainty</li><li><strong>RA1 (Change forces) verdict. <span class="g gB">B</span></strong> Both external and internal change forces are strong and well-evidenced across leadership, strategy, and financial-profile change</li><li><strong>RA2 (Robust base) verdict. <span class="g gB">B</span></strong> The base is well-invested and cash-generative with an undemanding multiple, but past-present fundamental delivery congruency is imperfect given the Energy Services miss</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-change-forces-b" data-spy><span class="id">E1 RA1</span> Change forces? <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Change forces) answer: <span class="g gB">B</span></strong> <em>DCC exhibits strong, verifiable change forces on both the external and internal axes</em>, <span class="s-pos">anchored in a completed two-divestment portfolio simplification</span></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds? <span class="g gB">B</span></strong> <em>Yes, <span class="s-pos">portfolio simplification and cash-conversion inflection are the dominant</span>, well-evidenced external-facing changes</em> 1. <strong>Portfolio simplification completed:</strong> <u>DCC sold Healthcare for GBP 1</u>,<span class="s-pos">050m enterprise value (12</span>.<strong>2x</strong> adjusted operating profit) in September 2025 and Info Tech for GBP 100m in November 2025, both to specialist buyers 2. <strong>Cash proceeds redeployed:</strong> <u>The Healthcare sale generated GBP 945m net proceeds</u>, funding a GBP 100m on-market buyback and a GBP 600m tender offer that together removed <strong>13.9%</strong> of shares outstanding 3. <strong>Nexora sale in flight:</strong> The residual Technology business, rebranded Nexora in December 2025, has a formal sale process targeting a definitive agreement by calendar 2026 year-end, <u>the single largest near-term catalyst</u> for the case 4. <strong>Working-capital improvement:</strong> Group working capital days fell to 0.<span class="s-neg">4 from 5</span>.7 days as Info Tech's GBP 156m of supply-chain financing was eliminated, a durable, not one-off, external tailwind</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ2 — Strong internal change forces? <span class="g gB">B</span></strong> <em>Yes, an orderly, internally-sourced leadership renewal reinforces the pure-play pivot</em> without introducing succession risk 1. <strong>Chief financial officer succession:</strong> Conor Murphy, a DCC veteran since 1998 and former DCC Energy chief financial officer, succeeded Kevin Lucey as group chief financial officer on 10 July 2025 2. <strong>New chief operating officer role:</strong> Kevin Lucey moved into a newly created chief operating officer role tasked with <u>driving energy-division execution</u> as the group simplifies 3. <strong>Board renewal toward energy expertise:</strong> John Abbott, deep global energy-sector experience, joins the board at the 16 July 2026 annual general meeting as healthcare-experienced director Laura Angelini retires 4. <strong>Stated 2030 ambition:</strong> Chief executive Donal Murphy has reiterated the goal of doubling energy operating profit from GBP 407m (FY2022) to GBP 830m by FY2030, a specific, falsifiable internal-change target</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-robust-base-b" data-spy><span class="id">E1 RA2</span> Robust base? <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Robust base) answer: <span class="g gB">B</span></strong> <em>The base is well-invested and highly cash-generative with an undemanding entry multiple</em>, <span class="s-neg">but one operating segment</span>, Energy Services, is not yet delivering on its stated ambition</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ1 — Absence of external headwinds? <span class="g gC">C</span></strong> <em>Largely absent at the group level</em>, <span class="s-neg">but Energy Services faces a live</span>, unresolved external headwind in weak UK/Ireland transition demand 1. <strong>Core demand resilient:</strong> <u>Energy Products demand is described as largely inelastic with prompt commodity-cost pass-through</u>, <span class="s-neg">per Deutsche Bank's David Brockton</span>, insulating the core business from the pressure hitting Energy Services 2. <strong>Energy Services headwind live:</strong> <span class="s-neg">Energy Services operating profit fell <strong>67.5%</strong> to GBP 15.7m</span> on softening UK/Ireland customer investment in the energy transition 3. <strong>Regulatory drag on transition demand:</strong> <u>The revised European Corporate Sustainability Reporting Directive has been delayed</u>, <span class="s-neg">subduing near-term demand for lower-carbon solutions</span></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA2 CQ2 — Well-invested base? <span class="g gB">B</span></strong> <em>Yes, capital investment in supply infrastructure and procurement scale is evidenced and recent</em> 1. <strong>Terminal investment:</strong> <u>Capital invested in Teesside and Avonmouth storage terminals has materially improved supply-chain resilience</u>, a direct, well-invested-base indicator 2. <strong>Procurement scale:</strong> <u>Centralised procurement leverages buying power across major refiner relationships</u>, Phillips66, ExxonMobil, Equinor, Valero, supporting margin resilience 3. <strong>M&amp;A capital deployed:</strong> GBP 112m was committed to European liquid-gas bolt-on acquisitions in FY2026 at attractive 6-<strong>8x</strong> EV/EBITDA multiples, continuing a 400-acquisition track record</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis? <span class="g gC">C</span></strong> <em>Partial: Energy Products and Mobility delivery is congruent</em> with the pure-play thesis, Energy Services delivery is not 1. <strong>Energy Products congruent:</strong> <u>Operating profit grew <strong>11.1%</strong> to GBP 404.1m despite a <strong>3.1%</strong> volume decline</u>, <span class="s-neg">congruent with the unit-margin-expansion-offsets-volume thesis</span> 2. <strong>Mobility congruent:</strong> <u>Adjusted operating profit rose <strong>8.6%</strong> to GBP 134.4m</u>, <span class="s-pos">with non-fuel services gross profit up 17</span>.<strong>4%</strong> to GBP 122.1m, congruent with the diversification-into-services thesis 3. <strong>Energy Services incongruent:</strong> <span class="s-neg">A <strong>67.5%</strong> profit collapse and GBP 43.16m impairment</span> directly contradict the "50-<strong>60%</strong> of Energy EBITA from services by 2030" plank of the thesis</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ4 — Large change-from-current / mispricing? <span class="g gB">B</span></strong> <em>Yes, a material gap exists</em> between DCC's public trading multiple and both its own history and private-market valuations 1. <strong>Discount to own history:</strong> <u>DCC trades at roughly a <strong>20%</strong> discount to its historical average forward</u> multiple per Deutsche Bank 2. <strong>Discount to peer median:</strong> <u>The group trades below the <strong>11.5x</strong> median EV/EBIT of listed international energy distribution peers</u> 3. <strong>Private-market signal:</strong> A KKR/ECP indicative approach values the energy platform at <strong>7.9x</strong> EBITDA, <u>well above</u> the implied public multiple on the energy business alone</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA2 CQ5 — Low trading multiple? <span class="g gB">B</span></strong> <em>Yes, <span class="s-pos">DCC trades on a 10</span>.<strong>7x</strong> forward P/E, 33rd percentile</em>, an undemanding entry point by both absolute and relative measures 1. <strong>Absolute level:</strong> <u><strong>10.7x</strong> forward P/E sits meaningfully below the market average multiple for a</u> compounding cash-generative distributor 2. <strong>Percentile confirmation:</strong> <u>The 33rd percentile ranking versus DCC's own 10-year history confirms the multiple</u> is toward the cheap end of its own range 3. <strong>Sell-side target dispersion:</strong> <u>Price targets range from 4</u>,708p (bear case) to 9,000p (bull case) against the current 6090.0p price, a wide dispersion signalling unresolved change-from-current</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Cohort anchor (Element E1):</strong> <u>Cohort HLD08 (Irish and UK diversified distribution conglomerates) carries zero peer memos on disk</u>, so this grade is struck directly from DCC's own Change Forces specifics rather than a peer base rate, per the cold-start protocol<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>Directional check against sector base rate:</strong> <u>Peer UGI Corporation cut its own FY2026 guidance in the same period</u></div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Read on the directional check:</strong> <u>This is a data point suggesting DCC's change forces are comparatively stronger</u> than at least one directly-comparable downstream distributor</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Additional specifics-retention sweep (Element E1):</strong> <u>A second pass over the source report surfaces further hard datapoints worth</u> carrying forward explicitly<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Safety metric context:</strong> <u>The lost-time injury frequency rate rose to 1.00 per 200</u>,<span class="s-pos">000 hours from 0</span>.90</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Severity trend also worse:</strong> <u>The lost-time injury severity rate also rose</u>, to 36.<span class="s-neg">5 days from 27</span>.3 days, both genuine blemishes on the well-invested-base claim</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>Governance detail:</strong> <u>Board gender representation temporarily fell to <strong>36%</strong> from a <strong>40%</strong> target during</u> the FY2026 reshuffle</div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext"><strong>Expected correction noted:</strong> <u>This is expected to correct following Mark Ryan's July 2026 retirement</u>, a specific governance data point worth tracking</div></div><div class="subfinding"><span class="subnum">8.5</span><div class="subtext"><strong>Named broker detail:</strong> <u>Deutsche Bank's David Brockton rates DCC Hold at 6</u>,000p; Jefferies' Allen Wells rates DCC Buy at 6,100p</div></div><div class="subfinding"><span class="subnum">8.6</span><div class="subtext"><strong>Split sell-side view:</strong> <u>Morgan Stanley's Annelies Vermeulen rates DCC Equal-weight at 5</u>,900p, <span class="s-pos">a genuinely split sell-side view worth carrying into the entry-point read</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (Element E1):</strong> <u>The strongest counter-argument is that the "robust base" claim is undermined by Energy Services</u>, <span class="s-pos">intended engine of half the 2030 profit-doubling ambition</span><div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><em>Rejected as a full override</em> because Energy Products and Mobility, <strong>92%</strong> of segment profit combined, are both delivering ahead of plan, and management has not walked back the 2030 target</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E1):</strong> <u>Two specific next actions carry this Element into Early-Stage Assessment</u><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Action 1:</strong> <u>Test Energy Services' recovery trajectory explicitly against management's 8-<strong>10%</strong> mid-term organic guidance</u></div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Action 2:</strong> <u>Read the Business Foundation report's operator-quality section for evidence the chief operating</u> officer role is closing the execution gap</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr" data-spy>Element E2 — Required case outputs [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E2 (Required case outputs) is first assessed at Early-Stage Assessment</u></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr" data-spy>Element E3 — Sufficient TSR / valuation upside [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E3 (Sufficient total-shareholder-return / valuation upside) is first assessed at Early-Stage Assessment</u></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">55 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> <span class="s-mid">A mixed picture</span>: strong case-setup fit and defensible value-chain dynamics, offset by a case-simplicity read held back by the still-unresolved Nexora perimeter</li><li><strong>Group headline.</strong> Group 2 (Case simplicity) and Group 3 (Core philosophy) carry the analytical weight at Triaging; Group 1 (Case momentum) is thematically stale-framed</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">17 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> Momentum is muted, technicals sit modestly below the prior close and thematic fit carries a stale-frame caveat, so this Group does not yet add conviction beyond Pillar I</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr-carried-forward" data-spy>Element E4 — Technical momentum [NR — carried forward] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E4 (Technical momentum) note.</strong> Element E4 (Technical momentum) <u>carries forward unchanged from the Generation stage rating</u> at Triaging, per Procedure 1; it is not re-assessed as new content here</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Price observation, not a new Element E4 rating:</strong> <u>DCC closed at 6090.0p on 3 July 2026</u>, down from a prior close of 6190.0p, a <strong>1.6%</strong> one-day move<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Relative strength context:</strong> <u>A relative-strength percentile of 82 indicates the stock has out-performed over the</u> wider lookback despite the pullback</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">15 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict. <span class="g gC">C</span></strong> DCC's defensive, price-inelastic energy-distribution model is <u>plausibly well-suited</u> to a risk-off, Iran-conflict-driven paradigm on first principles, but the canonical thematics file has not refreshed since 16-Apr, so this grade carries a <em>stale-frame caveat</em></li><li><strong>RA1 (Suitability for bear market/downturn) verdict. <span class="g gC">C</span></strong> Plausibly favourable on first-principles grounds but not confirmed against a live thematics model</li><li><strong>RA2 (Suitability for AI disruption) verdict. <span class="g gC">C</span></strong> Largely not applicable to the core distribution model</li><li><strong>RA3 (Suitability for Iran oil-price shock) verdict. <span class="g gB">B</span></strong> The strongest of the three thematic sub-tests, on pass-through pricing and diversified supply</li><li><strong>RA4 (Paradigm fit, business perspective) verdict. <span class="g gC">C</span></strong> Coherent positioning, not yet proven on the services leg</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Suitability for bear market / economic downturn) answer: <span class="g gC">C</span></strong> <em>Plausibly favourable</em> on first-principles grounds, <span class="s-pos">inelastic core demand</span>, negative working capital, low leverage, but not confirmed against a live thematics model</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ1 — Defensive credentials in a downturn? <span class="g gC">C</span></strong> <span class="s-pos">Core liquid-gas and mobility-fuel demand is described as largely inelastic with prompt commodity-cost pass-through</span>, a textbook downturn-defensive characteristic<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Watson-derived caveat:</strong> <u>This reasoning is Watson-derived rather than sourced from a live thematics model this pass</u>, given the canonical file's staleness</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Balance-sheet buffer:</strong> <u><strong>0.9x</strong> net debt to EBITDA and <strong>108%</strong> free cash flow conversion give</u> the group capacity to sustain the dividend and buyback programme through a downturn</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Customer mix supports the read:</strong> <u>Commercial and industrial customers are <strong>60%</strong> of Solutions gross profit</u>, <span class="s-pos">and domestic heating is inelastic even in a downturn</span>, a genuinely defensive demand mix</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA1 additional context, macro sensitivity:</strong> <u>DCC's macro sensitivities are modest relative to its scale</u>, a further downturn-defensiveness signal<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Interest-rate sensitivity:</strong> <u>A 100-basis-point interest-rate change affects group pre-tax profit by only GBP 1.4m</u>, a small figure for a GBP 15,440m revenue business</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Northern Europe softness noted:</strong> Softer economic conditions in Northern Europe have already depressed commercial and industrial volumes in that region, evidence the downturn-defensiveness thesis is not unconditional</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 (Suitability for AI disruption) answer: <span class="g gC">C</span></strong> <em>Largely not applicable</em> to DCC's core distribution model; the only channel is indirect, through the Nexora technology business being divested</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E5 RA2 CQ1 — Exposure to AI-driven disruption? [factual]:</strong> DCC's core Energy Products and Mobility divisions carry <u>minimal direct AI-disruption exposure</u>; the residual Technology/Nexora business is the only segment with any relevant exposure, and it is explicitly being exited<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Divestment removes the exposure:</strong> <u>Once Nexora completes</u>, DCC will carry essentially zero AI-disruption-relevant revenue, simplifying this thematic test for Early-Stage Assessment</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>RA3 (Suitability for Iran oil-price induced inflation or demand deterioration) answer: <span class="g gB">B</span></strong> <em>DCC's pass-through pricing model and refiner-diversified supply base make it relatively well-positioned</em> for an oil-price shock scenario</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E5 RA3 CQ1 — Resilience to an Iran-driven oil-price / demand shock? <span class="g gB">B</span></strong> <span class="s-pos">Strong pricing power lets DCC pass through wholesale commodity-cost inflation promptly to customers</span>, per Deutsche Bank's David Brockton<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>Directly relevant to Richard's current screen:</strong> <u>This is directly relevant to the current risk-off</u>, <span class="s-neg">Iran-conflict-driven sector screen targeting recurring non-cyclical revenue and domestic European footprint</span></div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Diversified refiner base:</strong> <u>Supply from Phillips66</u>, ExxonMobil, <span class="s-neg">Equinor and Valero reduces single-source disruption risk in an oil-shock scenario</span></div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>Foreign-exchange sensitivity flagged:</strong> <u>A <strong>10%</strong> foreign-exchange move affects group pre-tax profit by GBP 28.6m</u>, a real but secondary sensitivity relative to the pass-through mechanism</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>RA3 additional context, private-market corroboration:</strong> <u>The KKR/ECP indicative approach for the energy platform</u>, at <strong>7.9x</strong> EBITDA, is itself a signal that sophisticated private capital views DCC's defensive energy-distribution assets as attractively resilient in the current environment</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA4 (Paradigm fit from business perspective) answer: <span class="g gC">C</span></strong> <em>From a pure business-model perspective, DCC's product-agnostic multi-energy positioning is coherent</em> but not yet proven against the 2030 services ambition</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E5 RA4 CQ1 — Summarised paradigm fit from a business perspective? <span class="g gC">C</span></strong> <u>Management's explicit product-agnostic positioning</u>, providing whichever energy product the customer's transition pace demands, is coherent as a business-model matter<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Services leg not yet validated:</strong> The Energy Services delivery gap means the services leg of that positioning is not yet validated in the numbers, <span class="s-neg">the key open question for this Required Attribute</span></div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Management's own framing:</strong> Chief executive Donal Murphy has stated emissions reduction is "an output rather than a driver" of strategy, a framing that supports the product-agnostic, not eco-driven, paradigm read</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Cross-check against the wider Iran-risk screen (Element E5):</strong> <u>A dedicated check against Richard's current risk-off</u>, <span class="s-neg">Iran-conflict-driven sector screen</span>, which targets recurring non-cyclical revenue, domestic European footprint, and avoids consumer discretionary and chemicals exposure<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>Recurring non-cyclical revenue, confirmed:</strong> <u>DCC's core liquid-gas and mobility-fuel revenue is genuinely recurring and non-cyclical</u>, <span class="s-pos">a direct match to the screen's first criterion</span></div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>Domestic European footprint, partial match:</strong> <u>Roughly <strong>70%</strong> of group profit is generated outside the UK</u>, with meaningful continental European exposure, though North American exposure sits outside the pure domestic-Europe frame the screen prefers</div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext"><strong>Sector avoidance list, clean:</strong> <u>DCC carries no exposure to the specifically avoided sectors</u>, European chemicals, consumer discretionary, or beverages, <span class="s-pos">a clean pass on the screen's exclusion criteria</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Second-order Iran-shock consideration (Element E5):</strong> <u>Beyond the direct pass-through mechanism</u>, a second-order effect is worth flagging explicitly<div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext"><strong>Freight and shipping cost pass-through untested:</strong> <u>A prolonged Iran-conflict disruption to shipping lanes could raise DCC's logistics costs</u>, <span class="s-pos">and whether this is pass-through-able as fast as commodity cost is a genuine open question</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Cohort anchor (Element E5):</strong> <u>With cohort HLD08 cold-start</u>, this Element is graded against Watson's own first-principles thematic read rather than a peer base rate; the recommendation is to re-strike once both the cohort and the thematics file refresh</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Counter-view considered (Element E5):</strong> <u>The strongest counter-view is that grading Element E5 at all without a</u> live thematics reload is methodologically weak<div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><em>Accepted as a genuine limitation, not rejected</em>: this is exactly why the grade carries the explicit stale-frame caveat, <span class="s-pos">and the recommendation is to re-strike Element E5 and MR3 once the thematics file refreshes</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>Downstream actions (Element E5):</strong> <u>Two specific next actions carry this Element into Early-Stage Assessment</u><div class="subfindings"><div class="subfinding"><span class="subnum">15.1</span><div class="subtext"><strong>Action 1:</strong> <u>Re-run Element E5 and MR3 in full once the canonical thematics file</u> refreshes past its 16-Apr staleness date</div></div><div class="subfinding"><span class="subnum">15.2</span><div class="subtext"><strong>Action 2:</strong> <u>Cross-check the Iran/oil-shock read against Richard's current sector screen at Early-Stage Assessment</u></div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr" data-spy>Element E6 — Sell-side earnings momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E6 (Sell-side earnings momentum) is first assessed at Deep Dive</u></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">24 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gC">C</span></strong> Case simplicity is held below a B by the still-unresolved Nexora perimeter and a change-from-current count that exceeds the guardrail, even though the primary case-setup fit is strong</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">10 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict. <span class="g gC">C</span></strong> <span class="s-mid">Three live change-from-current items exceed the "2 or less" comfort guardrail</span>, meaning the case, while coherent, is <u>not yet simple</u> by Viewforth's own standard</li><li><strong>RA1 (Simplicity of the case) verdict. <span class="g gC">C</span></strong> Three reportable perimeters persist through the transition, a genuine complexity tax</li><li><strong>RA2 (Limited change-from-current count) verdict. <span class="g gC">C</span></strong> Three material live items exceed the stated guardrail of two or fewer</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Simplicity of the case) answer: <span class="g gC">C</span></strong> <em>The group still runs three reportable perimeters</em> during the transition window, Solutions, Mobility, <span class="s-neg">and the residual Technology/Nexora business awaiting sale</span>, which is not yet a clean two-division story</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>RA1 additional context, reporting-line complexity:</strong> <u>A further simplicity check on how the transition is presented in disclosure</u><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Segmental reporting not yet simplified:</strong> <u>FY2026 accounts still separately disclose Energy Products and Energy Services as sub-segments within Solutions</u>, meaning the disclosed reporting structure has not yet caught up with the "two-division" narrative management uses externally</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Read-through for Early-Stage Assessment:</strong> <u>This is a modest</u>, not severe, complexity tax, <span class="s-neg">since the underlying data are disclosed</span>, but it means an analyst must do extra work to reconstruct the clean two-division view</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA1 CQ1 — Is the investment case simple to state in one sentence? <span class="g gC">C</span></strong> <em>Reasonably, but not perfectly</em>: "a pure-play energy distributor mid-transformation" is close, but the Nexora perimeter and Energy Services sub-plot both need a second sentence 1. <strong>Core sentence works for Solutions/Mobility:</strong> <u>The two-division energy story is genuinely simple to articulate to a new observer</u> 2. <strong>Nexora complicates the single-sentence test:</strong> A residual, soon-to-be-divested Technology business still on the balance sheet means the "pure-play" framing is <u>not yet fully true</u> 3. <strong>Energy Services sub-plot:</strong> <u>A one-sentence summary must also flag the Energy Services underperformance</u>, a second complicating thread</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA1 CQ2 — Are there multiple, hard-to-disentangle moving parts? <span class="g gC">C</span></strong> <em>Yes, three distinct threads are running concurrently</em>, <span class="s-pos">which is more than ideal for a clean Triaging case</span> 1. <strong>Thread one:</strong> <u>The Nexora sale process</u>, <span class="s-neg">timing and price uncertain</span> 2. <strong>Thread two:</strong> <u>The Energy Services recovery</u>, dependent on UK/Ireland transition-demand normalisation and the delayed Corporate Sustainability Reporting Directive 3. <strong>Thread three:</strong> <u>Continued bolt-on M&amp;A at pace (GBP 112m committed in FY2026 alone)</u>, a positive thread but still a live variable</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA2 (Limited change-from-current count) answer: <span class="g gC">C</span></strong> <em>Three material live items are identifiable</em>, one more than the "2 or less" guardrail Viewforth applies at Triaging</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA2 CQ1 — How many material change-from-current items are live simultaneously? <span class="g gC">C</span></strong> <em>Three: Nexora sale timing/pricing, <span class="s-neg">Energy Services recovery trajectory</span>, and sustained M&amp;A pace/integration risk</em> 1. <strong>Nexora:</strong> Highest-materiality item; targeted for a definitive agreement by calendar 2026 year-end 2. <strong>Energy Services:</strong> Second-highest materiality; a <strong>67.5%</strong> profit collapse that must show signs of stabilising before Early-Stage Assessment can be confident in the "robust base" claim 3. <strong>M&amp;A pace:</strong> <u>Lower materiality individually</u>, <span class="s-neg">but a continuous stream of roughly 400 historical acquisitions means integration risk is a permanent</span>, not transient, feature of the case</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E7 RA2 CQ2 — Does the count exceed the stated guardrail? <span class="g gC">C</span></strong> <em>Yes, by one item</em>, <span class="s-neg">which is the primary reason Element E7 grades C rather than B</span> 1. <strong>Guardrail is two or fewer:</strong> Viewforth's own Triaging standard treats three-plus live items as a complexity tax that must be explicitly acknowledged, <span class="s-neg">not silently absorbed into a higher grade</span></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Cohort anchor (Element E7):</strong> No peer memo exists in the cold-start HLD08 cohort against which to benchmark a "typical" change-from-current count for this sector, so this grade rests on the absolute guardrail number rather than a relative peer comparison</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (Element E7):</strong> One could argue the M&amp;A-pace item should not count as a "change from current" since it is a permanent, <span class="s-pos">structural feature of DCC's model</span>, not a one-off event<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><em>Partially accepted</em>: the M&amp;A item is qualitatively different from the other two, <span class="s-neg">but it is retained in the count because integration risk still requires active monitoring</span>, even if it is a lower-materiality, recurring item rather than a one-off</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (Element E7):</strong> <u>Two specific next actions carry this Element into Early-Stage Assessment</u><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Action 1:</strong> <span class="s-neg">Track resolution of the Nexora sale and the Energy Services trajectory explicitly at Early-Stage Assessment</span>; if both resolve favourably, the change-from-current count should fall to one (M&amp;A pace only), which would support an upgrade to B</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Action 2:</strong> <u>Re-test whether the sustained M&amp;A pace should be reclassified as a structural</u>, not change-from-current, <span class="s-pos">feature once two of the three live items resolve</span></div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-b" data-spy>Element E8 — Fit with acceptable case setups <span class="g gB">B</span> <span class="secn">14 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gB">B</span></strong> <span class="s-pos">DCC cleanly fits two of Viewforth's eight acceptable case setups</span>, making Element E8 <u>the single strongest building block</u> in this memo despite carrying only a three-bullet floor</li><li><strong>RA1 (Setup sweep completed) verdict. <span class="g gB">B</span></strong> All eight setups were swept systematically; two fit cleanly, no forced fits were made</li><li><strong>RA2 (Primary setup: Strong corporate change driven EPSU/EPT) verdict. <span class="g gB">B</span></strong> Five of nine triggers present and well-evidenced</li><li><strong>RA3 (Secondary setup: Change-from-current clearing in a high-quality compounder) verdict. <span class="g gB">B</span></strong> A coherent secondary fit, reinforcing rather than duplicating the primary setup</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Setup sweep completed) answer: <span class="g gB">B</span></strong> <em>A full sweep of all eight Viewforth-approved case setups was run against the Change Forces evidence</em>, <span class="s-pos">yielding two clean fits and no forced or speculative matches</span></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1 CQ1 — Was the full setup sweep completed, not just a search for a single fit? <span class="g gB">B</span></strong> <em>Yes</em>, <span class="s-neg">all eight setups were checked systematically against the source evidence before selecting the two below</span> 1. <strong>Turnaround-from-distress, ruled out:</strong> <u>DCC shows no evidence of financial distress</u>, <strong>0.9x</strong> net debt to EBITDA and <strong>108%</strong> cash conversion are the opposite of a distress signature, so this setup does not apply 2. <strong>Hidden-asset unlock via structural change, ruled out:</strong> <u>The Healthcare and Info Tech disposals were conducted at full</u>, <span class="s-pos">disclosed private-market multiples (12</span>.<strong>2x</strong> adjusted operating profit for Healthcare), not a discounted or opaque unlock of an under-recognised asset 3. <strong>Cyclical-trough-entry, ruled out:</strong> <u>DCC's demand profile is described as largely inelastic with prompt cost pass-through</u>, <span class="s-pos">meaning there is no clear cyclical trough to time an entry against</span> 4. <strong>Secular-growth-inflection, ruled out:</strong> Energy Services, <span class="s-neg">the segment that would carry a secular-growth-inflection narrative</span>, is currently in profit decline, not inflection, so this setup is explicitly rejected rather than stretched to fit 5. <strong>Deep-value balance-sheet setup, considered and rejected:</strong> <u>While the multiple is undemanding</u>, <span class="s-pos">the case is not primarily a balance-sheet-value story</span>; the change-forces evidence is the dominant driver, so this setup was not selected as a primary or secondary fit 6. <strong>No forced fit:</strong> <u>Watson deliberately avoided stretching a marginal setup match to inflate this Element's grade</u>, consistent with the discipline that a B here, not an A, correctly reflects "two good fits" rather than "an exceptional multi-setup case"</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 (Primary setup: Strong corporate change driven EPSU/earnings-per-share upgrade or de-rating/EPT) answer: <span class="g gB">B</span></strong> <em>Five of nine defined triggers are present and well-evidenced</em>, <span class="s-pos">a strong primary fit</span></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA2 CQ1 — Which specific triggers under the primary setup are present? <span class="g gB">B</span></strong> <em>Shareholder-returns step-up, perimeter reduction, M&amp;A step-up, strategy change, and leadership refresh are all present</em> 1. <strong>Shareholder-returns step-up:</strong> <u>GBP 700m of FY2026 returns (GBP 100m buyback plus GBP 600m tender)</u> directly evidences this trigger 2. <strong>Perimeter reduction:</strong> <u>The Healthcare and Info Tech disposals</u>, plus the pending Nexora sale, are a textbook perimeter-reduction pattern 3. <strong>M&amp;A step-up:</strong> <u>GBP 112m of FY2026 bolt-on commitments at 6-<strong>8x</strong> EV/EBITDA evidences continued</u>, <span class="s-pos">disciplined capital deployment</span> 4. <strong>Strategy change:</strong> <u>The explicit pivot to "pure-play energy" from a diversified conglomerate model is a clear</u>, stated strategy change 5. <strong>Leadership refresh:</strong> <u>The chief financial officer succession</u>, <span class="s-pos">new chief operating officer role</span>, and board renewal together evidence a genuine leadership-refresh trigger</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA2 CQ2 — Are the absent triggers a concern, or simply not relevant to this case? <span class="g gB">B</span></strong> <em>Not a concern</em>: four triggers are simply absent, <span class="s-neg">not weakening the five present ones</span><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Absent triggers named:</strong> Activist involvement, spin-off structure, index-inclusion catalyst, and rights issue/recapitalisation are the four not present in this case 1. <strong>No activist involvement identified:</strong> <u>This is a management-led</u>, not activist-driven, transformation, <span class="s-neg">which if anything reduces execution-conflict risk</span> 2. <strong>No spin-off structure used:</strong> <u>DCC chose trade-sale divestment over spin-off for both Healthcare and Info Tech</u>, a cleaner, <span class="s-pos">faster mechanism given the private-market appetite evidenced by the 12</span>.<strong>2x</strong> Healthcare multiple</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>RA3 (Secondary setup: Change-from-current clearing in a high-quality compounder) answer: <span class="g gB">B</span></strong> <em>DCC's 32-year unbroken dividend record and disciplined capital-allocation history qualify it as a high-quality compounder</em>, <span class="s-pos">on top of which the current change-from-current items are actively clearing</span></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA3 CQ1 — Does the underlying business qualify as a high-quality compounder independent of the current change? <span class="g gB">B</span></strong> <em>Yes, <span class="s-pos">on dividend history</span>, cash conversion, and capital-allocation track record</em> 1. <strong>Dividend record:</strong> <u>An unbroken 32-year dividend history</u>, <span class="s-pos">with the final dividend up 5</span>.<strong>0%</strong> to 147.22 pence, is a strong quality signal independent of the current transformation 2. <strong>Cash-conversion quality:</strong> <u><strong>108%</strong> free cash flow conversion and negative working capital are structural</u>, not cyclical, quality features 3. <strong>Capital-allocation discipline:</strong> <u>Roughly 400 historical acquisitions at consistent 6-<strong>8x</strong> EV/EBITDA multiples evidence a repeatable</u>, <span class="s-pos">disciplined playbook rather than opportunistic dealmaking</span></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA3 CQ2 — Is the current change-from-current genuinely "clearing," or stalled? <span class="g gC">C</span></strong> <em>Mostly clearing</em>: two of three divestments are complete and cash-deployed, <span class="s-neg">but Nexora remains unresolved and Energy Services is a fresh</span>, not yet clearing, complication 1. <strong>Two-thirds complete:</strong> <u>Healthcare and Info Tech are both fully sold and cash-redeployed</u>, <span class="s-pos">the clearest evidence of active clearing</span> 2. <strong>One-third pending:</strong> <u>Nexora remains an open item</u>, <span class="s-neg">so the "clearing" claim is not yet complete across the full portfolio-simplification programme</span></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Cohort anchor (Element E8):</strong> <u>With no peer memo on file</u>, Watson cross-checked the setup-fit logic against the general Viewforth setup definitions directly, rather than a peer's application of them<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><strong>Why this substitution is lower-risk:</strong> This is judged a lower-risk cold-start substitution than for the more judgement-heavy Element E1 (Required input change forces) and Element E5 (Thematic fit), <span class="s-neg">since the setup criteria themselves are objective checklists</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Specifics-retention sweep (Element E8):</strong> <u>A dedicated pass to identify Element E8 (Fit with acceptable case setups)</u> fit surfaced the two setups documented above as the only clean fits<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Third setup considered and rejected:</strong> <u>A candidate third setup</u>, secular-growth-inflection, <span class="s-pos">was rejected because Energy Services' current trajectory runs counter to</span>, not with, a secular-growth-inflection narrative</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Materiality-weighting check (Element E8):</strong> A dedicated check on whether the two fitting setups are being weighted proportionately to their evidence strength, rather than simply counted<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>Primary setup carries more weight:</strong> <u>The primary setup (Strong corporate change driven EPSU/EPT) carries five of nine triggers</u>, <span class="s-pos">each independently evidenced with hard financial figures</span>, and is judged the stronger of the two fits</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>Secondary setup is corroborative, not standalone:</strong> <u>The secondary setup shares its evidence base</u>, the same divestment and cash-conversion facts, with the primary setup, so it is treated as corroborative rather than independent</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Setup-fit durability check (Element E8):</strong> <u>A test of whether the setup fit is likely to persist or</u> fade over the Early-Stage Assessment horizon<div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext"><strong>Primary setup likely to persist:</strong> <u>The five present triggers are largely structural (completed disposals</u>, dated succession, <span class="s-pos">disclosed capital-return programme) rather than transient</span>, so the primary setup fit should persist through Early-Stage Assessment</div></div><div class="subfinding"><span class="subnum">12.2</span><div class="subtext"><strong>Secondary setup depends on Nexora:</strong> <u>The secondary setup's "clearing" claim will strengthen further if Nexora completes on schedule</u>, <span class="s-neg">or weaken if the sale process stalls past the stated calendar 2026 year-end target</span></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Counter-view considered (Element E8):</strong> <u>A sceptic could argue the "high-quality compounder" secondary setup is doing double-duty</u> with the primary EPSU/EPT setup and should not be counted separately<div class="subfindings"><div class="subfinding"><span class="subnum">13.1</span><div class="subtext"><em>Rejected</em>: the two setups test different things, the primary setup tests whether change is happening and is evidenced, the secondary tests whether the underlying business merits a re-rating once that change clears, and DCC satisfies both tests on independent evidence</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Downstream actions (Element E8):</strong> <u>Two specific next actions carry this Element into Early-Stage Assessment</u><div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>Action 1:</strong> <u>Confirm at Early-Stage Assessment whether Nexora's resolution completes the "clearing" claim under RA3</u>, <span class="s-pos">upgrading this Element toward an A</span></div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>Action 2:</strong> <u>Watch for any fourth setup trigger</u>, <span class="s-neg">for example activist involvement</span>, emerging as the Nexora sale process progresses, which would strengthen, not weaken, the primary setup fit</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">12 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gB">B</span></strong> <span class="s-pos">The strongest Group in this memo</span>: resilient, price-inelastic core demand and a commanding regional market share underpin a B-grade Element E11, with real but contained disruption risk in the solar/Energy Services sub-segment</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E9 (Great operator) is first assessed at Early-Stage Assessment</u>, pending the Business Foundation family report</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment</u></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gB">B</span></strong> <span class="s-pos">A commanding roughly <strong>30%</strong> share in core European liquid-gas markets</span> combined with <u>price-inelastic, prompt-pass-through demand</u> underpins a genuinely advantaged value-chain position, offset only by real disruption risk in the solar/transition-services sub-segment</li><li><strong>RA1 (Favourable value-chain position) verdict. <span class="g gB">B</span></strong> Strong evidence of pricing power and scale advantage across procurement and logistics</li><li><strong>RA2 (Resilience to disruption) verdict. <span class="g gC">C</span></strong> Core products are resilient; the Energy Services/solar sub-segment is not</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Favourable value-chain position) answer: <span class="g gB">B</span></strong> <em>DCC holds a commanding position in its core liquid-gas markets</em>, <span class="s-pos">underpinned by procurement scale and prompt cost pass-through</span></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA1 CQ1 — Does DCC hold meaningful pricing power in its value chain? <span class="g gB">B</span></strong> <em>Yes, prompt commodity-cost pass-through to customers is well-evidenced</em> across the Energy Products segment 1. <strong>Market share:</strong> <u>A roughly <strong>30%</strong> share in core European liquid-gas markets is a genuinely commanding position</u>, <span class="s-pos">not a marginal one</span> 2. <strong>Procurement leverage:</strong> <u>Centralised procurement across major refiner relationships (Phillips66</u>, ExxonMobil, Equinor, <span class="s-pos">Valero) gives DCC buying-side scale advantages smaller distributors lack</span> 3. <strong>Unit-margin evidence:</strong> <u>Operating profit per litre rose <strong>15.1%</strong> to 3.8 pence even as volumes fell <strong>3.1%</strong></u>, <span class="s-neg">direct evidence of realised pricing power</span>, not merely a stated policy</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA1 CQ2 — Is the value-chain position durable, or vulnerable to disintermediation? <span class="g gB">B</span></strong> <em>Durable</em>: the physical logistics and storage infrastructure (Teesside, <span class="s-neg">Avonmouth terminals) represents a genuine</span>, not easily replicated, barrier to entry 1. <strong>Infrastructure barrier:</strong> <u>Capital-intensive storage and distribution infrastructure is a multi-year</u>, high-cost barrier for any would-be disintermediator 2. <strong>Customer-relationship durability:</strong> <u>Commercial and industrial customers</u>, <span class="s-neg"><strong>60%</strong> of Solutions gross profit</span>, typically sign multi-year supply arrangements, reducing switching risk</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 (Resilience to disruption) answer: <span class="g gC">C</span></strong> <em>Core Energy Products and Mobility are resilient to disruption</em>, <span class="s-neg">but the Energy Services/solar sub-segment has demonstrated genuine vulnerability</span></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA2 CQ1 — How resilient is the value chain to substitute products or channels? <span class="g gC">C</span></strong> <em>Mixed</em>: the core liquid-gas and mobility-fuel value chain is resilient, <span class="s-neg">but the newer</span>, capital-lighter solar/transition-services channel is not yet resilient 1. <strong>Core resilience:</strong> <u>Inelastic demand for liquid-gas heating and mobility fuel</u>, <span class="s-pos">especially in rural and off-grid locations</span>, provides a durable moat against substitution 2. <strong>Solar vulnerability confirmed:</strong> <u>The GBP 43.16m Dutch solar impairment is direct</u>, quantified evidence that the newer transition-services channel is exposed to demand-substitution and policy risk in a way the core business is not 3. <strong>Regulatory-driven demand risk:</strong> <u>The delayed Corporate Sustainability Reporting Directive has already suppressed demand for lower-carbon solutions</u>, <span class="s-neg">evidencing this sub-segment's greater sensitivity to external policy shifts</span></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>RA1 additional context, logistics-network specifics:</strong> <u>A closer look at the two named terminal investments and what they</u> actually buy DCC<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Teesside terminal:</strong> <u>Supports North Sea and continental-European liquid-gas import flows</u>, <span class="s-pos">a genuinely strategic node rather than a generic storage asset</span></div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Avonmouth terminal:</strong> <u>Serves the south-west UK and Bristol Channel catchment</u>, complementing Teesside's northern coverage and giving DCC a two-terminal, not single-point, resilience profile</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA2 additional context, quantifying the disruption-exposed share:</strong> <u>A first-pass estimate of how much of the value chain is genuinely</u> exposed to the disruption risk flagged under RA2<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>Energy Services is a minority of segment profit:</strong> <u>At GBP 15.7m of GBP 634.0m group adjusted operating profit</u>, <span class="s-neg">Energy Services is only around 2</span>.<strong>5%</strong> of the total, a small disruption-vulnerable share</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Strategic weight caveat:</strong> <u>Despite the small profit share</u>, Energy Services carries disproportionate weight in the stated 2030 ambition</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>Caveat on this estimate:</strong> <u>This is a profit-share</u>, not revenue-share, calculation, and does not capture the segment's disproportionate importance to the qualitative "multi-energy transition partner" positioning management uses externally</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Cohort anchor (Element E11):</strong> <u>DCC's roughly <strong>30%</strong> regional liquid-gas share is a strong absolute figure</u>; <span class="s-pos">with no peer memo available for a relative check</span>, this grade is anchored on the absolute market-share and pricing-power evidence rather than a cohort comparison</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (Element E11):</strong> <span class="s-neg">A sceptic could argue the Energy Services weakness should pull the whole Element down to C</span>, not just RA2<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><em>Rejected</em>: Energy Services is a minority, roughly <strong>2.5%</strong>, <span class="s-pos">of segment operating profit</span>; the core advantage in Energy Products and Mobility, <strong>97.5%</strong> of segment profit, dominates and merits the B grade</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (Element E11):</strong> <u>Two specific next actions carry this Element into Early-Stage Assessment</u><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Action 1:</strong> <u>Quantify the addressable size of the solar/transition-services sub-segment relative to core Energy Products</u>, to properly weight RA2's disruption-resilience read</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Action 2:</strong> <u>Test whether the Corporate Sustainability Reporting Directive delay is a temporary or</u> structural drag on transition-services demand</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-nr-light-framing-only" data-spy><span class="id">Grp 4</span> Case riskiness [NR — light framing only] <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gNR">NR</span></strong> <em>Light first-pass framing only at Triaging</em>; deep element-level risk work (Elements E15 through E19) is Early-Stage Assessment and Deep-Dive scope, not required here</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Visible risk signature, framing only:</strong> <u>Three risk threads are visible even at this light-touch stage</u>, <span class="s-neg">without yet being formally graded</span><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Seasonality:</strong> <u>Roughly <strong>67%</strong> of group profits are second-half weighted</u>, <span class="s-neg">a structural earnings-timing risk rather than a case-specific one</span></div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Foreign-exchange translation:</strong> <u>A <strong>10%</strong> foreign-exchange move affects group pre-tax profit by GBP 28.6m</u>, a moderate, disclosed sensitivity</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Execution risk on Nexora:</strong> <u>The sale-process timeline is the single largest near-term execution-risk item</u>, <span class="s-neg">already captured under Element E7's change-from-current count</span></div></div></div></div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment</u></div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-3-pillar-iii-investment-case-components-nr" data-spy><span class="id">C.3</span> Pillar III: Investment Case Components [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case Parameters Summary -- A concise bridge summary of the case parameters assessment, preceding the Pillar III analysis.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Pillar III (Investment case components</u>, Elements E14, E17 through E20 detail) is first assessed at Early-Stage Assessment; no Pillar III content is authored at Triaging per Procedure 1</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components-nr" data-spy><span class="id">D</span> Pillar III: Investment Case Components [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at this stage. <span class="g gNR">NR</span></strong> <span class="s-mid">Pillar III (position-management playbook, invalidation thresholds, driver tables)</span> is first assessed at Early-Stage Assessment and carries no content at Triaging, per Procedure 1</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> <u>Pillar III (Investment case components</u>, including the 10 invalidation thresholds and 7-column driver tables) is first assessed at Early-Stage Assessment; no Pillar III content is authored at Triaging</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">7 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gB">B</span></strong> <span class="s-pos">Progress to Early-Stage Assessment</span> with moderate-to-high conviction</li><li><strong>Rationale in one line.</strong> <em>Strong, financially-manifesting change forces and a clean primary case-setup fit clear the Triaging bar</em>, with the Energy Services setback and cold-start cohort limitation flagged as watch items rather than blockers</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> <u>Progress to Early-Stage Assessment</u></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Net force balance underpinning the decision:</strong> <span class="s-pos">Three positive, high-plausibility forces outweigh one contained negative force</span> at this stage of analysis<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Positive force, portfolio simplification:</strong> <em>Two of three planned divestments are complete and cash-deployed</em>, with the third, Nexora, formally in process and targeted for a definitive agreement by calendar 2026 year-end</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Positive force, cash-conversion inflection:</strong> <em>Free cash flow conversion improved to <strong>108%</strong></em> from <strong>84%</strong>, a structural, not one-off, <span class="s-pos">improvement driven by the elimination of Info Tech's GBP 156m supply-chain financing arrangement</span></div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Positive force, leadership renewal:</strong> <em>An orderly, internally-sourced succession</em>, <span class="s-neg">chief financial officer Conor Murphy</span>, new chief operating officer Kevin Lucey, and board renewal toward energy expertise, reduces execution risk through the transition</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Negative force, Energy Services collapse:</strong> <span class="s-neg">A <strong>67.5%</strong> profit fall to GBP 15.7m</span>, with a GBP 43.16m impairment, is the clearest negative force in the case</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Persistence read:</strong> Whether this reverses is <u>genuinely uncertain</u> given no near-term stabilisation evidence in this pass's source material</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext"><strong>Positive force, valuation gap:</strong> <em>A 10.<span class="s-neg"><strong>7x</strong> forward P/E</span>, 33rd percentile</em>, sits below both DCC's own history and a private-market reference point, the KKR/ECP indicative <strong>7.9x</strong> EBITDA approach</div></div><div class="subfinding"><span class="subnum">2.7</span><div class="subtext"><strong>Closing condition:</strong> <u>Closing this gap depends on Nexora completing cleanly or Energy Services stabilising</u></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Conviction level:</strong> Moderate-to-high, not high, <span class="s-neg">reflecting the Energy Services setback and the cold-start cohort anchor</span></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>What must happen first:</strong> <u>Three specific gating items before Early-Stage Assessment work begins in earnest</u> 1. <strong>Business Foundation report:</strong> <u>Request and read in full</u>; Elements E9, E10, E12, and E13 cannot be responsibly assessed without it 2. <strong>Thematics refresh:</strong> Either refresh <code>memory/thematics/active.md</code> or explicitly re-strike Element E5 and MR3 against a live model before relying on the thematic-fit read 3. <strong>Price-data gap closure:</strong> Re-pull <code>master-dashboard/data/prices.json</code> once its truncation issue resolves, <span class="s-neg">to confirm the 52-week range and moving averages this pass could not extract</span></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Two downstream actions, by owner:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Chief of Staff action:</strong> <u>Generate the Business Foundation family report for DCC-GB</u>, front-of-queue, ahead of Early-Stage Assessment pickup</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Investment Analyst action:</strong> Re-pull <code>master-dashboard/data/prices.json</code> once the file's truncation issue resolves, confirming the 52-week range and moving averages this pass could not extract</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Watch items carried to Early-Stage Assessment:</strong> <u>Four specific items to track explicitly at the next stage</u><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Nexora sale progress:</strong> <u>The single largest near-term catalyst</u>; <span class="s-pos">monitor news flow for a definitive agreement announcement</span></div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Energy Services stabilisation:</strong> <u>Look for any sign the <strong>67.5%</strong> profit collapse has bottomed before treating</u> the "robust base" claim as fully restored</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>Cohort peer emergence:</strong> <u>If a first HLD08 peer memo is written before Early-Stage Assessment</u>, re-strike Element E1 and Element E11's grades against it</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Safety-metric trend:</strong> <u>Track whether the lost-time injury frequency rate</u>, up to 1.00 from 0.90, is a one-year blip or the start of a pattern</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>If parking were the alternative, reassessment criteria:</strong> <u>Not applicable this pass</u>, <span class="s-pos">since the recommendation is to progress</span>, not park; reassessment criteria would apply only if a future pass reverses this decision</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-grade-summa" data-spy><span class="id">F.1</span> Grade Summa</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"C","label":"Technical momentum"},"MR2":{"grade":"B","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"B","label":"Pillar II: Case building blocks"},"MR6":{"grade":"NR","label":"Pillar III: Investment case components [NR]"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"E1.RA1":{"grade":"B","label":"Change forces?"},"E1.RA2":{"grade":"B","label":"Robust base?"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness [NR — light framing only]"},"Group 5":{"grade":"NR","label":"Case optionality [NR]"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"C"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"B"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"B"},{"code":"MR5","label":"Case building blocks","grade":"B"},{"code":"MR6","label":"Investment case components","grade":"NR"}],"pillars":[{"roman":"I","label":"Case change elements","grade":"B","elements":[{"code":"E1","label":"Required input change forces","grade":"B","ras":[{"code":"RA1","label":"Change forces?","grade":"B","cqs":[]},{"code":"RA2","label":"Robust base?","grade":"B","cqs":[]}]},{"code":"E2","label":"Required case outputs","grade":null,"ras":[]},{"code":"E3","label":"Sufficient TSR / valuation upside","grade":null,"ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[]},{"code":"E6","label":"Sell-side earnings momentum","grade":null,"ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"C","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"C","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"B","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"B","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"B","ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"C","elements":[]},{"code":"GROUP 5","label":"Case optionality","grade":"NR","elements":[]}]},{"roman":"III","label":"Investment Case Components","grade":null,"elements":[],"groups":[]},{"roman":"III","label":"Investment Case Components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

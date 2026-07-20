@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Getlink SE (GET-FR) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">30</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-c">MR1 — Technical momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-c">MR2 — Sell-side earnings momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-d">MR3 — Thematic fit<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-and-recommendation">B.6 — Action and Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">75</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-c">Element E1 — Required input change forces<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">64</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 — Technical momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-d">Element E5 — Thematic fit<span class="nav-rating-pill D">D</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">33</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-d">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill D">D</span><span class="nav-fc">21</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">16</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">23</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">11</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">12</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Getlink SE (GET-FR) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">GET-FR</span> A&amp;J MEMO — Getlink SE (GET-FR) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 21-Jul-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">€18.56 (web fallback — prices.json has zero GET-FR records)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">29.8x (31st percentile of history)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">47%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Directionally above (May-June 2026 recovery per Notion move-data)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">GET-FR (Getlink SE)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Infrastructure — airports/trains</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Captive fixed-route transport operators (concession or monopoly infrastructure, regulated or quasi-regulated volume-driven revenue)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Jungfraubahn (JFN-CH)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">€18.56 (web fallback — prices.json has zero GET-FR records)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">€15.02–€19.85</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">Not available locally; qualitative Stage read only (see MR1 process note)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Directionally above (May-June 2026 recovery per Notion move-data)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">29.8x (31st percentile of history)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">€19.80 (Bloomberg median consensus, late Apr 2026)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">30 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>PARK verdict. <span class="g gC">C</span></strong> Getlink has a genuinely exceptional 2086-dated physical monopoly and best-in-class segment economics, but the Risks report's Analysis of Competing Hypotheses names FALSE FRIEND (interconnector windfalls masking core volume decay) the undisputed winner with only two minor inconsistencies against seven for the bull case</li><li><strong>Key risk.</strong> UK business-rates escalation (+€<strong>6m</strong> FY26, +€<strong>14</strong>-16m FY27, +€<strong>24</strong>-27m FY28) is a certain, non-cyclical structural drag layered on top of ElecLink's inherent volatility and freight-volume softness (LeShuttle truck traffic still <strong>27%</strong> below 2019 levels)</li><li><strong>Key support.</strong> Sell-side earnings momentum is genuinely constructive (EPS revisions +2 L1M, sales revisions positive across all windows, momentum score 7, target-price revisions +5 to +8 across L1M-L3M) and the concession structure (2086 tunnel; 2052 Railway Usage Contract; 2047 ElecLink exemption) is a multi-decade duration asset with no credible competitor</li><li><strong>Recommendation.</strong> Park at Triaging with defined re-entry conditions; re-examine once the FALSE FRIEND pathways (ElecLink spread normalisation, core shuttle volume trend) are explicitly resolved with two further quarters of data</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">8 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Core business: monopoly cross-Channel transport and energy infrastructure operator.</strong> Getlink SE owns and operates the Channel Tunnel Fixed Link under a concession running to 2086, monetised through four segments:<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Eurotunnel shuttle and rail-toll services (~<strong>75%</strong> of revenue), ElecLink electricity interconnector (<strong>14.1%</strong> of revenue), Europorte rail freight logistics (<strong>10.8%</strong> of revenue), and smaller customs/other services</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Physical moat:</strong> The Treaty of Canterbury bars publicly-funded duplication of the tunnel, and a private competing tunnel would require an investment exceeding €<strong>20bn</strong>; this is an effectively unchallengeable structural monopoly on the shortest sea crossing between France and the UK</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Geographic structure: UK-France cross-border with EUR/GBP dual-currency exposure.</strong> Revenue splits roughly two-thirds EUR / one-third GBP with ~<strong>60%</strong> of operating costs in EUR<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">The group carries <strong>zero financial derivative FX hedging</strong> (hedge ratio <strong>0.00%</strong>), a genuine outlier versus eurozone-only concession peers</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>FX sensitivity:</strong> A <strong>10%</strong> sterling depreciation reduces reported revenue by €<strong>64m</strong> and EBITDA by €<strong>46m</strong>; a <strong>30%</strong> dual-shock (sterling plus an ElecLink outage) would breach the minimum debt-service cover ratio of <strong>1.25x</strong></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Financial character: high-margin infrastructure compounder with capex-heavy medium-term profile.</strong> FY2025 EBITDA €<strong>859m</strong> at a <strong>53.9%</strong> margin (highest in its European transport-infrastructure peer set bar none, versus Vinci <strong>16%</strong> and Eiffage <strong>18%</strong>)<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">Net debt/EBITDA improved to <strong>3.9x</strong> from <strong>4.3x</strong></div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext">Free cash flow fell <strong>20.6%</strong> to €<strong>374m</strong> in FY2025 as capex rose to €<strong>190m</strong>, guided €<strong>170</strong>-220m annually to 2032</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>Segment margin spread:</strong> ElecLink <strong>70.2%</strong> EBITDA margin, Eurotunnel/Fixed Link <strong>55.6%</strong>, Europorte rail freight only <strong>19.8%</strong> — group blended margin is a function of segment mix, not uniform operating leverage</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Investment style: regulated/quasi-regulated infrastructure concession with event-driven optionality.</strong> The core Eurotunnel toll business behaves as a bond-like inflation-linked annuity (Railway Usage Contract indexed to CPI/RPI minus <strong>1.1%</strong> to 2052)<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">ElecLink behaves as a merchant-energy trading business layered on top, introducing genuine earnings volatility the core concession does not otherwise carry</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Ownership structure is a strategic-anchor-dominated register, not a widely-held float.</strong> Eiffage holds <strong>29.40%</strong> of capital / <strong>29.50%</strong> of voting rights<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">Mundys holds 19.00-<strong>25.00%</strong> of capital / <strong>29.90%</strong> of voting rights (the two disclosures diverge across reports, flagged in F.2)</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext">Both sit symmetrically just below the <strong>30%</strong> mandatory-offer threshold, gridlocking buybacks</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Governance is centralised and long-tenured.</strong> Chairman Jacques Gounon has led since 2007 (age limit raised from 70 to 75 in 2025 specifically to retain him)<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">CEO Yann Leriche (in post since 2020, reappointed to 2028) requires board sign-off above €<strong>10</strong>-20m thresholds</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext">**Peer rank on margin is best-in-class<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">Peer rank on growth is pedestrian.** Getlink's <strong>53.9%</strong> EBITDA margin dwarfs the civil-contractor peer set (Vinci, Eiffage, ACS, Hochtief all sub-<strong>20%</strong>) and even beats most airport-concession peers (Aena ~<strong>59%</strong>)</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext">But underlying volume growth is structurally low-single-digit, a genuine "quality but slow-growth" profile</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>CEO Yann Leriche:</strong> École Polytechnique (1997) plus École des Ponts — the classic French "Corps des Ponts" grande-école infrastructure-executive pedigree<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext">Prior CEO of Transdev North America (2017-2020, 17,000 employees, USD 1.4bn revenue)</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext">All roles nested inside larger parent organisations, with no independent standalone-company P&amp;L track record prior to Getlink</div></div></div></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>FALSE FRIEND ACH verdict is the central unresolved tension. <span class="g gD">D</span></strong> The Risks report's Analysis of Competing Hypotheses names FALSE FRIEND the definitive winner across 15 evidence items with only two<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Minor inconsistencies (versus seven for the bull case and four for the bear case), transient ElecLink power-spread windfalls and deferred capex are assessed as masking structural cross-Channel traffic decay</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Researcher's own recommendation:</strong> The underlying Risks report explicitly recommends parking the case until core shuttle volume trajectory inflects, calling joint failure-narrative probability over 18 months to 3 years "high plausibility"</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>UK business-rates escalation is a certain, multi-year structural cost, not a one-off. <span class="g gD">D</span></strong> Cumulative extra cost of €<strong>6m</strong> in FY2026<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">€<strong>14</strong>-16m in FY2027, and €<strong>24</strong>-27m in FY2028 after a failed Valuation Office Agency negotiation on a near-<strong>200%</strong> rateable-value increase</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext">Management has warned this threatens UK-specific capex allocation</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Sell-side earnings momentum is genuinely positive <span class="g gC">C</span>, but the composition is not confidence-inspiring.</strong> EPS revisions +2 (L1M)<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">Sales revisions positive across every window (L1M +1, L3M +1, L6M +2, L12M +1), target-price revisions +5 (L1M) to +8 (L3M), momentum score 7 out of a typical 10-point scale, buy% <strong>47%</strong></div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext">This is constructive but the underlying earnings quality question (ElecLink windfall vs core decay) means the SSEM signal could itself be a lagging confirmation of the false-friend pattern rather than a refutation of it</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>The 2086 concession and layered regulatory moats are genuinely exceptional and do not disappear. <span class="g gB">B</span></strong> Physical monopoly to 2086, Railway Usage Contract toll rights to 2052 (CPI/RPI-linked)<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">ElecLink's 25-year energy exemption to 2047, and Eurostar's multi-year rolling-stock/signalling lock-in together create one of the most durable infrastructure moats in the European Industrials universe</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Path occupancy headroom:</strong> At only <strong>45.6%</strong> path occupancy, Getlink can in principle double passenger volumes with minimal incremental capex at <strong>90%</strong>+ incremental EBITDA margins — but this is <em>capacity</em><div class="subfindings"><div class="subfinding"><span class="subnum">4.2.1</span><div class="subtext">Not <em>demonstrated demand</em>, and Triaging discipline requires treating it as optionality (Group 5) not as a delivered change force (E1)</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Verdict: PARK.</strong> The concession quality and SSEM support a watch-list position, but the FALSE FRIEND ACH verdict, UK business-rates certainty, and unresolved ElecLink earnings-quality question mean the case does not clear the Triaging bar for progression at current information<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Re-entry:</strong> Park and re-examine once two further quarters confirm whether core shuttle/freight volumes inflect positively (refuting FALSE FRIEND) or continue declining (confirming it)</div></div></div></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-c" data-spy><span class="id">MR1</span> Technical momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Notion move-data (16-May-26) shows a spike-and-fade pattern: +<strong>8.8%</strong> 20-day peak (28-Apr, on the Q1 results beat) fading to -<strong>6.6%</strong> 20-day trough (8-May, on weak April traffic data), settling near €<strong>18.40</strong><div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">The live price of €<strong>18.56 </strong>sits mid-range within the €<strong>15.02</strong>-€<strong>19.85 </strong>52-week band, not at either extreme, a constructive but unconfirmed technical picture given the absence of local moving-average and RS-percentile data (prices.json returned zero GET-FR records</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">Flagged as a coverage gap)</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-c" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Momentum score 7<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Sales revisions positive across all windows (L1M +1, L3M +1, L6M +2, L12M +1)</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">EPS revisions +2 L1M but -3 L6M and only +1 L12M, a choppy, not smoothly accelerating, revision pattern</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext">Target-price revisions strongly positive at L1M (+5) and L3M (+8) but buy% at <strong>47%</strong> sits below what a genuinely strong upgrade cycle would typically produce</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-d" data-spy><span class="id">MR3</span> Thematic fit <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Assessed on stock-specific first-principles reasoning only, per Richard's 04-Jul-26 instruction (no live thematic overlay applied — see F.2): Getlink's high fixed-cost operating leverage and net-debt/EBITDA of <strong>3.9x</strong> make it <strong>structurally fragile in an economic-downturn / high-rates scenario</strong> (Bernstein:<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">A <strong>100bp</strong> WACC increase cuts fair value <strong>19%</strong>)</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">And the business is close to AI-disruption-neutral (a physical transport concession is not intermediated by software), but the downturn-fragility finding dominates the mixed picture and holds the grade at <span class="g gD">D</span></div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">High-speed-rail new-entrant volume growth (Virgin 2030, Trenitalia 2029) and the ferry-cost-floor reset (EU ETS carbon surcharges, seafarer minimum-wage laws) are genuine external change forces already visible in Q1 2026 data<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">But they are only partially offsetting the UK business-rates certainty and the unresolved core-volume softness that the Risks report treats as decisive</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">E5 (Thematic fit) <span class="g gD">D</span> on downturn fragility<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">E7 (Simplicity guardrails) strained by ElecLink's volatility layered on the core concession <span class="g gC">C</span></div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">E8 (Fit with acceptable case setups) qualified decisively by the FALSE FRIEND negative guardrail <span class="g gD">D</span></div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext">E11 (Value-chain dynamics) is the strongest Pillar II element, reflecting the genuinely exceptional monopoly value-chain position <span class="g gB">B</span></div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at Triaging stage</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> High-speed-rail entrant volume growth and ferry-cost-floor reset are real external change forces, but neither is yet large enough or near-term enough to override the UK business-rates certainty and the unresolved FALSE FRIEND core-volume question; the case change picture is directionally positive but not yet Triaging-clearing</li><li><strong>Element E1 headline:</strong> Six distinct change forces identified (HSR entrant volumes, ferry cost-floor reset, EES border technology moat, ElecLink forward-contracted revenue, occupational rail-freight contract wins, cost-discipline programmes); the negative external force (UK business rates) is high-certainty and non-negotiable, while the positive forces carry meaningfully lower certainty</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gC">C</span></strong> HSR new-entrant volumes (Virgin Trains 2030, Trenitalia 2029) are ORR-approved and depot-secured, giving genuine near-certainty to a volume tailwind on the highest-margin Eurotunnel segment<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Ferry operators face a structural cost-floor reset from EU ETS carbon surcharges (€<strong>6 </strong>in 2025 rising to €<strong>11 </strong>in 2026) and seafarer minimum-wage laws (crew costs +75-<strong>150%</strong>)</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">Which should progressively narrow the ferry-price gap that has pressured LeShuttle volumes</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>The offsetting certainty:</strong> UK business rates are a confirmed, non-cyclical, escalating cost (+€<strong>24</strong>-27m by FY2028) following a failed VOA negotiation — this is the single most certain financial fact in the entire change-forces picture, and it is negative</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext"><strong>Base robustness caveat:</strong> Q1 2026 group revenue beat (+<strong>15%</strong> constant FX) was driven overwhelmingly by ElecLink (+<strong>112%</strong> YoY<div class="subfindings"><div class="subfinding"><span class="subnum">1.4.1</span><div class="subtext">+<strong>21%</strong> underlying) while LeShuttle truck volumes fell <strong>2%</strong> and passenger cars fell <strong>1%</strong> in the same quarter, the "well-invested base" question</div></div><div class="subfinding"><span class="subnum">1.4.2</span><div class="subtext">(E1 RA2) cannot be answered cleanly while the segment driving the beat is the segment the Risks report flags as the false-friend mechanism</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2: <span class="g gNR">NR</span></strong> Required case outputs — not applicable at Triaging</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3: <span class="g gNR">NR</span></strong> Sufficient TSR / valuation upside — not applicable at Triaging</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> The value-chain position (E11) is genuinely exceptional — a monopoly infrastructure asset at the highest-margin node of its chain — but the FALSE FRIEND negative guardrail on E8, thematic downturn-fragility on E5, and the multi-segment complexity straining E7's simplicity guardrails collectively hold Pillar II to <span class="g gC">C</span></li><li><strong>Group 1 (momentum): <span class="g gC">C</span></strong> Technical picture directionally recovering but unconfirmed by local data; SSEM constructive but choppy; thematic fit held down by rate/downturn sensitivity</li><li><strong>Group 2 (simplicity): <span class="g gC">C</span></strong> Four distinct segments (Eurotunnel, ElecLink, Europorte, customs) with materially different risk/return/margin profiles strain the "focused bet" standard; ElecLink's merchant-energy character is a genuinely different business bolted onto a toll-road concession</li><li><strong>Group 3 (philosophy): <span class="g gB">B</span></strong> Value-chain position is the strongest element in the memo — an unchallengeable physical/regulatory monopoly capturing the highest-margin nodes in its chain</li><li><strong>Group 4 (riskiness): <span class="g gC">C</span></strong> FALSE FRIEND is the Risks report's undisputed ACH winner; ten distinct failure narratives identified (seven High plausibility, three Medium); FX is an unhedged, durable headwind</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum: <span class="g gC">C</span></strong> Technical spike-and-fade pattern with no local RS/MA confirmation; SSEM momentum score 7 but choppy EPS revision pattern; thematic fit <span class="g gD">D</span> on downturn fragility</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity: <span class="g gC">C</span></strong> ElecLink's merchant-energy volatility, UK/France dual-regulatory-regime complexity, and four structurally distinct segments push the perimeter wider than an ideal focused bet</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy: <span class="g gB">B</span></strong> Genuinely exceptional value-chain position; concession runs to 2086; ElecLink exemption to 2047; Railway Usage Contract to 2052; Eurostar rolling-stock lock-in</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness: <span class="g gC">C</span></strong> FALSE FRIEND undisputed ACH winner; UK business rates certain and escalating; unhedged FX exposure; ElecLink profit-sharing cap (<strong>50%</strong> above <strong>13%</strong> pre-tax IRR) limits upside capture</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5: <span class="g gNR">NR</span></strong> Case optionality — not applicable at Triaging</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-and-recommendation" data-spy><span class="id">B.6</span> Action and Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision: <span class="g gC">C</span></strong> PARK — monitor for re-entry; the FALSE FRIEND ACH verdict and UK business-rates certainty are not yet overridden by the HSR/ferry-reset change forces or the constructive but choppy SSEM signal</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Park at Triaging; retain on watch list given RB interest level "A — very desired, 1st decile" in Notion</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> Two further quarters of shuttle/freight volume data showing genuine inflection (not merely ElecLink-driven headline beats); explicit confirmation the ElecLink spread windfall is not a one-off masking core decay</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to monitor Q2 and Q3 2026 traffic releases for LeShuttle truck/passenger volume trend, testing directly against the FALSE FRIEND pathway<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">(2) Watson to commission a Researcher follow-up specifically re-testing the ACH matrix once two further quarters of segment data are available</div></div></div></div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">75 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> Getlink combines one of the most durable physical/regulatory monopolies in European infrastructure with a Risks report ACH conclusion that names the current earnings picture a false friend; the central tension is whether the HSR/ferry-reset change forces are real and near-term enough to outrun a confirmed UK cost escalation and an unresolved core-volume question</li><li><strong>Load-bearing tension:</strong> Best-in-class monopoly economics and margin structure versus a decisively unflattering ACH verdict on the sustainability of the current earnings trajectory</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> HSR entrant volumes and the ferry cost-floor reset are genuine, partially-visible-in-2026-data external change forces; but UK business rates are a certain offsetting cost, and the change-forces picture as a whole has not yet demonstrated it can overcome the core-volume softness the Risks report treats as the dominant signal</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-c" data-spy>Element E1 — Required input change forces <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E1 verdict. <span class="g gC">C</span></strong> Six distinct change forces are identified across the Change Forces and Business Foundation reports (HSR entrant volumes, ferry cost-floor reset, EES border-technology moat, ElecLink forward-contracted revenue, Europorte contract wins, cost-discipline programmes); the base robustness question (RA2) is compromised by the Q1 2026 beat being ElecLink-driven while core shuttle volumes declined in the same quarter, this is the E1 finding most directly in tension with the Risks report's FALSE FRIEND verdict</li></ul></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1 <span class="g gC">C</span>, Strong external change forces / tailwinds?:</strong> High-speed-rail liberalisation is ORR-approved and depot-secured: Virgin Trains targets 6.0m annual passengers by 2030 with Temple Mills depot access confirmed<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">Trenitalia targets Paris-London by 2029</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">Eurostar itself targets 30m passengers by 2030 (up from 20m in FY2025) via a EUR 2.0bn order for 50 new Alstom Avelia Horizon trains</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Ferry cost-floor reset is structural, not cyclical:</strong> EU ETS maritime carbon surcharges rise from EUR 6 in 2025 to EUR 11 in 2026<div class="subfindings"><div class="subfinding"><span class="subnum">1.3.1</span><div class="subtext">Seafarer minimum-wage laws are projected to raise ferry crew costs by 75-<strong>150%</strong></div></div><div class="subfinding"><span class="subnum">1.3.2</span><div class="subtext">Ferry operators have already been forced into sequential fare hikes (P&amp;O +<strong>30%</strong>, Irish Ferries +<strong>27%</strong>, DFDS +<strong>24%</strong>) rather than absorbing the cost</div></div></div></div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext"><strong>EES biometric border technology moat:</strong> Getlink has invested over EUR 70m in smart-border technology (two pre-registration zones processing 50 vehicles simultaneously) ahead of the April-September 2026 EES rollout<div class="subfindings"><div class="subfinding"><span class="subnum">1.4.1</span><div class="subtext">Positioning Getlink to convert regulatory friction into a competitive edge versus slower ferry-port processing, though this remains untested at peak-holiday volumes</div></div></div></div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext"><strong>External headwind, UK business rates escalation: <span class="g gD">D</span></strong> A near-<strong>200%</strong> Valuation Office Agency rateable-value increase, after failed negotiation, layers EUR 6m (FY26), EUR 14-16m (FY27), and EUR 24-27m (FY28) of certain, non-discretionary additional cost<div class="subfindings"><div class="subfinding"><span class="subnum">1.5.1</span><div class="subtext">CEO Leriche has warned this threatens UK-specific capital allocation</div></div></div></div></div><div class="subfinding"><span class="subnum">1.6</span><div class="subtext"><strong>European power-demand supercycle supports ElecLink structurally:</strong> European power demand is forecast to grow 1.5-<strong>2.0%</strong> annually from 2026<div class="subfindings"><div class="subfinding"><span class="subnum">1.6.1</span><div class="subtext">Great Britain plans interconnector capacity expansion from 8GW to 12GW by 2030</div></div><div class="subfinding"><span class="subnum">1.6.2</span><div class="subtext">Over <strong>40%</strong> of Europe's distribution grids are more than 40 years old, a genuine multi-year tailwind for interconnector economics generally</div></div></div></div></div><div class="subfinding"><span class="subnum">1.7</span><div class="subtext"><strong>Competitive dynamic shift from price war to rational capacity:</strong> The ferry market moved from 11 active vessels to a more rational 8 in the Notion peer-triage read, consistent with the cost-floor-reset thesis beginning to bite<div class="subfindings"><div class="subfinding"><span class="subnum">1.7.1</span><div class="subtext">This is corroborative but not yet conclusive evidence the mechanism is fully playing out</div></div></div></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext">**E1 RA1 CQ2 <span class="g gC">C</span><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">Strong internal change forces?:** Management has demonstrated real cost discipline: the EUR 40m Shield programme (2020-22) and the Eurotunnel Performance Plan (EUR 7m in FY2025) delivered opex growth of only <strong>2%</strong> in 2025 against <strong>5%</strong>+ wage inflation</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext">A genuine operating-leverage extraction</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Customs-services bolt-on acquisitions:</strong> Getlink acquired Associated Shipping Agencies and Boulogne International Maritime Services (Jan 2025, EUR 12m) and Bongers Customs Services (<strong>100%</strong>, Netherlands, May 2026)<div class="subfindings"><div class="subfinding"><span class="subnum">2.3.1</span><div class="subtext">Other revenues grew <strong>20%</strong> to EUR 49m in 2025, a genuine if modest internal diversification lever</div></div></div></div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>PRISM laser maintenance system:</strong> AI-assisted maintenance optimisation extends wheel life by <strong>25%</strong>, a tangible internal efficiency gain layered on top of the broader opex-discipline story</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Internal headwind, Europorte non-core drag:</strong> Management itself characterises Europorte (<strong>10.8%</strong> of revenue, <strong>19.8%</strong> EBITDA margin, the lowest-margin segment) as "mature/harvesting"<div class="subfindings"><div class="subfinding"><span class="subnum">2.5.1</span><div class="subtext">Yet no exit or consolidation has occurred, a signal of bureaucratic inertia around portfolio simplification that the Leadership report separately flags as a hired-manager pattern</div></div></div></div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext">**Dividend policy overreach is an internal-credibility risk<div class="subfindings"><div class="subfinding"><span class="subnum">2.6.1</span><div class="subtext">Not an external one:** the EUR 0.80-to-EUR 1.00-by-2030 dividend framework (up <strong>38%</strong> year on year into 2026) combined with the EUR 516m cumulative</div></div><div class="subfinding"><span class="subnum">2.6.2</span><div class="subtext">ElecLink profit-sharing provision and EUR 170-220m annual capex creates a stated policy that management's own free-cash-flow trajectory does not obviously support without cash-reserve drawdown</div></div></div></div></div><div class="subfinding"><span class="subnum">2.7</span><div class="subtext"><strong>C-suite continuity is a genuine internal-change-force positive, in contrast to several cohort and sector peers:</strong> CEO Leriche reappointed to 2028<div class="subfindings"><div class="subfinding"><span class="subnum">2.7.1</span><div class="subtext">Deputy CEO Perichon promoted from within in March 2024 as a visible qualified successor</div></div><div class="subfinding"><span class="subnum">2.7.2</span><div class="subtext">This stability is a positive differentiator versus the near-total-rotation pattern seen elsewhere in Watson's coverage</div></div></div></div></div></div></div></div>
+<p><strong>RA1 - Change forces summary <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> The change forces are real, identifiable, and partially already visible in 2026 data (HSR approvals, ferry fare hikes, ElecLink forward-contracting)<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">But the single most certain financial fact among them, UK business rates, is negative, and the segment producing the visible beat (ElecLink) is the segment flagged as the false-friend mechanism</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Near-term financial impact split:</strong> UK business rates (certain, negative, EUR 24-27m by FY28) versus HSR and ferry-reset volume upside (probable but multi-year, not yet fully quantified at the group EBITDA level)<div class="subfindings"><div class="subfinding"><span class="subnum">3.2.1</span><div class="subtext">The near-term arithmetic is closer to balanced-to-negative than clearly positive</div></div></div></div></div></div></div></div>
+<p><strong>RA2 - Robust base summary <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Getlink's operating base is exceptional on margin and balance-sheet metrics (<strong>53.9%</strong> EBITDA margin, deleveraging to <strong>3.9x</strong> net debt to EBITDA<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">S&amp;P and Fitch upgrades to BB+ and BBB+) but the Q1 2026 delivery pattern, an ElecLink-driven beat masking core volume softness, is precisely the pattern the Risks report's ACH matrix treats as decisive evidence for FALSE FRIEND</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Base quality is not the open question; earnings-quality composition is:</strong> the question at Triaging is not whether Getlink's infrastructure is well-invested (it plainly is) but whether the reported earnings trajectory reflects genuine underlying momentum or a temporarily flattering mix shift</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ1 <span class="g gD">D</span> - Absence of external headwinds?:</strong> Three material, simultaneously-active external headwinds are present: (1) UK business rates escalation (certain, EUR 24-27m by FY28)<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">(2) LeShuttle Freight volume contraction (-<strong>3%</strong> in 2025, truck traffic still <strong>27%</strong> below 2019 levels on persistent Brexit customs friction)</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext">(3) unhedged sterling exposure (<strong>10%</strong> depreciation equals EUR 64m revenue and EUR 46m EBITDA hit)</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>EES rollout is a genuine near-term operational risk, not merely a moat:</strong> Frontex has warned of up to two years of border-friction disruption<div class="subfindings"><div class="subfinding"><span class="subnum">5.3.1</span><div class="subtext"><strong>59%</strong> of surveyed UK holidaymakers already expect delays</div></div><div class="subfinding"><span class="subnum">5.3.2</span><div class="subtext">If peak-holiday dwell times exceed 30 minutes per vehicle, traffic could shift to ferries despite Getlink's technology investment</div></div></div></div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext"><strong>Ferry overcapacity persists even as the cost floor resets:</strong> eleven ships operated the Dover-Calais route in 2025 amid structural overcapacity<div class="subfindings"><div class="subfinding"><span class="subnum">5.4.1</span><div class="subtext">The Business Foundation report notes rational capacity reduction to eight vessels but this is a work-in-progress transition, not a completed one</div></div></div></div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext"><strong>Sovereign-yield sensitivity is a real, current headwind:</strong> Bernstein calculates a <strong>100bp</strong> WACC increase cuts fair value by <strong>19%</strong>; French and UK sovereign yields have been rising through 2026, a live risk to the valuation independent of operational performance</div></div><div class="subfinding"><span class="subnum">5.6</span><div class="subtext"><strong>RA2 CQ1 verdict: <span class="g gD">D</span></strong> Multiple simultaneous, structural (not merely cyclical) external headwinds are active; this is the clearest D-grade finding in Element E1</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA2 CQ2 <span class="g gB">B</span> - Well-invested base?:</strong> The physical and regulatory infrastructure is genuinely best-in-class: concession to 2086, Railway Usage Contract to 2052<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">ElecLink exemption to 2047, EUR 1.7bn cumulative investment programme, and only <strong>45.6%</strong> path occupancy leaving substantial capacity headroom at over <strong>90%</strong> incremental EBITDA margins</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Balance-sheet quality supports the base:</strong> Net debt fell EUR 184m to EUR 3,392m in 2025<div class="subfindings"><div class="subfinding"><span class="subnum">6.2.1</span><div class="subtext">Net debt to EBITDA improved to <strong>3.9x</strong> from <strong>4.3x</strong> (versus a peer median nearer <strong>4.5x</strong>)</div></div><div class="subfinding"><span class="subnum">6.2.2</span><div class="subtext">S&amp;P and Fitch both upgraded ratings in 2025-2026</div></div><div class="subfinding"><span class="subnum">6.2.3</span><div class="subtext">A EUR 600m green bond was issued at <strong>4.125%</strong> maturing 2030</div></div></div></div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>Deferred tax asset shield:</strong> EUR 986m of recognised deferred tax assets (EUR 461m France, EUR 525m UK) provide a multi-year net-income cushion independent of operating performance</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>RA2 CQ2 verdict: <span class="g gB">B</span></strong> The infrastructure and balance-sheet base is genuinely well-invested; this is the strongest sub-finding in E1 and the primary reason the case remains watch-list-worthy rather than reject-outright</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E1 RA2 CQ3 <span class="g gC">C</span> - Past/present fundamental delivery congruency with thesis?:</strong> Q1 2026 revenue beat (EUR 371m vs EUR 361.3m consensus, plus <strong>2.7%</strong>) is real at the headline level<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">And FY2025 EBITDA (EUR 859m) beat the initial guidance range (EUR 780-830m) by <strong>6.7%</strong>, continuing a consistent multi-year guidance-beat pattern (FY23 plus <strong>5.3%</strong>, FY24 plus <strong>3.5%</strong>, FY25 plus <strong>6.7%</strong>)</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Segment-level congruency breaks down:</strong> Q1 2026 segment beats and misses were mixed - Shuttle Services plus <strong>3.4%</strong> versus consensus, Railway Network minus <strong>3.7%</strong> versus consensus, ElecLink plus <strong>11.3%</strong> versus consensus<div class="subfindings"><div class="subfinding"><span class="subnum">7.2.1</span><div class="subtext">The group beat was carried almost entirely by ElecLink, not by the toll/shuttle core the investment thesis is normally anchored on</div></div></div></div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>Volume data directly contradicts the "core delivering" narrative:</strong> LeShuttle truck volumes -<strong>2%</strong> year on year and passenger cars -<strong>1%</strong> year on year in Q1 2026<div class="subfindings"><div class="subfinding"><span class="subnum">7.3.1</span><div class="subtext">April data showed passenger shuttles -<strong>9.8%</strong> year on year and May showed trucks -<strong>1.5%</strong> year on year, a genuinely weak and persistent volume trend, not a one-quarter blip</div></div></div></div></div><div class="subfinding"><span class="subnum">7.4</span><div class="subtext"><strong>RA2 CQ3 verdict: <span class="g gC">C</span></strong> Congruency is mixed; headline and margin delivery is consistent with the thesis, but volume delivery (the leading indicator for the HSR and ferry-reset change forces actually working) is not yet congruent</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E1 RA2 CQ4 <span class="g gC">C</span> - Large change-from-current / mispricing?:</strong> At <strong>29.8x</strong> forward P/E (31st percentile of history), Getlink is not trading at a level that signals the market has failed to price the HSR and ferry-reset optionality<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext">This is a materially higher percentile than several other Triaging-stage names in Watson's current coverage, and does not obviously represent a mispriced opportunity</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Sell-side target dispersion is wide but centred near current price:</strong> Bloomberg median target EUR 19.80 (only about <strong>6.7%</strong> above the EUR 18.56 live price)<div class="subfindings"><div class="subfinding"><span class="subnum">8.2.1</span><div class="subtext">Refinitiv consensus <strong>47%</strong> Overweight, <strong>35%</strong> Equal-weight, <strong>18%</strong> Underweight with targets spanning EUR 12.50-20.00, a genuinely divided sell-side, not a consensus mispricing call</div></div></div></div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>Bear-case downside is material and credibly sourced:</strong> Morgan Stanley's bear case of EUR 13.70 implies a <strong>29%</strong> correction<div class="subfindings"><div class="subfinding"><span class="subnum">8.3.1</span><div class="subtext">Options pricing implies a <strong>12.9%</strong> probability of falling below that level, a non-trivial tail risk that the current <strong>29.8x</strong> multiple does not obviously compensate for</div></div></div></div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext"><strong>RA2 CQ4 verdict: <span class="g gC">C</span></strong> The change-from-current is real (HSR entrants, ferry cost reset) but is not obviously underpriced at the current multiple; this is a fairly-priced-with-optionality read, not a large-mispricing read</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E1 RA2 CQ5 <span class="g gD">D</span> - Low trading multiple?:</strong> Forward P/E of <strong>29.8x</strong> sits at the 31st percentile of Getlink's own 10-year history<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">Meaningfully above the depressed-multiple entry-point geometry Triaging discipline looks for, and well above what a large-change-from-current-at-a-cheap-multiple setup would require</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>Peer-relative context (cohort):</strong> Jungfraubahn (JFN-CH), the nearest cohort peer, is a substantially smaller, single-asset Swiss mountain-railway concession with a different risk and multiple profile<div class="subfindings"><div class="subfinding"><span class="subnum">9.2.1</span><div class="subtext">A direct P/E comparison is of limited value given scale and market differences, but neither cohort peer is trading at a level suggesting Getlink is a relative bargain</div></div></div></div></div><div class="subfinding"><span class="subnum">9.3</span><div class="subtext"><strong>Peer-relative context (sector):</strong> Large-hub airport operators (ADP-FR, AENA-ES, FRA-DE) typically command premium multiples reflecting more diversified commercial-concession upside; Getlink's <strong>29.8x</strong> is not obviously cheap relative to this broader sector set either</div></div><div class="subfinding"><span class="subnum">9.4</span><div class="subtext"><strong>RA2 CQ5 verdict: <span class="g gD">D</span></strong> The multiple is not low by any of the three lenses (own history, cohort, sector); this is the second clear D-grade finding within E1 RA2 and directly weakens the robust-base-at-an-attractive-entry-point case</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The strongest E1 counter-argument is that ElecLink's forward-contracted revenue (<strong>89%</strong> of FY2026 capacity already secured at EUR 291m) means the false-friend framing is overstated<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext">A genuinely contracted revenue stream is not the same as a one-off windfall, and the volume softness may simply reflect near-term Brexit-related customs friction that resolves as EES beds in</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Watson response:</strong> This counter has real force on the ElecLink forward-contracting point specifically, but it does not address the core volume trend (LeShuttle truck traffic <strong>27%</strong> below 2019 levels for six years running) or the UK business-rates certainty<div class="subfindings"><div class="subfinding"><span class="subnum">10.2.1</span><div class="subtext">Both of which are independent of the ElecLink earnings-quality question and are decision-relevant on their own</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) Watson to track Q2 and Q3 2026 LeShuttle truck and passenger-car volume data specifically<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext">Testing whether the ferry cost-floor reset is translating into genuine volume share gains for Getlink or merely into higher ferry prices with volumes still shifting elsewhere</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext">(2) Watson to flag the FY2026 UK business-rates outcome (final VOA determination) as a hard trigger for reassessing the E1 RA1 external-headwind grade</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">64 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Value-chain position (E11) is the strongest element in the memo, reflecting a genuinely unchallengeable monopoly; but thematic downturn-fragility (E5), multi-segment complexity straining simplicity (E7), and the decisive FALSE FRIEND negative guardrail on E8 collectively hold Pillar II to <span class="g gC">C</span></li><li><strong>Group headline:</strong> Group 1 <span class="g gC">C</span> momentum split between constructive-but-choppy SSEM and thematic downturn-fragility; Group 2 <span class="g gC">C</span> simplicity strained by ElecLink's different risk character; Group 3 <span class="g gB">B</span> core philosophy carried by an exceptional value chain; Group 4 <span class="g gC">C</span> riskiness dominated by the FALSE FRIEND ACH verdict and unhedged FX</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> SSEM is genuinely constructive but the revision pattern is choppy rather than smoothly accelerating; thematic fit is held down to <span class="g gD">D</span> by the stock's structural fragility to a downturn/high-rates scenario, a first-principles finding independent of any live macro overlay</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 — Technical momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E4 (Technical momentum) is first assessed at Early-Stage Assessment; the spike-and-fade price pattern (Notion move-data, 16-May-26) and the live price versus 52-week range are summarised at MR1 level in Section B for context only</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-d" data-spy>Element E5 — Thematic fit <span class="g gD">D</span> <span class="secn">10 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict. <span class="g gD">D</span></strong> Assessed on stock-specific first-principles reasoning only per Richard's explicit instruction of 04-Jul-26, no live thematic overlay from memory/thematics/active.md or any macro frame was read or applied. Getlink's high fixed-cost operating leverage, <strong>3.9x</strong> net debt/EBITDA, and unhedged FX position make it structurally fragile in an economic-downturn or rising-rate scenario; AI-disruption exposure is close to neutral for a physical transport concession; the downturn-fragility finding dominates and holds the grade to <span class="g gD">D</span></li></ul></div>
+<p><strong>E5 RA1, Suitability for bear market / economic downturn <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gD">D</span></strong> Getlink is NOT structurally defensive in an economic downturn, despite the intuitive "toll road" framing, the business carries genuine operating and financial leverage that a true downturn-resilient business would not<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Fixed-cost operating leverage cuts both ways:</strong> incremental volumes convert at over 80-<strong>90%</strong> EBITDA margin (a positive in growth), but the same fixed-cost base means volume <em>declines</em> in a downturn also convert at a similarly punishing rate<div class="subfindings"><div class="subfinding"><span class="subnum">1.1.1</span><div class="subtext">Getlink's 2020 experience is the direct evidence: Eurostar passenger volumes fell <strong>77%</strong> and EBITDA compressed <strong>41%</strong> to EUR 328m in a single demand shock year</div></div></div></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ1 <span class="g gD">D</span>, Bear market defensive credentials?:</strong> Cross-Channel passenger and freight volumes are discretionary-travel and trade-cyclical in character, not the non-discretionary, recurring-inflow character of a genuinely defensive business (contrast with a savings platform or a utility)<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Financial leverage compounds the exposure:</strong> net debt/EBITDA of <strong>3.9x</strong> means a downturn-driven EBITDA decline mechanically worsens leverage ratios at the same time revenue is falling, a double-negative that a lower-leverage business would not face</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Sovereign-yield sensitivity is a direct downturn transmission channel:</strong> Bernstein's finding that a <strong>100bp</strong> WACC increase cuts fair value by <strong>19%</strong> means Getlink's equity value<div class="subfindings"><div class="subfinding"><span class="subnum">2.2.1</span><div class="subtext">Is directly exposed to the rate environment a downturn typically brings (either through a flight-to-quality rally in safe yields or a stagflationary rate spike</div></div><div class="subfinding"><span class="subnum">2.2.2</span><div class="subtext">Both plausible downturn transmission mechanisms)</div></div></div></div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Freight volumes are explicitly trade-cyclical:</strong> LeShuttle Freight (-<strong>3%</strong> in 2025) already tracks softer UK/EU industrial and trade activity even in a non-recessionary environment; a genuine downturn would be expected to worsen this materially</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Unhedged FX exposure is a downturn amplifier, not a mitigant:</strong> a sterling-depreciation shock, plausible in a UK-specific downturn or a no-deal-style shock<div class="subfindings"><div class="subfinding"><span class="subnum">2.4.1</span><div class="subtext">Directly reduces reported revenue and EBITDA with zero hedge offset (hedge ratio <strong>0.00%</strong>), this is a structural fragility unusual among European infrastructure peers</div></div></div></div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>RA1 verdict: <span class="g gD">D</span></strong> The combination of operating leverage, financial leverage, sovereign-yield sensitivity, and unhedged FX exposure means Getlink should be assessed as fragile<div class="subfindings"><div class="subfinding"><span class="subnum">2.5.1</span><div class="subtext">Not resilient, in a genuine economic downturn, a materially different (and more negative) finding than the "defensive infrastructure toll road" framing sometimes applied to concession assets</div></div></div></div></div></div></div></div>
+<p><strong>E5 RA2, Suitability for AI disruption <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Getlink's core business (physical cross-Channel transport infrastructure) is not directly disintermediated by AI, a tunnel cannot be replaced by software<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">But AI-driven changes in travel/logistics booking, freight brokerage, and border-processing automation could shift bargaining power or margin capture at the edges without threatening the core physical monopoly</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA2 CQ1 <span class="g gC">C</span>, AI disruption risk?:</strong> The physical concession (Fixed Link, Railway Usage Contract) is not exposed to AI disintermediation in the way a service intermediary or a content business would be<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">The tunnel and its regulated toll rights are a genuinely durable physical/legal asset independent of any software layer</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>AI as an internal productivity tool, not an external threat:</strong> the PRISM laser maintenance system and general operational AI tooling are internal efficiency gains<div class="subfindings"><div class="subfinding"><span class="subnum">4.2.1</span><div class="subtext">Similar in kind to the pattern seen across the peer set, and do not alter Getlink's competitive position materially</div></div></div></div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Genuine AI-adjacent risk sits in freight brokerage and logistics automation:</strong> AI-driven freight-matching platforms could compress the margin Europorte and customs-services bolt-ons currently capture<div class="subfindings"><div class="subfinding"><span class="subnum">4.3.1</span><div class="subtext">Though this is a second-order risk to a small (<strong>10.8%</strong> of revenue) and already-flagged "mature/harvesting" segment, not to the core Eurotunnel toll business</div></div></div></div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>RA2 verdict: <span class="g gC">C</span></strong> Broadly neutral; the core concession is insulated, the small freight-logistics adjacency carries modest AI-related margin risk; net effect is neither a meaningful AI tailwind nor a meaningful AI threat</div></div></div></div></div>
+<p><strong>E5 RA3, Suitability for Iran / oil-price induced inflation or demand deterioration <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> Getlink has limited direct oil-price exposure (an electrified rail/tunnel operator, not an energy-intensive shipper) but a material indirect exposure through consumer discretionary-travel demand and through the ferry-competitor cost base</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E5 RA3 CQ1 <span class="g gC">C</span>, Iran/oil exposure?:</strong> Direct operational oil exposure is low: Getlink's own operations (electrified shuttle and rail services) do not consume meaningful bunker fuel or refined-product inputs, unlike its ferry-operator competitors<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Indirect competitive-dynamics channel is genuinely two-sided:</strong> a sustained oil-price spike raises ferry operators' bunker-fuel costs (<strong>40%</strong> of ferry operating costs per the Business Foundation report), which should widen Getlink's relative cost advantage, a modest positive</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Consumer demand-deterioration channel is a modest negative:</strong> an oil-driven inflation shock reduces discretionary cross-Channel travel demand (car and coach passenger volumes), directly hitting LeShuttle Passenger revenue, an effect with no clean offset</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>RA3 verdict: <span class="g gC">C</span></strong> Broadly neutral to mildly positive on the direct/competitive-cost channel, offset by a modest negative on discretionary-demand; net assessed as <span class="g gC">C</span></div></div></div></div></div>
+<p><strong>E5 RA4, Paradigm fit from business perspective summary <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> Getlink fits the "regulated/quasi-regulated infrastructure concession with a merchant-energy overlay" archetype, a real and historically validated pattern, but the ElecLink merchant-energy layer introduces a genuinely different risk character than a pure toll-road or airport concession</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E5 RA4 CQ1 <span class="g gC">C</span>, Paradigm fit?:</strong> The core Eurotunnel business fits cleanly into the bond-like, inflation-linked infrastructure-concession paradigm that has historically rewarded patient capital (Railway Usage Contract to 2052, CPI/RPI-minus-<strong>1.1%</strong> indexation)<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>ElecLink is a genuinely different paradigm bolted on top:</strong> a 25-year energy exemption with <strong>50%</strong> profit-sharing above a <strong>13%</strong> pre-tax IRR is a merchant-energy-trading risk profile<div class="subfindings"><div class="subfinding"><span class="subnum">8.1.1</span><div class="subtext">Not an infrastructure-concession risk profile, the two paradigms coexist inside one balance sheet, complicating a clean paradigm-fit assessment</div></div></div></div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>The dual-paradigm structure is itself a source of the FALSE FRIEND risk:</strong> a merchant-energy segment layered on an infrastructure-concession core is precisely the structure that allows one segment's volatility (ElecLink) to mask the other's (core Eurotunnel) trend</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>RA4 verdict: <span class="g gC">C</span></strong> Reasonable paradigm fit for the core business; the ElecLink overlay introduces genuine paradigm impurity that a Triaging-depth read should flag rather than smooth over</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> The strongest E5 counter-argument is that the 2086 concession duration and CPI/RPI-linked toll structure are themselves a genuine downturn hedge<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">An inflation-linked, multi-decade contracted revenue stream is exactly the kind of asset that outperforms in a stagflationary environment, even if near-term volumes soften</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>Watson response:</strong> This has real force for the Railway Usage Contract toll component specifically<div class="subfindings"><div class="subfinding"><span class="subnum">9.2.1</span><div class="subtext">But does not extend to LeShuttle's volume-driven shuttle revenue (the majority of Eurotunnel segment revenue) or to ElecLink's merchant-energy exposure, both of which remain volume/price-cyclical rather than inflation-hedged</div></div><div class="subfinding"><span class="subnum">9.2.2</span><div class="subtext">The counter-argument narrows but does not overturn the <span class="g gD">D</span> downturn-fragility finding</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) Watson to model a downturn scenario explicitly (volume decline plus sovereign-yield spike plus sterling depreciation combined) to quantify the compound downside before any progression decision<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext">(2) Watson to track whether the Railway Usage Contract's inflation-linked toll component provides a measurable buffer in the next reporting period showing any demand softening</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">33 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gC">C</span></strong> The core toll/concession thesis is genuinely simple, but the ElecLink merchant-energy overlay, the Europorte non-core drag, and the dual-currency UK/France regulatory regime collectively push the case beyond an ideal focused-bet perimeter</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict. <span class="g gC">C</span></strong> Two identifiable fulcrum drivers exist (core toll/shuttle volume recovery via HSR and ferry-reset; ElecLink spread normalisation), but the segment-count, dual-currency, and dual-regulatory-regime complexity extend the monitoring perimeter beyond the ideal simplicity standard</li></ul></div>
+<p><strong>E7 RA1, Focused bet? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> Two clear fulcrum drivers can be named, (1) core Eurotunnel/shuttle volume recovery via HSR entrants and ferry-cost-floor reset<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">(2) ElecLink spread sustainability at or near current forward-contracted levels, but each fulcrum carries its own distinct sub-drivers, extending the effective key-driver count well beyond the ideal ceiling</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ1 <span class="g gC">C</span>, 2 or fewer fulcrum drivers AND 4 or fewer key drivers?:</strong> The two fulcrum drivers are identifiable<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">But the key-driver count extends to at least six when disaggregated: HSR entrant volumes, ferry cost-floor reset, ElecLink spread/capacity, UK business rates, Europorte contract wins, and FX exposure</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Fulcrum driver 1 (core volume recovery) is itself compound:</strong> it depends on Virgin/Trenitalia execution timing (outside Getlink's control), EES rollout smoothness (partially outside Getlink's control)<div class="subfindings"><div class="subfinding"><span class="subnum">2.2.1</span><div class="subtext">And ferry-operator pricing discipline (a competitor behaviour, outside Getlink's control), three externally-dependent sub-conditions bundled into one "fulcrum"</div></div></div></div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Fulcrum driver 2 (ElecLink) is a genuinely separate business risk:</strong> spread sustainability depends on European power-market dynamics largely uncorrelated with the core transport thesis, meaning a Getlink investor is implicitly taking two distinct bets in one security</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>RA1 verdict: <span class="g gC">C</span></strong> Identifiable at the top level, but the six-driver, cross-domain complexity (transport plus merchant energy) exceeds the four-or-fewer key-driver simplicity standard</div></div></div></div></div>
+<p><strong>E7 RA2, Narrow perimeter? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> Geographically narrow (essentially a single cross-Channel corridor) but the product/segment perimeter spans four structurally distinct businesses (Eurotunnel toll/shuttle, ElecLink merchant energy, Europorte rail freight, customs services) with materially different margin, regulatory, and cyclicality profiles</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA2 CQ1 <span class="g gC">C</span>, 10 or fewer geographies and/or business units?:</strong> Geographic perimeter passes cleanly (UK-France corridor only, no meaningful international diversification); the business-unit count (four structurally distinct segments) is the genuine complexity driver<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Dual-currency, dual-regulatory-regime overlay:</strong> operating simultaneously under French and UK regulatory, tax, and property-rates regimes (the VOA dispute is a direct manifestation) adds a jurisdictional-complexity layer that a single-country concession peer would not carry</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>RA2 verdict: <span class="g gC">C</span></strong> Geography is clean; business-unit and regulatory-regime complexity is the genuine simplicity constraint</div></div></div></div></div>
+<p><strong>E7 RA3, Zero headwinds? <span class="g gD">D</span></strong></p>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gD">D</span></strong> Multiple simultaneous, active, structural headwinds are present, this is a direct restatement of the E1 RA2 CQ1 finding and is consistently the most negative sub-finding across the memo</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA3 CQ1 <span class="g gD">D</span>, Zero value-chain headwind risks to revenue?:</strong> UK business rates (certain, escalating), LeShuttle Freight volume decline (-<strong>3%</strong>, structurally below 2019 levels), unhedged FX exposure, and ferry-operator overcapacity are all simultaneously live and material<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>RA3 verdict: <span class="g gD">D</span></strong> Zero headwinds is clearly not met; this Element carries the same D-grade finding as E1 RA2 CQ1, reinforcing rather than adding new information, but confirming the headwind picture is pervasive across the framework, not an isolated finding</div></div></div></div></div>
+<p><strong>E7 RA4, Handful of change-from-current items? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> A small number of genuinely trackable change-from-current items exist (HSR entrant launch dates, VOA rates determination<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">ElecLink forward-contract renewal pace) but the ElecLink segment introduces an additional, less-trackable change-from-current variable (spot power-spread movements) that sits outside management's control</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E7 RA4 CQ1 <span class="g gC">C</span>, 2 or fewer change-from-current items?:</strong> Trackable items: HSR launch execution (Virgin 2030, Trenitalia 2029), VOA rates final determination, ferry-fare/cost-floor pass-through pace, three items, at the upper bound of what a focused-bet Triaging standard tolerates<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>RA4 verdict: <span class="g gC">C</span></strong> At or slightly above the ideal ceiling; manageable but not a clean two-item change-from-current picture</div></div></div></div></div>
+<p><strong>E7 RA5, Conservative investor relations? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> Getlink's investor-relations posture is genuinely disciplined and conservative, a consistent multi-year guidance-beat pattern (FY23 +<strong>5.3%</strong>, FY24 +<strong>3.5%</strong><div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">FY25 +<strong>6.7%</strong>) with FY2026 guidance (EUR 820-860m) set just below the company-compiled consensus of EUR 862m and below Bernstein's EUR 893m estimate, a textbook sandbagging pattern rather than an aggressive-target pattern</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E7 RA5 CQ1 <span class="g gB">B</span>, Company confirms guidance is conservative?:</strong> The Change Forces report explicitly characterises management as "a sandbagger" on the basis of the FY2026 guidance positioning versus consensus and versus the FY2025 actual beat<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Credibility gap on longer-term targets is the qualifier:</strong> the Leadership report separately flags a "narrative-reality disconnect" on volume bridges (ferry price cuts blamed on weather with no detailed bridge to the EUR 1bn 2030 EBITDA target)<div class="subfindings"><div class="subfinding"><span class="subnum">10.1.1</span><div class="subtext">Meaning near-term guidance is conservative and credible but the multi-year target framework is less rigorously bridged</div></div></div></div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>RA5 verdict: <span class="g gB">B</span></strong> Strong near-term guidance discipline; a genuine positive, tempered by a credibility gap on the longer-dated 2030 target bridge</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The strongest E7 counter is that the geographic simplicity (a single corridor) and the multi-decade contracted-toll-revenue base actually make Getlink simpler to monitor than a typical multi-country industrial<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext">Because the KPI set (traffic volumes, ElecLink contracted capacity, UK rates outcome) is small and externally observable on a monthly cadence</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>Watson response:</strong> The KPI set is indeed observable, but observable is not the same as simple, the ElecLink merchant-energy risk is a genuinely different analytical domain from transport-volume risk<div class="subfindings"><div class="subfinding"><span class="subnum">11.2.1</span><div class="subtext">And conflating the two into one "infrastructure concession" label is exactly the simplification the Risks report's FALSE FRIEND finding warns against</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) Watson to build the six-item KPI monitoring framework (HSR launch progress, ferry fare/volume trend, ElecLink forward-contract renewal rate, UK business-rates final determination, Europorte contract pipeline, FX rate) ahead of any re-examination<div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext">(2) Watson to explicitly disaggregate ElecLink from the core transport thesis in any future memo iteration, treating it as a distinct sub-case with its own bull/bear framework</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-d" data-spy>Element E8 — Fit with acceptable case setups <span class="g gD">D</span> <span class="secn">21 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gD">D</span></strong> The strongest candidate setup (Change-from-current clearing in high-quality compounder, via the HSR/ferry-reset thesis) is qualified decisively by the RA8 FALSE FRIEND negative guardrail, which the Risks report names the undisputed ACH winner with only two minor inconsistencies against seven for the bull case, no acceptable setup can be graded above this guardrail's finding</li></ul></div>
+<p><strong>E8 RA1, Mis-modelled, high-quality EPS upgrader <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> Partial fit, SSEM shows genuinely positive sales and target-price revisions (momentum score 7), suggesting some analyst catch-up is occurring<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">But the EPS revision pattern is choppy (L1M +2, L6M -3, L12M +1) rather than a clean, systematic modelling-error correction</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1 CQ1 <span class="g gC">C</span>, Systematic modelling error?:</strong> The mixed EPS-revision windows (positive at L1M, negative at L6M) are inconsistent with a clean "sell-side has been systematically under-modelling Getlink" story<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">A genuine mis-modelling setup would show a more consistent, one-directional revision pattern over time</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>RA1 verdict: <span class="g gC">C</span></strong> Partial fit at best; the setup's core requirement (systematic, directional mis-modelling) is not clearly evidenced</div></div></div></div></div>
+<p><strong>E8 RA2, Big demand change-driven EPSU or EPT <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> The HSR liberalisation (Virgin 2030, Trenitalia 2029) is a genuine big-demand-change catalyst on the highest-margin Eurotunnel segment, but the near-term EPS conversion is not yet visible given the core-volume softness in the same period</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA2 CQ1 <span class="g gC">C</span>, New demand driver opening a new growth vector?:</strong> HSR entrant volumes are a genuinely new demand source (new operators<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">Not merely organic growth of the existing Eurostar franchise), targeting 6m (Virgin) and an unspecified but material Trenitalia contribution by 2029-2030</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Near-term conversion caveat:</strong> launch dates (2029-2030) are 3-4 years out from Triaging depth, and the near-term data (Q1-Q2 2026) shows the core segment softening, not yet inflecting on any visible HSR-related volume uplift</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>RA2 verdict: <span class="g gC">C</span></strong> Genuine demand-change catalyst identified; near-term EPS conversion evidence is not yet present</div></div></div></div></div>
+<p><strong>E8 RA3, Strong corporate change driven EPSU / EPT <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gD">D</span></strong> There is no meaningful corporate-change catalyst at Getlink in the sense this setup requires, CEO Leriche has been in post since 2020 (reappointed to 2028) with no strategic pivot, restructuring, or major transaction underway<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">This is a continuity story, not a corporate-change story</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA3 CQ1 <span class="g gD">D</span>, New CEO / management team changing the company?:</strong> No new CEO<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">Leriche's tenure and reappointment represent continuity, and while continuity is a genuine positive for execution stability (see E1 RA1 CQ2), it does not fit a corporate-change-driven setup</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Customs bolt-on acquisitions are too small to qualify:</strong> the Bongers Customs Services and Associated Shipping Agencies acquisitions (single-digit EUR millions) are immaterial relative to the group's EUR 1.6bn revenue base and do not constitute a business-redefining corporate change</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>RA3 verdict: <span class="g gD">D</span></strong> Does not fit; Getlink is a continuity, not a corporate-change, story</div></div></div></div></div>
+<p><strong>E8 RA4, Change-from-current clearing in high-quality compounder <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> This is the closest-fitting setup, Getlink is a genuine high-quality compounder (<strong>53.9%</strong> EBITDA margin, deleveraging balance sheet) with an identifiable change-from-current (HSR entrant launches<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">Ferry cost-floor reset) that is beginning to clear, but the clearing process is contaminated by the FALSE FRIEND earnings-quality question</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA4 CQ1 <span class="g gC">C</span>, Quality compounder with identifiable near-term event?:</strong> Getlink is unambiguously a quality compounder on margin and balance-sheet metrics<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext">The near-term events (VOA final determination, HSR launch progress, ferry fare/volume data) are genuinely identifiable and trackable on a quarterly cadence</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>The clearing signal is currently ambiguous, not absent:</strong> unlike a clean "clearing" setup where the change-from-current is unambiguously resolving, Getlink's Q1-Q2 2026 data shows a genuinely mixed signal, ElecLink clearing positively (forward-contracted), core volumes not yet clearing (still declining)</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>RA4 verdict: <span class="g gC">C</span></strong> The setup shape fits; the clearing evidence is not yet conclusive, which is consistent with a Triaging-stage "watch, don't commit" read rather than a confident progression</div></div></div></div></div>
+<p><strong>E8 RA5, Huge change-from-current clearing event in solid quality <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA5 answer: <span class="g gD">D</span></strong> There is no single, large, discrete clearing event equivalent to (for example) a major refinancing completion, a transformative acquisition, or a definitive regulatory resolution<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">The VOA business-rates dispute has already resolved <em>against</em> Getlink (a certain cost, not a clearing positive), and the HSR launches are multi-year phased events, not a single catalyst</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 RA5 CQ1 <span class="g gD">D</span>, Large clearing event with quality underneath?:</strong> Quality is present; no qualifying large single clearing event is present; rated <span class="g gD">D</span>, setup does not fit</div></div>
+<p><strong>E8 RA6, Trough-on-trough turn in solid quality cyclical <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>RA6 answer: <span class="g gD">D</span></strong> Getlink is not at a cyclical trough, FY2025 EBITDA (EUR 859m) is a record, not a trough level, and the multi-year guidance-beat pattern confirms the business has been on an improving, not a depressed, trajectory</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E8 RA6 CQ1 <span class="g gD">D</span>, At cyclical trough?:</strong> Financial metrics are at or near record levels; this setup definitively does not apply; rated <span class="g gD">D</span></div></div>
+<p><strong>E8 RA7, Fit with unacceptable case setups? [NEGATIVE GUARDRAIL] <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA7 answer: <span class="g gC">C</span></strong> Getlink does not fit the clearest unacceptable-setup categories (no commodity-trade exposure, no active restructuring, no negative earnings trend at the group level)<div class="subfindings"><div class="subfinding"><span class="subnum">13.1</span><div class="subtext">But the combination of a <strong>29.8x</strong> multiple with a decisively negative ACH verdict has meaningful proximity to a "priced for a story the evidence does not yet support" unacceptable pattern</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E8 RA7 CQ1 <span class="g gC">C</span>, Does this fit an unacceptable case setup?:</strong> No commodity-trade, restructuring, or negative-earnings-trend exposure at the headline level<div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>Proximity concern:</strong> a <strong>29.8x</strong> forward multiple (31st percentile) combined with a Risks report ACH verdict finding the bull case has the most inconsistencies of the three hypotheses tested is a combination that warrants caution<div class="subfindings"><div class="subfinding"><span class="subnum">14.1.1</span><div class="subtext">Not yet a clean "unacceptable setup" but adjacent to one</div></div></div></div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>RA7 verdict: <span class="g gC">C</span></strong> Not disqualifying on its own, but a genuine proximity flag that reinforces rather than offsets the RA8 finding below</div></div></div></div></div>
+<p><strong>E8 RA8, Fit with false friend case setups? [NEGATIVE GUARDRAIL] <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>RA8 answer: <span class="g gD">D</span></strong> The Risks report's own Analysis of Competing Hypotheses (§13, explicitly load-bearing) names FALSE FRIEND the winning hypothesis with only two minor inconsistencies across fifteen evidence items<div class="subfindings"><div class="subfinding"><span class="subnum">15.1</span><div class="subtext">Against seven inconsistencies for the bull case and four for the bear case, this is a decisive, not a marginal, ACH result</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E8 RA8 CQ1 <span class="g gD">D</span>, Does this fit a FALSE FRIEND setup?:</strong> Two distinct FALSE FRIEND pathways are explicitly identified and quantified in the Risks report's own failure-narrative enumeration<div class="subfindings"><div class="subfinding"><span class="subnum">16.1</span><div class="subtext"><strong>FALSE FRIEND pathway 1, ElecLink spread windfall masking core decay:</strong> ElecLink revenue rose <strong>112%</strong> year-on-year in Q1 2026 while core LeShuttle truck traffic contracted <strong>2%</strong> in the same quarter<div class="subfindings"><div class="subfinding"><span class="subnum">16.1.1</span><div class="subtext">The report explicitly names this "Failure #9, False Friend: Spread Windfalls Masking Volume Decay" and assesses it High plausibility</div></div></div></div></div><div class="subfinding"><span class="subnum">16.2</span><div class="subtext"><strong>FALSE FRIEND pathway 2, capex deferral flattering free cash flow:</strong> the report separately names "Failure #10, False Friend: Capex Deferral Cash Flattery", assessed Medium plausibility<div class="subfindings"><div class="subfinding"><span class="subnum">16.2.1</span><div class="subtext">Noting elevated gross cash (EUR 1,498m) against capex guidance of EUR 170-220m creates an appearance of financial strength that could mask deferred asset-renewal liabilities</div></div><div class="subfinding"><span class="subnum">16.2.2</span><div class="subtext">The disconfirmer (capex has in fact been deployed on schedule, EUR 190m actual in FY2025) is a genuine mitigant on this second pathway specifically</div></div></div></div></div><div class="subfinding"><span class="subnum">16.3</span><div class="subtext"><strong>Researcher's own explicit recommendation:</strong> the Risks report states directly: "The RESEARCHER recommends to PARK the investment case until core shuttle volume trajectory inflects<div class="subfindings"><div class="subfinding"><span class="subnum">16.3.1</span><div class="subtext">High real-world failure plausibility in core shuttle volumes outweighs temporary interconnector spreads", this is as close to an unambiguous steer as a Research Report provides, and Watson's balanced RR-trust dial gives this substantial, though not automatically final, weight</div></div></div></div></div><div class="subfinding"><span class="subnum">16.4</span><div class="subtext"><strong>Ten total failure narratives identified, seven at High plausibility:</strong> beyond the two false-friend patterns, the report separately flags EES border gridlock, Eurostar volume plateau (terminal capacity constraints)<div class="subfindings"><div class="subfinding"><span class="subnum">16.4.1</span><div class="subtext">ElecLink spread crash, UK business-rate escalation, and HSR-competitor postponement, all rated High plausibility, a genuinely dense cluster of live risk narratives, not an isolated concern</div></div></div></div></div><div class="subfinding"><span class="subnum">16.5</span><div class="subtext"><strong>RA8 verdict: <span class="g gD">D</span></strong> This is the single most decisive negative finding in the entire memo<div class="subfindings"><div class="subfinding"><span class="subnum">16.5.1</span><div class="subtext">A FALSE FRIEND verdict this clean (two minor inconsistencies versus seven for the bull case) is a stronger</div></div><div class="subfinding"><span class="subnum">16.5.2</span><div class="subtext">More one-sided ACH result than several other Triaging-stage names in Watson's current coverage have produced, and it directly drives the overall PARK recommendation</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>E8 primary and secondary setup identification:</strong> PRIMARY candidate = RA4 (Change-from-current clearing in high-quality compounder, via HSR/ferry-reset); SECONDARY candidate = RA2 (Big demand change-driven EPSU, via HSR liberalisation specifically); both are qualified decisively by the RA8 FALSE FRIEND guardrail</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>E8 overall grade rationale: <span class="g gD">D</span></strong> RA4 and RA2 both score <span class="g gC">C</span> as candidate setups<div class="subfindings"><div class="subfinding"><span class="subnum">18.1</span><div class="subtext">RA1 <span class="g gC">C</span></div></div><div class="subfinding"><span class="subnum">18.2</span><div class="subtext">RA3, RA5, RA6 all <span class="g gD">D</span> (do not fit)</div></div><div class="subfinding"><span class="subnum">18.3</span><div class="subtext">RA7 guardrail <span class="g gC">C</span> (proximity flag)</div></div><div class="subfinding"><span class="subnum">18.4</span><div class="subtext">RA8 guardrail <span class="g gD">D</span> (undisputed FALSE FRIEND winner), the presence of a decisive RA8 negative guardrail finding caps the overall Element E8 grade at <span class="g gD">D</span> regardless of the RA4/RA2 candidate-setup scores, consistent with the framework's guardrail-first grading logic</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><strong>E8 ESA deepening priorities (if re-examined):</strong> RA8 FALSE FRIEND resolution must be the primary Early-Stage Assessment investigation focus, explicitly re-test both false-friend pathways (ElecLink spread sustainability<div class="subfindings"><div class="subfinding"><span class="subnum">19.1</span><div class="subtext">Core volume trend) against two further quarters of segment data before deepening RA4 or RA2</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> The strongest E8 counter-argument is that ElecLink's <strong>89%</strong> forward-contracted FY2026 capacity (EUR 291m secured) is a durable<div class="subfindings"><div class="subfinding"><span class="subnum">20.1</span><div class="subtext">Not a transient, revenue stream, and that treating a largely pre-sold revenue line as a "windfall masking decay" understates its genuine earnings-quality contribution</div></div><div class="subfinding"><span class="subnum">20.2</span><div class="subtext"><strong>Watson response:</strong> The forward-contracting point genuinely strengthens the near-term (12-month) visibility of ElecLink revenue specifically, but it does not resolve the ACH's core finding<div class="subfindings"><div class="subfinding"><span class="subnum">20.2.1</span><div class="subtext">Which is about the <em>composition</em> of the group beat (ElecLink offsetting, not confirming, core-segment health) rather than about ElecLink's own revenue certainty</div></div><div class="subfinding"><span class="subnum">20.2.2</span><div class="subtext">A well-contracted but volatile-spread merchant-energy business masking a declining toll-road core is still the pattern the ACH identifies, contracted or not</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) Watson to commission a Researcher follow-up specifically re-running the ACH matrix once Q2 and Q3 2026 segment data are available, testing whether the FALSE FRIEND verdict strengthens, weakens, or reverses<div class="subfindings"><div class="subfinding"><span class="subnum">21.1</span><div class="subtext">(2) Watson to disaggregate ElecLink from the core transport case explicitly in any future memo, avoiding a blended "infrastructure concession" framing that obscures the two distinct risk profiles</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">18 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gB">B</span></strong> Getlink's value-chain position is the strongest single finding in this memo: an unchallengeable physical and regulatory monopoly capturing the highest-margin nodes across cross-Channel transport and adjacent energy infrastructure. Elements E9 (Great operator), E10 (Advantaged business and widening competitive advantage), E12 (Supportive industry structure) and E13 (High secular growth potential) are not applicable at this stage; they are first assessed at Early-Stage Assessment.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">16 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gB">B</span></strong> Getlink occupies the highest-margin bottleneck nodes in its value chain, the electricity-interconnection node (ElecLink, approximately <strong>85%</strong> gross margin / <strong>70%</strong> EBIT calculated) and the fixed-link concession node (approximately <strong>60%</strong> gross / <strong>42%</strong> EBIT calculated), well above overland rail, customs, or maritime alternatives; this is a genuinely exceptional value-chain position, the strongest finding of the memo</li></ul></div>
+<p><strong>E11 RA1, Demand side strong / fragile? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> Demand for the core concession is structurally durable at the corridor level (there is no substitute physical crossing that avoids either Getlink's tunnel or<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">A competing ferry route) but the demand <em>trend</em> is currently soft: passenger vehicle traffic -<strong>10%</strong> year-on-year in April 2026 and truck traffic persistently <strong>27%</strong> below 2019 levels</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Eurostar demand is genuinely strong in isolation:</strong> Eurostar carried a record 11.81m passengers in 2025, up <strong>5%</strong> year-on-year, with market share of the London-Paris corridor at <strong>76.9%</strong> versus airlines, rail has decisively won the London-Paris travel-mode competition already</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA1 CQ1 <span class="g gC">C</span>, Demand side strength?:</strong> Eurostar rail demand is strong and growing (record 2025 volumes)<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">LeShuttle vehicle demand is structurally soft (truck traffic <strong>27%</strong> below 2019, passenger cars -<strong>10%</strong> in the latest monthly data), a genuine bifurcation within the same physical asset</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Structural demand ceiling for freight is a genuine concern, not merely cyclical:</strong> the -<strong>3%</strong> 2025 freight volume and persistent <strong>27%</strong>-below-2019 level, six years after the Brexit transition<div class="subfindings"><div class="subfinding"><span class="subnum">2.2.1</span><div class="subtext">Is longer-lived than a typical cyclical dip and raises the question of whether some freight volume has permanently relocated to alternative routes or modes</div></div></div></div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>RA1 verdict: <span class="g gC">C</span></strong> Genuinely mixed, rail passenger demand strong, vehicle shuttle and freight demand structurally soft</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA1 CQ2 <span class="g gC">C</span>, Consumer switching / substitution risk?:</strong> For passenger vehicles, ferries are a genuine substitute<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">And the current price-war dynamics (ferry fare-cutting pressure noted in both the Change Forces and Leadership reports) suggest real substitution is occurring at the margin</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>For rail passengers, substitution risk is low:</strong> Eurostar's <strong>76.9%</strong> London-Paris mode share versus airlines reflects a durable time/convenience advantage that a ferry cannot replicate for the passenger-rail segment</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>RA1 CQ2 verdict: <span class="g gC">C</span></strong> Vehicle/freight substitution risk to ferries is real and currently manifesting in volume data; rail passenger substitution risk is low</div></div></div></div></div>
+<p><strong>E11 RA2, Competitive supportiveness / aggression? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gC">C</span></strong> The competitive environment is transitioning from an aggressive ferry price war toward a more rational capacity structure (11 vessels down to a more disciplined 8)<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">A genuinely constructive shift, but this transition is not yet complete and near-term volume data still reflects the more aggressive prior period</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA2 CQ1 <span class="g gC">C</span>, Sector concentration and competitive dynamics?:</strong> The cross-Channel corridor has a small number of large competitors (Getlink's tunnel plus a handful of major ferry operators: P&amp;O, DFDS, Irish Ferries)<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">This is a moderately concentrated structure, not a fragmented one</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Getlink vs ferry cost-structure divergence is the central competitive dynamic:</strong> ferry operators face rising cost floors (EU ETS<div class="subfindings"><div class="subfinding"><span class="subnum">5.2.1</span><div class="subtext">Seafarer wages) that Getlink's electrified, largely fixed-cost model does not carry in the same way, this should structurally favour Getlink over a multi-year horizon</div></div></div></div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>RA2 CQ1 verdict: <span class="g gC">C</span></strong> Competitive dynamics are directionally favourable to Getlink but the favourable shift has not yet fully shown up in Getlink's own volume and pricing data</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA2 CQ2 <span class="g gC">C</span>, Pricing power and market share trends?:</strong> LeShuttle passenger car market share was roughly stable (<strong>62.0%</strong> vs <strong>62.1%</strong> year-on-year per the AZA-SE-comparable Notion dataset context<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">Specific to Getlink, market share held near <strong>56.1%</strong> of the passenger vehicle segment in FY2025 per the Business Foundation report) even as absolute volumes softened</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext">Suggesting the softness is market-wide (a shrinking overall corridor, not Getlink losing share within it)</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>RA2 CQ2 verdict: <span class="g gC">C</span></strong> Market share appears broadly stable<div class="subfindings"><div class="subfinding"><span class="subnum">6.3.1</span><div class="subtext">The concern is total corridor demand, not competitive share loss, a materially different and somewhat less alarming interpretation than a share-loss story, though still consistent with the FALSE FRIEND volume-decay concern at the aggregate level</div></div></div></div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E11 RA2 CQ3 <span class="g gC">C</span>, Competitive intensity trend?:</strong> Competitive intensity is easing structurally (cost-floor reset, capacity rationalisation) but this is a multi-year transition, not a completed one<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">Near-term intensity likely remains elevated as ferry operators fight to retain share before their own cost structures fully reset</div></div></div></div></div>
+<p><strong>E11 RA3, Disruption forces? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>RA3 answer: <span class="g gB">B</span></strong> Getlink's core physical-monopoly business is genuinely insulated from technology-driven disruption; the more relevant disruption vector is regulatory/border-process change (EES/ETIAS), which Getlink has proactively invested against rather than being caught exposed to</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E11 RA3 CQ1 <span class="g gB">B</span>, Technology or structural disruption threat?:</strong> No credible technology-based disruption threat exists to a physical rail tunnel<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">The EES biometric border rollout is a regulatory-process change that Getlink has pre-invested against (EUR 70m+ smart-border technology), a proactive rather than reactive posture</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>RA3 verdict: <span class="g gB">B</span></strong> Genuinely low disruption risk with proactive management response; one of the stronger sub-findings in the memo</div></div></div></div></div>
+<p><strong>E11 RA4, Political / regulatory? <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA4 answer: <span class="g gD">D</span></strong> The UK business-rates dispute is a live, negative, and now-resolved-against-Getlink regulatory outcome, and it is the clearest political/regulatory finding in the entire memo</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E11 RA4 CQ1 <span class="g gD">D</span>, Regulatory headwinds?:</strong> The Valuation Office Agency's near-<strong>200%</strong> rateable-value increase, following a failed negotiation, is a concrete, quantified<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext">Multi-year regulatory cost escalation (EUR 6m FY26 rising to EUR 24-27m FY28), this is as clear a negative regulatory finding as exists anywhere in Watson's current Triaging coverage</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>French regulatory environment is comparatively benign:</strong> the Railway Usage Contract's CPI/RPI-minus-<strong>1.1%</strong> indexation to 2052 is a stable, predictable regulatory framework on the French/EU side, in contrast to the adversarial UK rates process</div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext"><strong>RA4 verdict: <span class="g gD">D</span></strong> The UK regulatory outcome is a confirmed, quantified negative; this is the clearest D-grade finding in Group 3 and reinforces the E1 RA1 external-headwind concern from an independent angle</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E11 RA4 CQ2 <span class="g gD">D</span>, Geopolitical exposure?:</strong> Genuine dual-sovereign exposure (UK and France, plus EU regulatory frameworks) creates a structurally higher regulatory-complexity burden than a single-country concession peer<div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext">Brexit-related customs friction remains a live, multi-year drag on freight volumes six years after implementation</div></div></div></div></div>
+<p><strong>E11 RA5, Supportive supplier side? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> Getlink's supplier relationships are structurally favourable<div class="subfindings"><div class="subfinding"><span class="subnum">13.1</span><div class="subtext">Concentrated supplier relationships (180 suppliers representing <strong>80%</strong> of spend per the Business Foundation report) are managed via internalised maintenance and hedged energy procurement (<strong>30%</strong> power-purchase agreements, two-year rolling hedge), reducing dependency risk</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E11 RA5 CQ1 <span class="g gB">B</span>, Supplier power and procurement structure?:</strong> Concentrated but strategically managed supplier relationships; internalised maintenance capability (PRISM laser system) reduces reliance on third-party maintenance providers relative to a peer that outsources more heavily<div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>RA5 verdict: <span class="g gB">B</span></strong> Supplier side is a genuine structural strength, consistent with the overall best-in-class value-chain position</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The strongest E11 counter-argument is that the exceptional segment margins (<strong>70.2%</strong> ElecLink, <strong>55.6%</strong> Eurotunnel) partly reflect a temporarily favourable interconnector spread environment and inflation-linked toll escalation<div class="subfindings"><div class="subfinding"><span class="subnum">15.1</span><div class="subtext">Rather than durable competitive advantage, and that margins could compress if either the ElecLink spread environment normalises down or the ferry cost-floor reset stalls</div></div><div class="subfinding"><span class="subnum">15.2</span><div class="subtext"><strong>Watson response:</strong> The Eurotunnel toll margin is substantially protected by contract (Railway Usage Contract to 2052) independent of competitive dynamics, giving genuine confidence in that component's durability<div class="subfindings"><div class="subfinding"><span class="subnum">15.2.1</span><div class="subtext">The ElecLink margin is more exposed to the counter-argument and is precisely the segment the RA8 FALSE FRIEND finding already flags, the counter-view is valid for ElecLink specifically but does not undermine the core toll-concession value-chain finding</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) Watson to track LeShuttle passenger and freight market share (not just absolute volume) quarterly to distinguish a "shrinking corridor" read from a "losing share within the corridor" read<div class="subfindings"><div class="subfinding"><span class="subnum">16.1</span><div class="subtext">(2) Watson to monitor the UK VOA final rates determination and any appeal outcome as the clearest single regulatory catalyst in the case</div></div></div></div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gC">C</span></strong> First-pass, light framing at Triaging. The FALSE FRIEND ACH verdict (E8 RA8), the certain UK business-rates escalation, unhedged FX exposure, and ten distinct failure narratives (seven High plausibility) collectively make this the most heavily-flagged risk picture Watson has produced in current-cycle Triaging coverage; deep Element-level risk work (E15, E16, E17, E18, E19) is Early-Stage Assessment / Deep Dive scope and is explicitly not written here.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>First-pass risk framing:</strong> Five risk vectors are simultaneously active at Triaging depth: (1) the Risks report's FALSE FRIEND ACH verdict (undisputed winner, two minor inconsistencies vs seven for the bull case)<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">(2) UK business-rates escalation (certain, non-cyclical, EUR 24-27m by FY28)</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">(3) unhedged FX exposure (zero derivative hedge ratio against a genuine sterling/euro cost-revenue mismatch)</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext">(4) ElecLink concentration risk (<strong>18.4%</strong> of group EBITDA in a merchant-energy business subject to spread volatility and a <strong>50%</strong> profit-sharing cap above <strong>13%</strong> pre-tax IRR)</div></div><div class="subfinding"><span class="subnum">1.4</span><div class="subtext">(5) persistent freight-volume softness (<strong>27%</strong> below 2019 levels, no clear inflection visible yet)</div></div><div class="subfinding"><span class="subnum">1.5</span><div class="subtext"><strong>Combined burden:</strong> No single vector is individually disqualifying, but the Risks report's own explicit recommendation ("PARK the investment case until core shuttle volume trajectory inflects") reflects the combined weight of these vectors assessed together, not any one in isolation</div></div><div class="subfinding"><span class="subnum">1.6</span><div class="subtext"><strong>ACH finding restated:</strong> the ACH matrix tested three hypotheses (bull, bear, FALSE FRIEND) against fifteen evidence items<div class="subfindings"><div class="subfinding"><span class="subnum">1.6.1</span><div class="subtext">FALSE FRIEND carries only two minor inconsistencies versus seven for the bull case and four for the bear case, a genuinely decisive, not marginal, result</div></div></div></div></div><div class="subfinding"><span class="subnum">1.7</span><div class="subtext"><strong>E15, E16, E17, E18, E19:</strong> Not applicable at this stage; first assessed at Deep Dive (E15, E16, E17) and Early-Stage Assessment (E18, E19)</div></div></div></div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not in scope at Triaging; first written at Early-Stage Assessment. Candidate optionality items to assess then: the <strong>45.6%</strong> path-occupancy headroom (capacity to roughly double volumes at over <strong>90%</strong> incremental EBITDA margin with minimal capex); ElecLink 2 (a further 1GW interconnector targeting 2030-2035 commercial operations); and any post-summit UK-EU single-market alignment for cross-Channel goods and passenger transport, which the 16-May-26 Notion Recent Developments note flags as the highest-conviction medium-term positive catalyst.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">5 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation: <span class="g gC">C</span> PARK, monitor for re-entry.</strong> The Risks report's own Analysis of Competing Hypotheses names FALSE FRIEND the undisputed winner across fifteen evidence items with only two minor inconsistencies, and the researcher's own explicit recommendation is to park until core shuttle volume trajectory inflects. Getlink's concession quality and value-chain position (E11 <span class="g gB">B</span>) are genuinely exceptional and merit a watch-list position, not a rejection.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Park at Triaging with conviction; retain on watch list given the RB interest level of "A, very desired, 1st decile" already recorded in Richard's Notion Stock tracker</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conviction qualifier:</strong> Medium-high conviction to park<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">The value-chain and concession-durability case (E11 <span class="g gB">B</span>) is genuinely strong, and SSEM (MR2 <span class="g gC">C</span>) is constructive<div class="subfindings"><div class="subfinding"><span class="subnum">2.1.1</span><div class="subtext">But the FALSE FRIEND ACH verdict is decisive and directly matches the Researcher's own explicit park recommendation, and the UK business-rates escalation is a certain, not merely probable, ongoing cost</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If progressing, next-stage actions:</strong> Not applicable; the case is parked, not progressed, at this Triaging pass</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>If parking, reassessment criteria:</strong> Re-examine Getlink when BOTH of the following are observed: (a) two consecutive quarters of LeShuttle truck and/or passenger-car volume data showing genuine positive inflection (not merely an ElecLink-driven group EBITDA beat)<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">(b) a fresh Researcher-run ACH matrix, incorporating the additional quarters of data, no longer names FALSE FRIEND the undisputed winning hypothesis</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Watchlist placement:</strong> Getlink remains on Watson's watch list at "3<div class="subfindings"><div class="subfinding"><span class="subnum">4.2.1</span><div class="subtext">Triaged" knowledge level per Richard's existing Notion tagging</div></div><div class="subfinding"><span class="subnum">4.2.2</span><div class="subtext">The HSR entrant launch dates (Trenitalia 2029</div></div><div class="subfinding"><span class="subnum">4.2.3</span><div class="subtext">Virgin 2030) and the UK-EU summit cycle (next major summit late June/early July 2026 per the Notion Recent Developments note) are the two external catalysts most likely to move the case materially</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to commission a Researcher follow-up Key-Question query re-running the Risks report's ACH matrix once Q2 and Q3 2026 traffic and ElecLink segment data are available<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">Explicitly testing whether the FALSE FRIEND verdict has strengthened, weakened, or reversed</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext">(2) Watson to monitor the UK VOA final business-rates determination and any appeal outcome as a discrete, dateable catalyst that will clarify the magnitude of the confirmed cost headwind</div></div></div></div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">23 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">11 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>41-Change Forces (CF) report [AS]:</strong> GET-FR; on disk, submitted 12-Jun-26, produced 12-Jun-26, 14,809 words, identity-confirmed (two-signal); primary source for E1 (all RAs and CQs), Section A/B price and guidance context, HSR entrant timeline, ferry cost-floor reset mechanics, UK business-rates figures</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>42-Business Foundation (BF) report [AS]:</strong> GET-FR; on disk, submitted 22-Jun-26, 27,878 words, identity-confirmed (two-signal); primary source for E11 (all RAs), value-chain margin distribution by node, segment EBITDA margins, competitive-landscape and industry-structure content, peer benchmarking on capex intensity and margins</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>43-Leadership Foundation (LF) report [AS]:</strong> GET-FR<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">On disk, produced 11-Jun-26, 16,848 words, identity-confirmed (two-signal)</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext">Primary source for CEO Yann Leriche career analysis, governance and ownership-concentration findings, capital-allocation and dividend-policy credibility assessment, "hired-manager mindset" and narrative-reality-gap findings feeding E1 RA1 CQ2 and E7 RA5</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>44-Risks report [AS]:</strong> GET-FR<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">On disk, submitted 12-Jun-26, produced 12-Jun-26, 27,600 words, identity-confirmed (two-signal)</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext">Primary source for E8 RA7/RA8 negative guardrails, the FALSE FRIEND Analysis of Competing Hypotheses matrix (load-bearing for the memo's overall PARK verdict), the ten failure narratives, and the FX-sensitivity and hedging-policy findings feeding E5 RA1 and Group 4</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>GET-IAJA-SYNTHESIS-cleaned.md (legacy, 13-Apr-26):</strong> Pre-4-report-era ESA-depth synthesis; used as a cross-check and supplementary source, particularly for the dividend-sustainability framing and the HSR "quality over carrier fragmentation" thesis; superseded by, and broadly consistent with, the current-framework Change Forces and Risks reports</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>GET-FR-Triaging-ratings.json:</strong> Watson-generated metadata sidecar; all grades and rationales; used throughout for grade consistency</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>Master-dashboard/data/factset-valuation.json:</strong> GET-FR entry; P/E <strong>29.8x</strong> current, P/E percentile 31st, EPS 24-month-forward 0.6189; used for Section A and E1 RA2 CQ5 (low trading multiple)</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Master-dashboard/data/factset-ssem.json:</strong> GET-FR entry; EPS/EBITDA/sales revision counts across L1M-L12M, momentum score 7, buy% <strong>47%</strong>; used for MR2 and Section A</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Master-dashboard/data/prices.json:</strong> Checked and found EMPTY (zero stock records) for the entire 950-stock file at time of writing, a file-wide data outage, not a GET-FR-specific gap<div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext">Live price and 52-week range sourced via web search fallback (Yahoo Finance / eToro / Investing.com aggregation) as a result, per 06-RESEARCH-SOURCE-MAP.md's fallback provision for absent/stale local data</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Notion Stock Notes database (28 linked notes for GET-FR):</strong> Fetched the parent Stock page (confirming RB interest level "A, very desired, 1st decile", RB knowledge level "3<div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext">Triaged", Timeliness "B, next fortnight") and the most recent Recent Developments Summariser note (16-May-26), which independently corroborates the live price range</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext">The Q1 2026 beat/traffic-data spike-and-fade pattern, and flags the system's sector tag as a known data error (corrected to Infrastructure/Transport, consistent with the live universe.json read used in this memo)</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Wisdom Library models consulted:</strong> moats-and-srca (gold), pricing-power (gold), false-friends (gold, situational/simple-patterns), quality-compounder (gold, situational/simple-patterns), network-effects (gold), economies-of-scale (gold)<div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext">The false-friends model in particular directly informed the framing of the E8 RA8 and overall PARK analysis</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext">Independent of and prior to reading the Risks report's own FALSE FRIEND terminology, providing genuine cross-validation rather than the model being reverse-fitted to the report's language</div></div></div></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">12 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>No live thematic overlay applied, per Richard's explicit instruction of 04-Jul-26.</strong> Element E5 (Thematic fit) was assessed using stock-specific, first-principles reasoning only (operating leverage, financial leverage<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext">FX hedging posture, sovereign-yield sensitivity, direct/indirect oil-price transmission channels). <code>memory/thematics/active.md</code> was NOT read and no live macro/thematic frame was drawn upon at any point in this memo's construction</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext">The downturn-fragility finding (E5 RA1 <span class="g gD">D</span>) is derived entirely from Getlink's own balance-sheet and operating characteristics as disclosed in the Business Foundation and Risks reports, not from any external thematic call</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Cohort and sector peer sets used, per Richard's explicit instruction, drawn from the live <code>master-dashboard/data/universe.json</code> file (not any older/stale extract):</strong> Cohort 10.219 "Captive fixed-route transport operators" contains three names<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext">FGP-GB (FirstGroup), GET-FR (Getlink, subject), JFN-CH (Jungfraubahn), so the cohort peer set used throughout is FGP-GB and JFN-CH. Sector D.1 "Infrastructure - airports/trains" contains nine names</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext">The eight sector peers (excluding GET-FR) are ADP-FR (Aeroports de Paris), AENA-ES (Aena), AIA-GR (Athens International Airport), ENAV-IT (Enav), FHZN-CH (Flughafen Zurich), FLU-AT (Flughafen Wien), FRA-DE (Fraport), KBHL-DK (Kobenhavns Lufthavne)</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext">Both integration dials held at NORMAL (default weight) throughout, per Richard's instruction</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>ENAV-IT sector-membership verification, per Richard's explicit instruction:</strong> the live <code>master-dashboard/data/universe.json</code> file was checked directly and confirms ENAV-IT sits in sector "D.1<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext">Infrastructure - airports/trains" (cohort 10.215, "Mid-size European regulated airports and air navigation services"), the SAME sector as GET-FR, though a DIFFERENT cohort</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext">This is consistent with Richard's brief that an older/stale extract file may incorrectly tag Enav as a telecoms operator<div class="subfindings"><div class="subfinding"><span class="subnum">3.2.1</span><div class="subtext">No such mis-tag was found in the live universe.json used here, and ENAV-IT is treated as a genuine sector peer (not a cohort peer) throughout this memo</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Peer coverage used was thin by necessity, not by omission:</strong> cohort peers FGP-GB and JFN-CH each have only Change Forces, Business Foundation, and Risks family reports on disk (no Leadership Foundation report for either)<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">Sector peer ADP-FR has no <code>Files/ADP-FR/</code> folder on disk at all</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext">Given the token-budget and relevance-gate guidance in <code>06-RESEARCH-SOURCE-MAP.md</code><div class="subfindings"><div class="subfinding"><span class="subnum">4.2.1</span><div class="subtext">Watson did not commission fresh peer research at Triaging depth and instead used the cohort/sector identification itself (confirming Getlink's genuine</div></div><div class="subfinding"><span class="subnum">4.2.2</span><div class="subtext">Peer set) plus the qualitative peer-multiple and peer-margin context already embedded in Getlink's own Business Foundation report (which independently cites Vinci</div></div><div class="subfinding"><span class="subnum">4.2.3</span><div class="subtext">Eiffage, ACS, Hochtief, Aena and DFDS as comparators) rather than pulling full peer-report material that would have added limited incremental Triaging-depth value for a light first pass This is flagged as a genuine coverage thinness</div></div><div class="subfinding"><span class="subnum">4.2.4</span><div class="subtext">Not a silent gap: a fuller cohort/sector peer-report read is recommended at Early-Stage Assessment if Getlink is re-examined</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Master-dashboard prices.json outage flagged as a genuine data gap, not silently patched:</strong> the file contained zero stock records at the time of this memo (a file-wide condition, confirmed by checking the total record count, not a GET-FR-specific omission)<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext">Live price (EUR 18.56) and 52-week range (EUR 15.02-19.85) were sourced via web search (Yahoo Finance aggregation) as the explicit fallback per <code>06-RESEARCH-SOURCE-MAP.md</code> section 4c No local moving-average or RS-percentile data was available<div class="subfindings"><div class="subfinding"><span class="subnum">5.1.1</span><div class="subtext">MR1 (Technical momentum) and E4 are graded/noted accordingly, at <span class="g gC">C</span> and <span class="g gNR">NR</span> respectively, reflecting this specific data limitation rather than a substantive technical read</div></div></div></div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Two Notion-derived data points used as corroboration, not as primary sources:</strong> the 16-May-26 Recent Developments Summariser note independently confirms the Q1 2026 results-driven spike and the subsequent traffic-data-driven fade<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">And separately flags (and corrects) a system sector-classification error that this memo's own live-universe.json read did not reproduce</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext">Watson notes this as a positive cross-check that the live universe.json data used in this memo (Infrastructure, not Telecoms) is the corrected, not the erroneous, classification</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Mundys ownership-stake figures diverge slightly between reports:</strong> the Business Foundation report cites Mundys at <strong>19.00%</strong> of capital while the Change Forces report and the Leadership Foundation report cite <strong>25.00%</strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">Watson has not reconciled this discrepancy within Triaging depth and flags it explicitly here rather than picking one figure silently</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext">Both reports agree the combined Eiffage-plus-Mundys position sits at or near the <strong>30%</strong> mandatory-offer threshold, which is the decision-relevant fact for the governance/ownership-concentration finding regardless of the exact Mundys percentage</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Ticker format:</strong> GET-FR used throughout; consistent with universe.json, factset-valuation.json, and factset-ssem.json</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>No prior 4RR-era memo:</strong> This is the first 4-report-era Triaging memo for GET-FR; D-IA-4RR-15 applies (no carry-forward; full floor from scratch)</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>E2 and E3 deferred:</strong> Both explicitly not in scope at Triaging per Procedure 1</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Briefing dials confirmed:</strong> RR-trust balanced; cohort integration normal; sector integration normal; thematic overlay OFF (Richard's explicit 04-Jul-26 override), applied throughout</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Notion access:</strong> Fully successful. The Getlink parent Stock page and the most recent linked Stock Note were fetched directly via the Notion MCP tools; no access failure to flag</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief, <code>memory/skills/investment-analyst/self-review-debriefs/GET-FR-triaging-self-review-debrief-2026-07-04.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"C","label":"Technical momentum"},"MR2":{"grade":"C","label":"Sell-side earnings momentum"},"MR3":{"grade":"D","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"C"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"C"},{"code":"MR3","label":"Thematic fit","grade":"D"},{"code":"MR4","label":"Case change elements","grade":"C"},{"code":"MR5","label":"Case building blocks","grade":"C"},{"code":"MR6","label":"Investment case components","grade":null}],"pillars":[{"roman":"I","label":"Case change elements","grade":"C","elements":[{"code":"E1","label":"Required input change forces","grade":"C","ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"D","ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"C","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"C","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"D","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"B","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"B","ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"C","elements":[]},{"code":"GROUP 5","label":"Case optionality","grade":null,"elements":[{"code":"E20","label":"Nice-to-have attributes","grade":null,"ras":[]}]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

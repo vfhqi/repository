@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Nestlé S.A. (NESN-CH) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">31</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">10</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-d">MR2 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-d">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">255</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">57</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-c">Element E1 — Required input change forces<span class="nav-rating-pill C">C</span><span class="nav-fc">55</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-change-forces-present" data-element-id="element-e1-required-input-change-forces-c">E1 RA1 — Change forces present?<span class="nav-fc">18</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-robust-base" data-element-id="element-e1-required-input-change-forces-c">E1 RA2 — Robust base?<span class="nav-fc">37</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr">Element E2 — Required case outputs [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr">Element E3 — Sufficient TSR / valuation upside [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-d">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill D">D</span><span class="nav-fc">198</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">34</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 — Technical momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">33</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e5-ra1-suitability-for-bear-market-downturn-c" data-element-id="element-e5-thematic-fit-c">E5 RA1 — Suitability for bear market / downturn<span class="nav-rating-pill C">C</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra2-suitability-for-ai-disruption-b" data-element-id="element-e5-thematic-fit-c">E5 RA2 — Suitability for AI disruption<span class="nav-rating-pill B">B</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra3-suitability-for-iran-oil-price-inflation-scenario-mix" data-element-id="element-e5-thematic-fit-c">E5 RA3 — Suitability for Iran oil-price inflation scenario [~mixed]<span class="nav-fc">7</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra4-paradigm-fit-d" data-element-id="element-e5-thematic-fit-c">E5 RA4 — Paradigm fit<span class="nav-rating-pill D">D</span><span class="nav-fc">11</span></span>
+</div>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-d">Group 2 — Case simplicity<span class="nav-rating-pill D">D</span><span class="nav-fc">99</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">42</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e7-ra1-focused-bet-d" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA1 — Focused bet?<span class="nav-rating-pill D">D</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra2-narrow-perimeter-d" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA2 — Narrow perimeter?<span class="nav-rating-pill D">D</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra3-zero-headwinds-f" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA3 — Zero headwinds?<span class="nav-rating-pill F">F</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra4-handful-of-change-from-current-items-d" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA4 — Handful of change-from-current items?<span class="nav-rating-pill D">D</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra5-conservative-investor-relations-c" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA5 — Conservative investor relations?<span class="nav-rating-pill C">C</span><span class="nav-fc">12</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">57</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e8-ra1-mis-modelled-high-quality-eps-upgrader" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA1 — Mis-modelled high-quality EPS upgrader<span class="nav-fc">5</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra2-big-demand-change-driven-epsu-ept" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA2 — Big demand change-driven EPSU/EPT<span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra3-strong-corporate-change-driven-epsu-ept" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA3 — Strong corporate change driven EPSU/EPT<span class="nav-fc">11</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra4-change-from-current-clearing-in-high-quality-compound" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA4 — Change-from-current clearing in high-quality compounder<span class="nav-fc">11</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra5-huge-change-from-current-clearing-event-in-solid-qual" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA5 — Huge change-from-current clearing event in solid quality<span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra6-trough-on-trough-turn-in-solid-quality-cyclical" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA6 — Trough-on-trough turn in solid quality cyclical<span class="nav-fc">4</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra7-unacceptable-case-setups-negative-guardrail" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA7 — Unacceptable case setups (negative guardrail)<span class="nav-fc">5</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra8-false-friend-case-setups-negative-guardrail" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA8 — False friend case setups (negative guardrail)<span class="nav-fc">12</span></span>
+</div>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">52</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">48</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e11-ra1-demand-side-strong-fragile" data-element-id="element-e11-value-chain-dynamics-c">E11 RA1 — Demand side strong/fragile<span class="nav-fc">9</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra2-competitive-supportiveness-aggression" data-element-id="element-e11-value-chain-dynamics-c">E11 RA2 — Competitive supportiveness/aggression<span class="nav-fc">16</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra3-disruption-forces" data-element-id="element-e11-value-chain-dynamics-c">E11 RA3 — Disruption forces<span class="nav-fc">5</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra4-political-regulatory" data-element-id="element-e11-value-chain-dynamics-c">E11 RA4 — Political/regulatory<span class="nav-fc">7</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra5-supportive-supplier-side" data-element-id="element-e11-value-chain-dynamics-c">E11 RA5 — Supportive supplier side<span class="nav-fc">11</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-d">Group 4 — Case riskiness<span class="nav-rating-pill D">D</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e15-invalidating-attributes-nr">Element E15 — Invalidating attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e16-strenuously-seek-to-avoid-attributes-nr">Element E16 — Strenuously seek-to-avoid attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e17-capital-constraining-attributes-nr">Element E17 — Capital-constraining attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e18-clear-transmission-mechanism-inputs-to-earnings-">Element E18 — Clear transmission mechanism, inputs to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e19-monitorable-transmission-mechanism-leading-track">Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">17</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">12</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Nestlé S.A. (NESN-CH) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">NESN-CH</span> A&amp;J MEMO — Nestlé S.A. (NESN-CH) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 22-Jul-26 12:30</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">CHF 85.55 (web fetch, 17-Jul-26)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">16.4x</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">OW 39% / EW 50% / UW 8% (28 analysts)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (price near 52w high)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">NESN-CH (Nestlé S.A.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Consumer Staples — Food, Beverages &amp;amp; Nutrition</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Diversified food and nutrition mega-caps (branded packaged goods, global scale, category breadth)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Unilever (ULVR-GB)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">CHF 85.55 (web fetch, 17-Jul-26)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">CHF 69.90–89.43</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">n/a (not in prices.json)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (price near 52w high)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">16.4x</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">CHF 86.87 (consensus)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">31 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall verdict. <span class="g gC">C</span></strong> Nestlé presents a <u>complex turnaround</u> with genuine change forces but <span class="s-neg">severe execution complexity, stretched balance sheet, and negative earnings momentum</span> that cap near-term conviction.</li><li><strong>Key risk.</strong> <span class="s-neg">Simultaneous commodity inflation, CHF translation headwinds, and formula recall damage</span> could neutralise self-help savings and volume recovery.</li><li><strong>Key support.</strong> <span class="s-pos">Coffee acceleration (<strong>9.3%</strong> organic Q1-26), P/E at 9th percentile of 10Y history, and CHF 3bn cost programme</span> provide identifiable upside catalysts.</li><li><strong>Recommendation.</strong> Progress to ESA conditionally; verify H2-26 margin delivery and commodity normalisation trajectory before deepening commitment.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">10 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>World's largest food company.</strong> <em>Nestlé generates CHF 89.5bn revenue</em> through 271,000 employees operating across 185 countries, the largest scale platform in packaged food globally.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Four category pillars.</strong> Coffee (<strong>29%</strong> of sales), Food &amp; Snacks (<strong>29%</strong>), Petcare (<strong>21%</strong>), and Nutrition (<strong>21%</strong>) form a diversified but genuinely disparate portfolio.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Coffee is the crown asset.</strong> Nestlé holds the #1 global coffee position through Nescafé, Nespresso, and the licensed Starbucks at-home business.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Petcare category leadership.</strong> The group is #1 in cat food globally and #2 in dog food, competing chiefly against privately-held Mars.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Three geographic operating zones.</strong> Americas, Europe, and AOA (Asia, Oceania, Africa) run 75 factories worldwide, following a January-25 reorganisation from five zones.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Leadership in flux.</strong> Nestlé is on its <u>third CEO in 24 months</u> (Navratil, appointed Sep-25) and its first external Chairman in 25 years (Isla, Apr-26).</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Self-help programme underway.</strong> "Fuel for Growth" targets CHF 3.0bn cumulative savings with 16,000 headcount cuts, a material internal restructuring effort.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>FY25 delivery.</strong> <em>Organic growth of <strong>3.5%</strong></em>, a <strong>16.1%</strong> underlying trading operating profit (UTOP) margin, and free cash flow of CHF 9.15bn.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Balance sheet position.</strong> Net debt of CHF 51.4bn equates to <strong>2.85x</strong> EBITDA, at the upper end of the group's own 2.0-<strong>3.0x</strong> target range.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Dividend and valuation.</strong> CHF 3.10 per share, the 66th consecutive year of dividend payment or increase; forward P/E of <strong>16.4x</strong> sits at the <u>9th percentile</u> of the last 10 years.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">4 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Verdict. <span class="g gD">D</span></strong> Nestlé presents a <u>complex turnaround</u> with genuine change forces but <span class="s-neg">severe execution complexity, stretched balance sheet, and negative earnings momentum</span> that cap near-term conviction.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Key risk. <span class="g gD">D</span></strong> <span class="s-neg">Simultaneous commodity inflation, CHF translation headwinds, and formula recall damage</span> could neutralise self-help savings and volume recovery before they compound.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key support. <span class="g gB">B</span></strong> <span class="s-pos">Coffee acceleration (<strong>9.3%</strong> organic Q1-26), P/E at 9th percentile of 10Y history, and the CHF 3bn cost programme</span> provide identifiable, trackable upside catalysts.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Recommendation. <span class="g gC">C</span></strong> <em>Progress to ESA conditionally</em>; verify H2-26 margin delivery and the commodity normalisation trajectory before deepening commitment to the case.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Price action is constructive.</strong> Live price of CHF 85.55 sits <u>+<strong>11%</strong> over four weeks</u> and close to the 52-week high of CHF 89.43, though not yet a fresh high.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-d" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Estimate revisions are deteriorating.</strong> <em>SSEM momentum score of -5</em>, with EPS revisions of <span class="s-neg"><strong>2%</strong> (L3M), -<strong>4%</strong> (L6M), -<strong>10%</strong> (L12M)</span> and only <strong>39%</strong> Buy-rated across 28 analysts.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Defensive but currency-exposed.</strong> Consumer staples character fits a risk-off stance, but <u>CHF reporting creates a structural ~<strong>5%</strong> p.a. translation drag</u>, and the case is not a pure EU-domestic play.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change is real but contested.</strong> Internal restructuring and portfolio optimisation are genuine, but sit alongside commodity, FX, and recall headwinds that make delivery uncertain.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-d" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Complexity is the drag.</strong> A global conglomerate spanning 185 countries and four categories fails simplicity guardrails despite a <em>solid value-chain position</em>.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> Change forces are present but surrounded by headwinds; the base is under repair, not robust.</li><li><strong>E1 headline.</strong> Genuine internal change (three CEOs, CHF 3bn savings, portfolio pruning) is offset by negative SSEM, commodity drag, the recall, and CHF translation.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gC">C</span></strong> <em>Massive internal restructuring</em> (3 CEOs, CHF 3bn savings target, brand count 400→150) provides genuine change; offset by <span class="s-neg">negative SSEM (-5), commodity drag, the infant formula recall (-<strong>90bps</strong>), and CHF translation (~<strong>5%</strong> headwind)</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 — Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at this stage; first assessed at Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 — Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at this stage; first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gD">D</span></strong> A solid brand-owner value-chain position and an identifiable setup archetype are dragged lower by case complexity and near-term risk.</li><li><strong>Group headlines.</strong> Momentum is divided (C), simplicity fails hard (D), core philosophy is solid-but-pressured (C), riskiness is elevated (D), optionality not yet in scope.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gC">C</span></strong> MR1 technical momentum is positive (B), MR2 SSEM is negative (D), thematic fit is mediocre (C); <em>momentum signals are genuinely divided</em>.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gD">D</span></strong> <u>Case complexity is HIGH</u> (global conglomerate, 4+ categories, 185 countries, multiple fulcrum drivers); simplicity guardrails fail; a self-help and turnaround setup is identified.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gC">C</span></strong> Strong brand-owner value-chain position (<strong>45.6%</strong> gross margin) is real, but downstream retail power is shifting and private label is eroding share.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gD">D</span></strong> Balance sheet is stretched (<strong>2.85x</strong>), the dividend is uncovered by organic FCF, and GLP-1, recall, and China risks stack up simultaneously.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Not yet in scope at Triaging.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gC">C</span></strong> Progress to ESA conditionally, with low-to-medium conviction pending margin and commodity confirmation.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> <em>Progress to ESA conditionally.</em></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> (1) H2-26 margin delivery versus the <strong>16.1%</strong> baseline; (2) coffee/cocoa commodity price trajectory confirming a genuine surplus; (3) infant formula share recovery post-recall.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) IA to run ESA-level research (Business Foundation deep read plus Leadership Foundation generation) by 15-Aug-26; (2) APM to add NESN-CH to the monitoring dashboard with weekly commodity and scanner-data tracking.</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">255 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> <em>Nestlé is a genuine but crowded turnaround case</em>; change forces are real, but case complexity, negative sell-side momentum, and balance sheet strain sit directly against them.</li><li><strong>Load-bearing tension.</strong> <span class="s-pos">Self-help delivery and coffee-led growth</span> is fighting <span class="s-neg">commodity inflation, CHF drag, and a 185-country perimeter</span> that no single management action can simplify away.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">57 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> Change forces are present, internally generated, and partially evidenced in Q1-26 delivery, but external headwinds are numerous enough that the base cannot yet be called robust.</li><li><strong>Element headline.</strong> E1 is the only in-scope Pillar I element at Triaging; E2 and E3 (case outputs, valuation upside) first apply at ESA.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-c" data-spy>Element E1 — Required input change forces <span class="g gC">C</span> <span class="secn">55 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E1 verdict. <span class="g gC">C</span></strong> <em>Real internal change forces exist</em> (leadership reset, CHF 3bn cost programme, portfolio pruning) but the external environment is <span class="s-mid">mixed</span>, with commodity relief forming against CHF drag, a recall, and China's structural decline.</li><li><strong>RA1 verdict. <span class="g gC">C</span></strong> Both external and internal change forces are identifiable and material; the case clears the "change exists" test but not yet the "change is sufficient" test.</li><li><strong>RA2 verdict. <span class="g gD">D</span></strong> The base is not robust: gross margin, FX, and China headwinds are active and unresolved even as the group ticks boxes on delivery congruency and valuation support.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-change-forces-present" data-spy><span class="id">E1 RA1</span> Change forces present? <span class="secn">18 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> <em>Change forces exist on both sides of the ledger</em> — external commodity and demand shifts, and internal restructuring — but they only partially offset each other.</div></div>
+<p><strong>CQ1 — External change forces: <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Coffee commodity surplus forming.</strong> Expana projects a <u>9 million bag surplus for 2025/26</u> as Arabica shifts from deficit to surplus on the new Brazilian crop; <span class="s-pos">directly relieves Nestlé's largest single input cost</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Cocoa prices easing.</strong> West African weather improvement and stronger Ecuadorian output are pulling cocoa off recent highs, a second favourable commodity signal alongside coffee.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Q1-26 organic growth beat.</strong> <em>Reported organic growth of <strong>3.5%</strong></em> against a consensus of <strong>2.2%</strong>, a genuine positive surprise driven overwhelmingly by coffee at <strong>9.3%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>European pricing carryover.</strong> <strong>2.8%</strong> pricing achieved in FY25, supported by the annual retail negotiation cycle, evidencing retained pricing power in the group's largest developed market.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>GLP-1 adoption risk.</strong> Jefferies estimates up to <u><strong>40%</strong> of Nestlé sales are exposed</u> to GLP-1-driven demand destruction in snacking and confectionery categories; <span class="s-neg">a genuine structural threat, not a cyclical one</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>China infant formula collapse.</strong> Chinese births fell <strong>17%</strong> in 2025 to a 5.6-per-1,000 birth rate, a demographic headwind that no marketing spend can reverse.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E-commerce channel growth.</strong> Online now represents <strong>20.5%</strong> of group sales, growing <strong>13.5%</strong> organically, a structurally growing and higher-margin distribution channel.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Private label expansion.</strong> Private label holds <strong>14%</strong> dollar share in the US, and <strong>53%</strong> of consumers say they are increasing private-label purchases; <span class="s-neg">a genuine share-of-wallet threat to branded volume</span>.</div></div>
+<p><strong>CQ2 — Internal change forces: <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Three CEOs in 24 months.</strong> Schneider (to Aug-24), Freixe (Sep-24 to Sep-25), and now Navratil (from Sep-25); <u>leadership instability is real</u>, but so is the opportunity for a genuine reset.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Fuel for Growth savings.</strong> <em>CHF 3.0bn cumulative target by 2027</em>, with CHF 1.1bn already delivered in FY25, CHF 350m ahead of plan, an encouraging early proof point.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Headcount reduction.</strong> 16,000 roles being cut, 12,000 of them white-collar, targeting CHF 1.0bn of annual savings, a genuinely large organisational change.</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Portfolio rationalisation.</strong> Ice cream moved to the Froneri joint venture, Waters to be deconsolidated by 2027, Blue Bottle sold, and the brand count cut from 400 to 150.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Market-led operating model.</strong> Zones cut from five to three, and decision rights shifted from category structures to local markets, a genuine decentralisation of authority.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>First external Chairman in 25 years.</strong> Isla, former Inditex CEO, brings <em>outside supply-chain and retail discipline</em> to a board that had been almost entirely insider-led.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>New CFO rigour.</strong> Anna Manz, ex-LSEG, is credited with bringing more institutional financial discipline to group reporting and capital allocation.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Marketing spend step-up.</strong> Spend raised from <strong>8.1%</strong> to <strong>8.6%</strong> of sales, targeting <strong>9%</strong>, a genuine reinvestment signal rather than pure cost extraction.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Growth platforms expanded.</strong> Growth platforms grew from <strong>10%</strong> to <strong>30%</strong> of sales with CHF 0.6bn of additional funding, <u>evidence management is not purely defensive</u>.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-robust-base" data-spy><span class="id">E1 RA2</span> Robust base? <span class="secn">37 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 answer. <span class="g gD">D</span></strong> The base is <u>not robust</u>: five separate headwind categories are live simultaneously, even where delivery congruency and valuation support are genuinely favourable.</div></div>
+<p><strong>CQ1 — Absence of external headwinds: <span class="g gD">D</span></strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>CHF translation drag.</strong> Reported sales carried a <u>~<strong>5%</strong> currency headwind</u> in FY25 (-<strong>5.7%</strong>) and a similar level is expected in FY26; <span class="s-neg">this is structural, not a one-off, given Switzerland's safe-haven currency status</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Gross margin compression.</strong> Margin fell <strong>110bps</strong> to <strong>45.6%</strong> on coffee and cocoa inflation, the clearest P&amp;L evidence that the input-cost cycle has not yet turned.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Infant formula recall drag.</strong> The recall cut Q1-26 organic growth by <strong>90bps</strong> group-wide and <u>-<strong>10%</strong> in directly affected markets</u>, a reputational as well as financial cost.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Greater China organic decline.</strong> Organic sales fell <strong>10.6%</strong> in Q1-26 on distributor destocking layered onto the demographic decline described above.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>European private label share gain.</strong> Scanner value growth slowed to <u>-<strong>1.9%</strong> in Apr-26</u>, evidence that pricing carryover is now being offset by volume and mix losses to private label.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Financing cost drag.</strong> CHF 51.4bn of net debt creates an ongoing interest expense drag on EPS that limits the flow-through of operating improvement to the bottom line.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Headwinds are stacking, not sequencing.</strong> <em>All six items above are live in the same reporting period</em>, meaning a single favourable quarter cannot be read as the base turning robust; each headwind needs its own resolution.</div></div>
+<p><strong>CQ2 — Well-invested base: <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Capex normalising down.</strong> Capex fell to <u><strong>4.8%</strong> of sales (CHF 4.53bn)</u> from <strong>6.4%</strong> in FY24, signalling the capacity-build cycle is largely complete rather than starved.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Glendale plant fully ramped.</strong> The pet food facility resolved prior wet cat food supply constraints, removing a specific bottleneck that had capped petcare growth.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Single group-wide ERP backbone.</strong> <em>Nine core end-to-end processes are standardised</em> on one IT system, a genuine efficiency asset relative to less-integrated peers.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Shared services automation.</strong> Automation is cutting costs by 30-<strong>75%</strong> in standardised processes, a credible mechanism behind the Fuel for Growth savings target.</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>E-commerce infrastructure scaled.</strong> <strong>20.5%</strong> of sales now flow through e-commerce, growing near <strong>10%</strong> annually, evidence the digital investment has already paid off.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Reverse factoring expanded.</strong> The supply-chain finance programme reached CHF 6.21bn (<strong>6.8%</strong> of sales, <strong>37%</strong> of payables); <span class="s-neg">functionally useful for working capital, but an artificial support to reported free cash flow</span>.</div></div>
+<p><strong>CQ3 — Past/present delivery congruency: <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>FY24 guidance failure.</strong> Organic growth guidance was slashed mid-year from <strong>4%</strong> to <strong>2%</strong>, a <u>severe miss</u> that still colours sell-side scepticism of Nestlé targets.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>FY25 guidance met.</strong> Organic growth of <strong>3.5%</strong> matched the "improving versus 2024" guide, and margin of <strong>16.1%</strong> met the "at or above <strong>16.0%</strong>" commitment.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Q1-26 genuine beat.</strong> The <strong>110bps</strong> beat against consensus (<strong>3.5%</strong> versus <strong>2.2%</strong>) is the first <em>unambiguously positive surprise</em> in several years.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Historical margin resets.</strong> Pre-COVID targets of 17.5-<strong>18.5%</strong> have been walked down repeatedly to today's <strong>16.1%</strong>, a pattern of <u>serial ambition-lowering</u> rather than delivery.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><strong>VMS integration failure.</strong> The Bountiful vitamins acquisition integration failed, delaying an <strong>18%</strong> margin target by two years, a specific and costly execution error.</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><strong>Shift to "honest-tracker" posture.</strong> Management is explicitly targeting beatable guidance now, an implicit admission that prior targets were set for credibility rather than accuracy.</div></div>
+<p><strong>CQ4 — Large change-from-current / mispricing: <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><strong>Valuation near trough.</strong> Forward P/E of <u><strong>16.4x</strong> sits at the 9th percentile</u> of the last ten years, a genuinely rare entry point by Nestlé's own history.</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><strong>Wide sell-side target range.</strong> Targets span CHF 69-100, with consensus at CHF 86.87, implying only <strong>1.5%</strong> upside at the mean, but real dispersion in the tails.</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><strong>Rating mix implies mediocrity, not disaster.</strong> <strong>50%</strong> Equal-weight suggests the sell-side expects a muddling outcome rather than a structural breakdown, a <em>moderately reassuring signal</em>.</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><strong>EPS upside scenario exists.</strong> If organic growth holds at 3.5-<strong>4%</strong> and margins expand <strong>50bps</strong>, EPS could reach <u>CHF 5.0+</u> versus a current consensus near CHF 4.40.</div></div>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><strong>Commodity relief flows straight to margin.</strong> A forming coffee/cocoa surplus would flow directly to gross margin given Nestlé's scale of raw material purchasing.</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><strong>Disposal proceeds could accelerate deleveraging.</strong> Ice cream and Waters disposals could unlock CHF 5-10bn, directly addressing the balance sheet constraint identified in Group 4.</div></div>
+<p><strong>CQ5 — Low trading multiple [~mixed]:</strong></p>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><strong>Cheap versus own history.</strong> Forward P/E of <strong>16.4x</strong> compares to a <u>10-year median in the low-to-mid 20s</u>, a genuine historical discount.</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><strong>FCF yield less compelling versus peers.</strong> Projected FY26 FCF yield of ~<strong>3.7%</strong> trails Unilever's <strong>6.2%</strong>, <span class="s-neg">a real gap on a cash-flow basis rather than an earnings basis</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><strong>EV/EBITDA target derivation.</strong> Bernstein derives its target multiple from <strong>11.1x</strong> forward EBITDA, broadly in line with sector norms rather than a demanding premium.</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><strong>Dividend yield supportive.</strong> ~<strong>3.6%</strong> yield (CHF 3.10 / CHF 85.55) with a <u>66-year unbroken record</u> provides a valuation floor of sorts.</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><strong>Buybacks suspended.</strong> The balance sheet constraint has forced a halt to buybacks, removing a valuation support mechanism peers still enjoy.</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><strong>Premium on FCF-yield basis.</strong> Morgan Stanley flags a <u><strong>30%</strong> premium to the staples sector</u> on FCF yield, meaning the "cheap" read is P/E-specific, not universal, a genuinely <span class="s-mid">mixed</span> signal.</div></div>
+<p><strong>Counter-view considered (E1)</strong></p>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><strong>Counter-view:</strong> <em>Coffee and cocoa surpluses could reverse abruptly</em> if adverse weather returns; CHF strength may be structural rather than cyclical; the "honest-tracker" posture could simply mask permanently lower ambition.</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><strong>Why rejected:</strong> Q1-26 volume recovery (<u><strong>1.2%</strong> RIG</u> versus flat in prior periods) suggests real traction, and the 9th-percentile P/E provides valuation support even under a slow-recovery path.</div></div>
+<p><strong>Downstream actions (E1)</strong></p>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><strong>Action 1:</strong> IA to track monthly coffee and cocoa futures curves against the Expana surplus thesis through Q3-26, flagging any reversal immediately.</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><strong>Action 2:</strong> APM to request FY26 H1 results commentary specifically on Fuel for Growth savings delivery versus the CHF 1.1bn FY25 run-rate.</div></div>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext"><strong>Action 3 (supplementary).</strong> IA to cross-check the Q1-26 volume beat (<strong>1.2%</strong> RIG) against Q2-26 data before treating the recovery as confirmed rather than a single-quarter read.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr" data-spy>Element E2 — Required case outputs [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E2 (Required case outputs) is first assessed at Early-Stage Assessment, once Pillar I change forces have been validated in more depth.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr" data-spy>Element E3 — Sufficient TSR / valuation upside [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E3 (Sufficient total-shareholder-return / valuation upside) is first assessed at Early-Stage Assessment, once a fuller earnings model exists.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-d" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gD">D</span> <span class="secn">198 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gD">D</span></strong> <em>Case complexity is the dominant drag on this pillar</em>; value-chain and momentum characteristics are respectable, but simplicity guardrails fail hard and riskiness is elevated.</li><li><strong>Group headline.</strong> Momentum divided (C), simplicity fails (D), philosophy solid-but-pressured (C), riskiness elevated (D), optionality not yet in scope (NR).</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">34 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> Technical momentum is genuinely positive, but sell-side earnings momentum is genuinely negative; the two do not net to a clean signal.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 — Technical momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E4 (Technical momentum) is captured at Triaging via Master Rating MR1 (Section B.3); the full Element E4 is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">33 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E5 verdict. <span class="g gC">C</span></strong> <em>Defensive category character</em> fits a risk-off environment, but <span class="s-neg">CHF reporting currency and a mega-cap market value push the case away from Richard's stated sweet spot</span>; E5 carries x2 weight in Pillar II scoring.</li><li><strong>RA1 verdict [~mixed].</strong> Staples resilience is genuine but currency and premium-category trade-down risk temper the downturn case.</li><li><strong>RA2 verdict. <span class="g gB">B</span></strong> AI is a modest net positive: low direct disruption risk to core manufacturing, genuine efficiency upside in procurement and demand forecasting.</li><li><strong>RA3 verdict [~mixed].</strong> Partial fit to an Iran/oil-inflation scenario; commodity drivers are crop-based rather than oil-based, but CHF safe-haven flows cut against Nestlé specifically.</li><li><strong>RA4 verdict. <span class="g gD">D</span></strong> Paradigm fit is mixed-to-poor on Richard's specific criteria; non-cyclical revenue fits, but EU-domestic and market-cap sweet-spot criteria both fail.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra1-suitability-for-bear-market-downturn-c" data-spy><span class="id">E5 RA1</span> Suitability for bear market / downturn <span class="g gC">C</span> <span class="secn">8 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> <em>Defensive at the category level</em>, but currency mechanics and premium trade-down risk mean the downturn case is weaker than a first glance suggests.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Essential-service demand base.</strong> Food, pet food, and coffee are essential daily spending categories; <span class="s-pos">demand does not disappear in a downturn, even if it downgrades in mix</span>.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>CHF amplifies losses in risk-off.</strong> Swiss franc strength during flight-to-safety episodes directly compresses reported CHF earnings for a group already carrying a ~<strong>5%</strong> translation headwind.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Historical precedent:</strong> prior risk-off periods (2011, 2015, 2020) all saw CHF appreciation coincide with reported-currency drag on Nestlé's foreign-sourced revenue.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Premium trade-down risk.</strong> Nespresso and specialty pet food face genuine trade-down risk in a deep recession, even if switching costs partly protect them.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Dividend income support.</strong> ~<strong>3.6%</strong> yield with a <u>66-year unbroken record</u> gives some downside support to the equity in a broad market downturn.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Debt limits flexibility.</strong> <em><strong>2.85x</strong> leverage</em> reduces the balance sheet's capacity to absorb a demand shock without further deleveraging pressure on the dividend or capex.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Private label substitution accelerates.</strong> Recessions historically accelerate private-label switching, compounding the structural share losses already visible in European scanner data.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Net downturn read.</strong> <em>Defensive character is real but partial</em>; a Richard-style risk-off allocation into Nestlé specifically should size for the CHF drag, not just the category resilience.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra2-suitability-for-ai-disruption-b" data-spy><span class="id">E5 RA2</span> Suitability for AI disruption <span class="g gB">B</span> <span class="secn">7 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> <em>Core manufacturing carries low direct AI disruption risk</em>, and several early deployments are genuinely accretive rather than merely defensive.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Physical manufacturing is AI-resistant.</strong> Food and beverage production, brand trust, and category leadership are not easily disintermediated by AI-native competitors.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>AI deployed for procurement gains.</strong> Recipe redesign, demand forecasting, and procurement optimisation are cited as active use cases inside the group's cost programme.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Shared services automation target.</strong> 30-<strong>75%</strong> cost reduction targets in standardised processes rely partly on automation and AI-adjacent tooling, __reinforcing the Fuel for Growth thesis==.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>ChoViva cocoa alternative.</strong> An AI-assisted cocoa alternative reduces commodity dependency directly, a rare case of AI addressing a raw-material risk rather than a labour risk.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E-commerce personalisation upside.</strong> <strong>20.5%</strong> of sales flowing through e-commerce creates a data asset that AI-driven personalisation can compound over time.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Net moat assessment.</strong> Brand trust and physical distribution remain the dominant moats; AI is additive rather than disruptive to Nestlé's specific business model.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra3-suitability-for-iran-oil-price-inflation-scenario-mix" data-spy><span class="id">E5 RA3</span> Suitability for Iran oil-price inflation scenario [~mixed] <span class="secn">7 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 answer [~mixed]:</strong> <em>Partial fit</em>; food commodity exposure is real but crop-driven rather than oil-driven, while CHF safe-haven dynamics work against the stock specifically.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Modest oil correlation.</strong> Food commodity prices correlate only modestly with oil, mainly through transportation and fertiliser costs rather than direct input substitution.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Coffee and cocoa are crop-cycle driven.</strong> Prices are set primarily by Brazilian and West African harvest outcomes, __not by the oil price channel Richard is tracking==.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>CHF strengthens in geopolitical crises.</strong> A classic safe-haven flow into CHF during a Middle East escalation would add to, not offset, the existing translation headwind.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Emerging market demand resilience.</strong> India, growing net sales +<strong>14.9%</strong>, could prove resilient even under an oil-inflation scenario, a genuine offsetting factor.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>European affordability already pressured.</strong> Any additional oil-driven inflation would add to an already-stretched European consumer, worsening the private-label dynamic already in evidence.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Richard's sector framework.</strong> Consumer staples screen as defensive in Richard's Iran scenario work, but Nestlé's currency structure is a distinguishing negative versus EU-domestic staples names.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra4-paradigm-fit-d" data-spy><span class="id">E5 RA4</span> Paradigm fit <span class="g gD">D</span> <span class="secn">11 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 answer: <span class="g gD">D</span></strong> <em>Nestlé fits Richard's non-cyclical revenue criterion cleanly</em>, but fails the EU-domestic-footprint and market-cap sweet-spot criteria that otherwise define his portfolio.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Recurring non-cyclical revenue.</strong> Essential daily consumption across coffee, pet food, and packaged food is a clean fit with Richard's stated preference.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>EU-domestic footprint fails.</strong> Nestlé is a <u>global business reporting in CHF</u>, not the domestic-EU-footprint profile Richard is currently prioritising in risk-off positioning.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Healthcare fit is partial.</strong> Medical nutrition and pet therapeutics touch Richard's healthcare interest, but represent a minority of group revenue rather than the core thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Chemicals / discretionary avoidance not applicable.</strong> Nestlé is neither a chemicals name nor discretionary consumer, so these avoid-criteria are simply not triggered either way.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Market cap fails the sweet spot.</strong> <em>CHF ~220bn market capitalisation</em> is far outside Richard's stated $<strong>5</strong>-50bn sweet spot, a structural rather than cyclical mismatch.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Concentration implication.</strong> A position of this scale would likely anchor a 5-15 position portfolio rather than sit as one name among many, a genuine sizing question for later stages.</div></div>
+<p><strong>Counter-view considered (E5)</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Counter-view:</strong> Defensive staples character and the dividend track record could be argued to outweigh the market-cap and geography mismatches, given Richard's risk-off stance.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Why rejected:</strong> <em>Paradigm fit is a structural screen, not a cyclical one</em>; a temporary risk-off tilt should not override Richard's standing sizing and geography discipline.</div></div>
+<p><strong>Downstream actions (E5)</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Action 1:</strong> IA to quantify Nestlé's actual CHF revenue exposure by segment ahead of ESA, to size the translation headwind precisely rather than qualitatively.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Action 2:</strong> APM to flag the market-cap sweet-spot breach explicitly in any portfolio construction discussion if the case progresses past ESA.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-d" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gD">D</span> <span class="secn">99 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gD">D</span></strong> <em>Case complexity fails outright</em> on every guardrail tested; this is the single biggest drag on the Pillar II score.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 — Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">42 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E7 verdict. <span class="g gD">D</span></strong> <em>Every simplicity guardrail tested fails</em>: too many fulcrum drivers, too wide a perimeter, multiple live headwinds, and a poor guidance-conservatism track record; E7 carries x2 weight in Pillar II scoring.</li><li><strong>RA1 verdict. <span class="g gD">D</span></strong> Four fulcrum drivers, not two, and six-plus key drivers; fails the focused-bet test outright.</li><li><strong>RA2 verdict. <span class="g gD">D</span></strong> Three zones spanning 185 countries and four category pillars; fails the narrow-perimeter test outright.</li><li><strong>RA3 verdict. <span class="g gF">F</span></strong> Six live headwinds identified; the "zero headwinds" test is failed by the widest margin of any guardrail.</li><li><strong>RA4 verdict. <span class="g gD">D</span></strong> Five change-from-current items running concurrently; fails the "two or fewer" test.</li><li><strong>RA5 verdict. <span class="g gC">C</span></strong> Guidance conservatism is improving but not yet proven given the FY24 track record.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra1-focused-bet-d" data-spy><span class="id">E7 RA1</span> Focused bet? <span class="g gD">D</span> <span class="secn">8 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gD">D</span></strong> <em>Four fulcrum drivers are live simultaneously</em>, not the two-or-fewer required for a focused bet, and management controls only one of them directly.</div></div>
+<p><strong>CQ1 — Two or fewer fulcrum drivers and four or fewer key drivers?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Four fulcrum drivers identified.</strong> (1) Fuel for Growth execution; (2) coffee pricing/volume balance; (3) commodity cost normalisation; (4) CHF translation — __this fails the two-or-fewer test outright==.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Six-plus key drivers.</strong> Coffee acceleration, petcare capacity, India expansion, portfolio disposals, margin expansion, and China recovery all carry material weight in the thesis.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Driver dependency compounds risk.</strong> Growth-platform funding depends on cost-savings delivery, meaning a shortfall in one driver directly weakens a second.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Cross-driver correlation.</strong> Coffee and cocoa must normalise <u>simultaneously</u> for the margin target to be met; a single commodity reversal breaks the whole chain.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Control asymmetry.</strong> Management can control cost savings directly, but cannot control commodity prices or CHF strength, the two largest swing factors in the model.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Judgement:</strong> <em>Too many drivers, too little management control over the largest ones</em>; this is not a focused bet by any reasonable definition.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Implication for sizing.</strong> A four-driver case with two drivers outside management's control should be sized more conservatively than a typical Richard position, even if it progresses to ESA.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra2-narrow-perimeter-d" data-spy><span class="id">E7 RA2</span> Narrow perimeter? <span class="g gD">D</span> <span class="secn">7 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 answer: <span class="g gD">D</span></strong> <em>The operating perimeter is wide by any measure</em>, spanning far more geographies and categories than the ten-unit threshold implies.</div></div>
+<p><strong>CQ1 — Ten or fewer geographies/business units?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Three zones, 185 countries.</strong> The zone structure simplifies reporting but does not reduce the __underlying operational complexity of 185 country markets and 75 factories==.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Four category pillars.</strong> Coffee, Petcare, Nutrition, and Food &amp; Snacks each carry distinct competitive dynamics, supply chains, and growth drivers.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Reorganisation still bedding in.</strong> The 5-to-3 zone consolidation completed only in January-25, meaning organisational change is still absorbing management attention.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Regionally distinct problems.</strong> Chinese distributor destocking and European private-label erosion are __separate, unrelated regional problems== requiring different management responses.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>India distinct from developed markets.</strong> The Indian growth story (+<strong>14.9%</strong> net sales) is structurally unrelated to the flat developed-market volume challenge.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Judgement:</strong> The perimeter <em>far exceeds</em> ten meaningful units; this is a conglomerate-scale complexity problem, not a narrow bet.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra3-zero-headwinds-f" data-spy><span class="id">E7 RA3</span> Zero headwinds? <span class="g gF">F</span> <span class="secn">8 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 answer: <span class="g gF">F</span></strong> <em>Six distinct headwinds are live concurrently</em>; this is the guardrail failed by the widest margin of the five tested.</div></div>
+<p><strong>CQ1 — Zero value-chain headwind risks to revenue?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Gross margin compression.</strong> <strong>110bps</strong> of margin loss to commodity inflation is a __direct, quantified headwind==, not a theoretical risk.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>CHF translation drag.</strong> ~<strong>5%</strong> annual reported-sales headwind from currency, structural rather than transitory given Switzerland's safe-haven status.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Infant formula recall.</strong> -<strong>90bps</strong> to Q1-26 organic growth group-wide, and -<strong>10%</strong> in directly affected markets, a live and unresolved headwind.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Private label expansion.</strong> European grocery private-label share continues to expand, directly eroding Nestlé's branded volume and pricing power.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>China structural decline.</strong> -<strong>10.6%</strong> organic in Q1-26 combines demographic decline with distributor destocking, a compound headwind rather than a single issue.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>GLP-1 adoption.</strong> Up to <strong>40%</strong> of sales exposed per Jefferies, a genuinely structural rather than cyclical demand threat.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Judgement:</strong> <em>Six live headwinds is far from zero</em>; this guardrail fails more comprehensively than any other tested in E7.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra4-handful-of-change-from-current-items-d" data-spy><span class="id">E7 RA4</span> Handful of change-from-current items? <span class="g gD">D</span> <span class="secn">7 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 answer: <span class="g gD">D</span></strong> <em>Five change-from-current items are running concurrently</em>, well above the two-or-fewer threshold for a clean case.</div></div>
+<p><strong>CQ1 — Two or fewer change-from-current items?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Third CEO still settling in.</strong> Navratil is establishing strategic direction only ten months into the role, an unresolved change item in itself.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Portfolio pruning ongoing.</strong> Ice cream, Waters, and Blue Bottle disposals run through 2027, meaning the portfolio is not yet in its steady-state shape.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>16,000 headcount cuts.</strong> Organisational disruption from cuts of this scale typically takes multiple years to fully digest.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Market-led model transition.</strong> The category-to-local-market decentralisation is still bedding in, a genuine operating-model change still in motion.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Recall recovery ongoing.</strong> Infant formula brand-trust recovery is unresolved and its timeline is __genuinely uncertain==.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Judgement:</strong> Five concurrent change-from-current items <em>clearly fails</em> the two-or-fewer threshold for a clean, gradeable case.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra5-conservative-investor-relations-c" data-spy><span class="id">E7 RA5</span> Conservative investor relations? <span class="g gC">C</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 answer: <span class="g gC">C</span></strong> <em>Guidance conservatism is improving but not yet proven</em>; the FY24 track record still weighs against management credibility.</div></div>
+<p><strong>CQ1 — Company confirms guidance is conservative?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>FY24 guidance failure.</strong> Organic growth guidance was slashed mid-year from <strong>4%</strong> to <strong>2%</strong>, a __severe conservatism failure== still fresh in sell-side memory.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>FY25 guidance met narrowly.</strong> <strong>16.1%</strong> margin met the "at or above <strong>16.0%</strong>" guide, but only just, not a comfortable beat.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Management tone shift.</strong> Freixe-era language moved toward "achievable and hopefully beatable" targets, a genuine tonal change from prior years.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>FY26 guidance parameters.</strong> Organic growth of 3-<strong>4%</strong>, margin improvement versus <strong>16.1%</strong>, and FCF above CHF 9bn are the stated targets for the year ahead.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Sell-side view.</strong> Jefferies characterises FY26 guidance as <em>"conceptually contrived but fundamentally achievable"</em>, a qualified endorsement rather than a clean one.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Judgement:</strong> The posture is <em>moving toward conservative</em>, but with only one clean quarter of evidence (Q1-26), the guardrail is not yet proven.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Cross-reference to E8.</strong> This same guidance-credibility gap directly informs the false-friend risk assessed in RA8 below; a repeat of the FY24 pattern would confirm the false-friend read rather than the corporate-change thesis.</div></div>
+<p><strong>Counter-view considered (E7)</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view:</strong> Complexity guardrails are designed for smaller, single-driver situations; a mega-cap conglomerate should be judged on a different, more forgiving standard.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Why rejected:</strong> <em>The guardrails exist precisely to flag cases like this one</em>; applying a looser standard to mega-caps would defeat the purpose of the simplicity screen.</div></div>
+<p><strong>Downstream actions (E7)</strong></p>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Action 1:</strong> IA to build a one-page fulcrum-driver tracker (savings delivery, coffee pricing, commodity cost, CHF) for weekly monitoring ahead of ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Action 2:</strong> APM to set an explicit review trigger if a fifth or sixth fulcrum driver emerges, given the case already exceeds the two-driver threshold.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">57 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E8 verdict. <span class="g gC">C</span></strong> <em>Two acceptable setups fit</em>, corporate change and compounder-clearing, but both carry a material <u>"false friend" risk</u> given Nestlé's history of unmet restructuring ambition; E8 tests all eight archetypes at Triaging depth.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra1-mis-modelled-high-quality-eps-upgrader" data-spy><span class="id">E8 RA1</span> Mis-modelled high-quality EPS upgrader <span class="secn">5 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gF">F</span></strong> <em>Nestlé is not mis-modelled</em>; this is one of the most heavily covered stocks in Europe, and the setup requires an information or modelling gap that does not exist here.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Coverage depth.</strong> 28 sell-side analysts actively cover the stock; a mis-modelling thesis requires a gap the sell-side has missed, __implausible at this coverage density==.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Quality assessment.</strong> Quality is reasonable, <strong>45.6%</strong> gross margin and #1/#2 category positions, but <em>not exceptional</em>; ROIC of <strong>12.5%</strong> trails Hershey's <strong>23%</strong>, undermining the "high-quality" half of the label too.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Judgement:</strong> <em>Weak fit</em>; the stock is too well understood, and too diluted on ROIC, for a mis-modelling thesis to hold.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Note for completeness.</strong> This archetype is tested and rejected explicitly, rather than skipped, because Richard's framework requires all eight setup types to be checked at Triaging depth.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra2-big-demand-change-driven-epsu-ept" data-spy><span class="id">E8 RA2</span> Big demand change-driven EPSU/EPT <span class="secn">6 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 answer: <span class="g gF">F</span></strong> <em>No single demand shift is large enough to drive the case alone</em>, and the largest identified demand shift (GLP-1) points the wrong direction entirely.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Direction of the largest demand shift.</strong> GLP-1 adoption is a __negative demand change==, the opposite of what this setup archetype requires.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Scale of positive demand shifts.</strong> Indian net sales growth of +<strong>14.9%</strong> is meaningful but small relative to group revenue of CHF 89.5bn.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ3 — Coffee demand shift.</strong> Coffee's <strong>9.3%</strong> organic growth is encouraging but reflects a mix of pricing, share gain, and category tailwind, not a single transformational demand event.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Judgement:</strong> <em>Weak fit</em>; demand changes here are incremental and mixed in direction, not the single transformational shift this archetype requires.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Distinction from RA3.</strong> The corporate-change setup below absorbs most of the genuine positive momentum in this case; demand alone cannot carry the thesis independently of management action.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra3-strong-corporate-change-driven-epsu-ept" data-spy><span class="id">E8 RA3</span> Strong corporate change driven EPSU/EPT <span class="secn">11 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 answer. <span class="g gB">B</span></strong> <em>This is the primary fit for the Nestlé case</em>; corporate change is extensive, internally generated, and already showing early delivery evidence, though execution risk remains elevated.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Leadership change magnitude.</strong> Three CEO changes in 24 months represents <em>exceptional corporate disruption</em>, creating both risk and genuine opportunity for a reset.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Cost programme scale.</strong> The CHF 3.0bn Fuel for Growth target is a __significant, quantified restructuring commitment==, not a vague cost-cutting gesture.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ3 — Portfolio refocusing.</strong> Ice cream, Waters, and brand-count reduction (400 to 150) represent genuine strategic refocusing, not cosmetic portfolio tidying.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ4 — New CFO rigour.</strong> Anna Manz's LSEG background is credited with bringing more institutional financial discipline to reporting and capital allocation decisions.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>CQ5 — New Chairman perspective.</strong> Isla's Inditex background brings outside supply-chain agility to a board that had been almost entirely insider-composed for 25 years.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>CQ6 — Decentralisation.</strong> The market-led model replacing category structure is a genuine decentralisation of decision rights, not just a relabelling exercise.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ7 — Nature of the change.</strong> <em>Change here is more imposed than market-driven</em>; management is executing under investor and board pressure rather than from a position of strength.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>CQ8 — Execution risk from cuts.</strong> 16,000 layoffs, <u>12,000 white-collar</u>, carry real risk of damaging institutional capability and morale during the transition.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>CQ9 — Management quality read.</strong> Three CEOs in 24 months reads as <em>instability</em>, not strategic vision; the jury is still out on Navratil specifically.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Judgement:</strong> <em>Primary fit</em>; the corporate-change archetype clearly applies, but execution risk is elevated enough to warrant only conditional conviction.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra4-change-from-current-clearing-in-high-quality-compound" data-spy><span class="id">E8 RA4</span> Change-from-current clearing in high-quality compounder <span class="secn">11 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 answer. <span class="g gC">C</span></strong> <em>Secondary fit</em>; Nestlé has genuine historical compounder characteristics, and current earnings depression creates a clearing opportunity, but leverage and suspended buybacks strain the "high quality" label.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Historical compounder evidence.</strong> <u>66 consecutive years</u> of dividend payment or increase and durable category leadership support the compounder characterisation.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Earnings depression evidence.</strong> Current EPS of CHF 4.42 sits below historic trend, creating room for a clearing-driven recovery if headwinds resolve.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ3 — Valuation evidence of clearing opportunity.</strong> P/E at the <em>9th percentile of 10-year history</em> directly reflects the market pricing in the current change-from-current items.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>CQ4 — Quality metrics.</strong> <strong>45.6%</strong> gross margin, a diversified brand portfolio, and global scale support quality, though these are middling rather than best-in-class.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>CQ5 — Multiple simultaneous clearing items.</strong> Commodity headwinds, the formula recall, and CEO turnover could plausibly clear together over the next 12-18 months.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>CQ6 — Upside scenario.</strong> If commodities normalise, restructuring delivers, and volume recovers together, EPS could recover to <u>CHF 5.0+</u>, a genuine re-rating catalyst.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>CQ7 — Quality strain from leverage.</strong> <strong>2.85x</strong> net debt/EBITDA and suspended buybacks are <u>not consistent with a "high-quality" label</u> in the classic sense.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>CQ8 — Dividend coverage strain.</strong> Organic FCF barely covers the dividend, a further strain on the quality characterisation this setup requires.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>CQ9 — Timing uncertainty.</strong> <em>No fixed catalyst date</em> exists for when these items clear; the thesis depends on a multi-quarter, not single-event, resolution.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Judgement:</strong> <em>Secondary fit</em>; a genuine compounder-clearing setup exists, but leverage and dividend coverage strain make the "high-quality" qualifier debatable.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra5-huge-change-from-current-clearing-event-in-solid-qual" data-spy><span class="id">E8 RA5</span> Huge change-from-current clearing event in solid quality <span class="secn">3 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 answer. <span class="g gF">F</span></strong> <em>No single huge event dominates the thesis</em>; change-from-current items here are numerous and distributed rather than concentrated in one clearing catalyst.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Single-event test.</strong> There is no equivalent of a litigation resolution, regulatory approval, or single asset sale that alone would re-rate the stock.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Judgement:</strong> <em>Weak fit</em>; this archetype requires concentration in a single event, which is precisely what Nestlé's case lacks.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra6-trough-on-trough-turn-in-solid-quality-cyclical" data-spy><span class="id">E8 RA6</span> Trough-on-trough turn in solid quality cyclical <span class="secn">4 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA6 answer. <span class="g gF">F</span></strong> <em>Does not fit</em>; Nestlé is not a cyclical business, and this archetype requires cyclical, not structural, demand characteristics.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Cyclicality test.</strong> Consumer staples demand is recurring and non-cyclical by definition, the opposite of the archetype's premise.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Judgement:</strong> <em>Does not fit</em>; this archetype is simply the wrong category for a staples business.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Note for completeness.</strong> Tested explicitly, as with RA1 and RA2 above, because the framework requires all eight archetypes checked regardless of prior fit, not just the ones that look promising.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra7-unacceptable-case-setups-negative-guardrail" data-spy><span class="id">E8 RA7</span> Unacceptable case setups (negative guardrail) <span class="secn">5 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA7 answer. <span class="g gC">C</span></strong> <em>The case clears the negative guardrail</em>, but leverage is a yellow flag worth carrying forward into ESA.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Hope-stock test.</strong> Nestlé is not a hope stock; it has genuine category leadership and a specific, funded restructuring plan.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Levered commodity bet test.</strong> This is not purely a levered commodity bet, but the balance sheet __is stretched at <strong>2.85x</strong>==, a related risk worth tracking.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ3 — Sentiment-driven test.</strong> The case is not purely sentiment-driven; fundamental change forces (E1) are present and partially evidenced.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Judgement:</strong> <em>Clears the negative guardrail</em>, but the leverage yellow flag should be monitored explicitly through ESA.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra8-false-friend-case-setups-negative-guardrail" data-spy><span class="id">E8 RA8</span> False friend case setups (negative guardrail) <span class="secn">12 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA8 answer. <span class="g gD">D</span></strong> <em>False-friend risk is material</em>; Nestlé's own history includes a prior restructuring narrative that failed to deliver, which is the textbook false-friend pattern.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>CQ1 — Perpetual restructurer risk.</strong> The prior Schneider-era restructuring had ambitions that were <u>not fully met</u>, a direct historical precedent for the current programme underdelivering too.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>CQ2 — Value trap risk.</strong> The cheap valuation may reflect a <em>permanent multiple compression</em> from structurally lower growth, not a temporary mispricing.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>CQ3 — Complexity discount risk.</strong> The conglomerate structure plausibly warrants a permanent discount that no amount of self-help fully removes.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Judgement:</strong> <em>False-friend risk is material and should be weighted heavily</em>; cheap valuation combined with a restructuring story has specifically failed to deliver at Nestlé before.</div></div>
+<p><strong>Best-fit setups identified (E8)</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Primary fit:</strong> RA3, strong corporate change driven EPSU/EPT, supported by three CEO changes, the CHF 3.0bn savings programme, and genuine portfolio refocusing.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Secondary fit:</strong> RA4, change-from-current clearing in a high-quality compounder, supported by the 9th-percentile valuation and a 66-year dividend record, though quality is strained by leverage.</div></div>
+<p><strong>Counter-view considered (E8)</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Counter-view:</strong> The false-friend risk (RA8) could be dismissed as backward-looking, given genuinely new leadership (Navratil, Isla, Manz) not present in the prior failed restructuring cycle.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Why rejected:</strong> <em>New personnel alone does not neutralise structural complexity</em>; the same 185-country, four-category perimeter that defeated the prior restructuring remains fully in place today.</div></div>
+<p><strong>Downstream actions (E8)</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Action 1:</strong> IA to build a specific comparison of the current Fuel for Growth programme against the prior Schneider-era restructuring, isolating what is genuinely different this time.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Action 2:</strong> APM to track quarterly whether the RA3/RA4 setup evidence strengthens or weakens, using Q2-26 and Q3-26 results as explicit checkpoints.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Action 3 (supplementary).</strong> IA to explicitly re-test RA8 (false-friend risk) at ESA once Navratil has delivered at least two full quarters as CEO.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">52 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gC">C</span></strong> At Triaging, only Element E11 (value-chain dynamics) is in scope for this Group; E9, E10, E12, and E13 first apply at Early-Stage Assessment.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">48 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E11 verdict. <span class="g gC">C</span></strong> <em>Nestlé holds a genuinely strong brand-owner position in the value chain</em>, but <span class="s-neg">downstream retail consolidation and private label are eroding that position at the margin</span>, and one structural demand threat (GLP-1) sits outside the value chain entirely.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra1-demand-side-strong-fragile" data-spy><span class="id">E11 RA1</span> Demand side strong/fragile <span class="secn">9 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer [~mixed]:</strong> <em>Base demand is resilient</em>, but developed-market volumes are flat and growth increasingly depends on pricing and emerging markets rather than organic volume.</div></div>
+<p><strong>CQ1 — Consumer demand resilient?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Essential categories underpin demand.</strong> Coffee, food, and pet food are essential daily consumption categories, giving the base a __genuinely resilient floor==.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Premium switching costs are real.</strong> Nespresso and specialty pet food face trade-down risk, but proprietary formats and habitual use create real switching costs.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Q1-26 volume confirms demand.</strong> <strong>3.5%</strong> organic growth, with <u><strong>1.2%</strong> RIG (volume)</u>, confirms real consumer demand rather than pricing alone.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Developed-market volumes are flat.</strong> Growth is now leaning heavily on pricing carryover and emerging markets, not organic volume in mature markets.</div></div>
+<p><strong>CQ2 — End-market structural growth?</strong></p>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Petcare structural tailwind.</strong> The global petcare market grows structurally at 4-<strong>5%</strong> on pet humanisation trends, a genuine long-run positive.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Coffee category growth.</strong> Mid-single-digit long-term category growth, with cold coffee formats expanding rapidly, a newer and growing sub-segment.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Infant nutrition structural decline.</strong> China's -<strong>17%</strong> birth decline is a <u>permanent, not cyclical, impairment</u> to this specific category.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>GLP-1 structural negative.</strong> Adoption is a structural negative for snacking and confectionery categories specifically, layered onto the infant nutrition decline.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra2-competitive-supportiveness-aggression" data-spy><span class="id">E11 RA2</span> Competitive supportiveness/aggression <span class="secn">16 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 answer [~mixed]:</strong> <em>Industry structure is broadly supportive</em> in coffee and petcare, but food and snacking are fragmented and private label is actively gaining.</div></div>
+<p><strong>CQ1 — Industry structure?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Petcare consolidated duopoly.</strong> Nestlé and Mars together hold <em>~<strong>50%</strong> of US retail petcare</em>, a supportive, disciplined structure for pricing.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Coffee oligopoly.</strong> Nescafé, JDE Peet's, Lavazza, and the licensed Starbucks at-home business form a relatively rational competitive set.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Food/snacking fragmentation.</strong> The largest single competitor holds only <strong>3.7%</strong> share, __a genuinely fragmented and more aggressively contested category==.</div></div>
+<p><strong>CQ2 — Private label threat?</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>US private label share.</strong> <strong>14%</strong> dollar share, with <strong>53%</strong> of consumers reporting they are increasing private-label purchases, a real structural shift.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Walmart Bettergoods scale.</strong> The private-label range reached $<strong>1bn</strong> in initial launch sales, evidencing real retailer commitment to the category.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Premium categories more resistant.</strong> Premium pet food and medical nutrition resist private-label trade-down better than commodity packaged food.</div></div>
+<p><strong>CQ3 — Competitor behaviour?</strong></p>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Mars digital aggression.</strong> Mars deploys strong digital media spend to actively steal share in petcare, a direct competitive threat.</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Industry shift to volume-led growth.</strong> Competitors are re-investing savings into volume-led growth rather than pure price-led strategies, intensifying competitive intensity.</div></div>
+<p><strong>CQ4 — Market share trends?</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>European share losses.</strong> Scanner value growth fell to <u>-<strong>1.9%</strong> in Apr-26</u>, direct evidence of share loss in Nestlé's largest developed market.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Coffee share gains.</strong> <strong>9.3%</strong> organic growth in Q1-26 versus a category growth rate of roughly <strong>4%</strong> evidences genuine share gain in coffee specifically.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Petcare volume moderation.</strong> Volume growth has moderated but capacity expansion (Glendale) should restore momentum going forward.</div></div>
+<p><strong>CQ5 — Pricing discipline?</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Industry discipline broadly holding.</strong> <strong>2.8%</strong> pricing achieved in FY25 without catastrophic volume loss evidences retained sector-wide pricing discipline.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Flavour house pricing power eroding.</strong> Expert channel checks note eroding pricing power for flavour-house suppliers, a related but distinct value-chain signal.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>Retail buying alliances intensifying.</strong> Retail buying groups are becoming more demanding in annual negotiations, a genuine downstream pressure point.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>Net competitive read.</strong> <em>Coffee and petcare structures protect margin</em>; food and snacking do not, meaning the group-level number blends genuinely different competitive realities.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra3-disruption-forces" data-spy><span class="id">E11 RA3</span> Disruption forces <span class="secn">5 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 answer: <span class="g gD">D</span></strong> <em>GLP-1 adoption is the single largest disruption force identified</em>, materially outweighing the modestly positive AI-related developments elsewhere in the business.</div></div>
+<p><strong>CQ1 — Technology/regulatory disruption?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>GLP-1 sales-at-risk.</strong> Jefferies estimates up to <u><strong>40%</strong> of sales at risk</u>, the largest single disruption force identified in this analysis.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Sweet bakery spend decline.</strong> Cornell data shows a <strong>9%</strong> decline in sweet bakery spending following GLP-1 initiation, a directly relevant category read-through.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>AI as a positive force.</strong> Procurement, recipe design, and demand forecasting applications are a <em>modest net positive</em>, discussed fully under E5 RA2.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Ultra-processed food litigation risk.</strong> A Wisconsin lawsuit signals emerging litigation risk around ultra-processed food classification, a new and still-developing regulatory threat.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra4-political-regulatory" data-spy><span class="id">E11 RA4</span> Political/regulatory <span class="secn">7 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 answer [~mixed]:</strong> <em>Regulatory risk is real but manageable</em>; the formula recall exposed a genuine compliance gap, while sugar-reduction rules play to Nestlé's reformulation capacity.</div></div>
+<p><strong>CQ1 — Regulatory risk?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Formula recall compliance gap.</strong> The recall exposed a <u>genuine regulatory compliance vulnerability</u> in the infant nutrition supply chain.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Sugar reduction guidelines.</strong> Reformulation requirements are arguably a positive for a company with Nestlé's scale of R&amp;D and innovation capacity.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Clean label scrutiny.</strong> Rising consumer scrutiny of ingredient lists is increasing compliance and reformulation costs across the portfolio.</div></div>
+<p><strong>CQ2 — Geopolitical?</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Iran scenario modest impact.</strong> Direct impact is limited since coffee and cocoa pricing is driven by crop cycles, not oil, as discussed under E5 RA3.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Thai Nescafé JV resolved.</strong> The Singapore High Court dispute was resolved in May-26; Nestlé is building its own plant, removing a lingering legal overhang.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Middle East shipping managed.</strong> Reroutes have been successfully managed operationally, evidencing reasonable supply-chain resilience to regional disruption.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra5-supportive-supplier-side" data-spy><span class="id">E11 RA5</span> Supportive supplier side <span class="secn">11 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> <em>The supplier side is turning genuinely supportive</em>, with two major commodity categories moving toward surplus simultaneously.</div></div>
+<p><strong>CQ1 — Supply chain stability?</strong></p>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Coffee surplus forming.</strong> Expana projects a <u>9 million bag surplus</u> for 2025/26, the single most important supplier-side tailwind identified in this memo.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Cocoa easing.</strong> West African weather improvement and Ecuadorian output gains are pulling cocoa prices down from recent highs.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Milk cost firming.</strong> India-specific milk costs are firming (<strong>20%</strong> of the Indian raw material basket) during the summer lean season, a partial offset.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Centralised procurement scale.</strong> Three procurement hubs cover over <strong>70%</strong> of spend, giving Nestlé real scale leverage over suppliers relative to smaller competitors.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Net supplier-side read.</strong> <em>This is the single most constructive input signal in the whole memo</em>; if the coffee and cocoa surplus thesis holds through FY26, gross margin recovery becomes highly probable rather than merely possible.</div></div>
+<p><strong>Counter-view considered (E11)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view:</strong> Downstream retail consolidation (Walmart, Aldi, Lidl) could permanently shift value-chain power away from branded manufacturers, compressing margins toward retailer-set cost structures over time.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Why rejected:</strong> <em>Over 30 billionaire brands</em>, proprietary ecosystems (Nespresso), and medical/therapeutic nutrition create category-specific switching costs that commodity food brands lack; top-5 customer concentration is only <u><strong>14%</strong> of receivables</u>, limiting any single retailer's leverage.</div></div>
+<p><strong>Downstream actions (E11)</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Action 1:</strong> IA to build a segment-level private-label exposure map ahead of ESA, distinguishing resistant categories (medical nutrition, premium pet) from exposed ones (commodity food).</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Action 2:</strong> APM to add coffee and cocoa futures curves to the weekly monitoring dashboard as the primary supplier-side leading indicator.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Action 3 (supplementary).</strong> IA to quantify the top-5 customer receivables concentration (<strong>14%</strong>) against peer levels, to confirm the retail-power counter-view genuinely holds at ESA depth.</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-d" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gD">D</span> <span class="secn">12 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gD">D</span></strong> <em>Multiple risk categories are live simultaneously</em> rather than sequentially, the defining characteristic of an elevated riskiness score at this stage.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Balance sheet constrains flexibility.</strong> Leverage of <u><strong>2.85x</strong></u>, at the upper end of the group's own 2.0-<strong>3.0x</strong> target range, constrains strategic optionality on disposals and reinvestment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Dividend coverage is structurally thin.</strong> Organic free cash flow of CHF 9.15bn <em>barely covers</em> the dividend obligation, leaving little margin for reinvestment surprises.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>GLP-1 is a medium-term structural threat.</strong> Up to <strong>40%</strong> of sales are estimated at risk per Jefferies, a threat that develops over years, not quarters.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Formula recall damage is still healing.</strong> Brand-trust recovery timing is <u>genuinely uncertain</u> and cannot yet be modelled with confidence.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>China decline looks permanent.</strong> -<strong>17%</strong> births and -<strong>10.6%</strong> organic growth in Q1-26 together suggest a <em>structural, not cyclical, impairment</em> to the nutrition category.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Compound failure risk.</strong> These risks are not independent; a simultaneous commodity reversal and China deterioration would stress the balance sheet at the same time as revenue.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Deeper element work not yet in scope.</strong> Elements E15-E19 (invalidating attributes, capital constraints, transmission mechanisms) are ESA/Deep-Dive scope and are marked not applicable below.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e15-invalidating-attributes-nr" data-spy>Element E15 — Invalidating attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Structural ACH Screening -- We are looking for evidence that none of the 10 general invalidating ACHs applies; each structural risk must be explicitly tested and ruled out or mitigated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E15 (Invalidating attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e16-strenuously-seek-to-avoid-attributes-nr" data-spy>Element E16 — Strenuously seek-to-avoid attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case-Specific ACH Screening -- We are looking for identification and rigorous testing of the 2-4 case-specific alternate hypotheses most credible given this stock&#x27;s situation; avoiding generic lists or unexamined risks.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E16 (Strenuously seek-to-avoid attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e17-capital-constraining-attributes-nr" data-spy>Element E17 — Capital-constraining attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Volatility Profile -- We are looking for a manageable volatility profile: limited earnings variability, predictable news-flow, low short interest, and adequate liquidity for typical portfolio position sizes.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E17 (Capital-constraining attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e18-clear-transmission-mechanism-inputs-to-earnings-" data-spy>Element E18 — Clear transmission mechanism, inputs to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E18 (Clear transmission mechanism, inputs to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e19-monitorable-transmission-mechanism-leading-track" data-spy>Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E19 (Monitorable transmission mechanism, leading tracking indicators to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not yet in scope at Triaging.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III content (position-management playbook, ten invalidation thresholds, seven-column driver tables) first appears at Early-Stage Assessment.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">17 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation. <span class="g gC">C</span></strong> <em>Progress to ESA conditionally</em>, with low-to-medium conviction, given genuine but contested change forces and hard guardrail failures on complexity.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation.</strong> <em>Progress Nestlé to Early-Stage Assessment on a conditional basis</em>, reflecting low-to-medium conviction; the case has real change forces (E1, RA3/RA4 of E8) but is surrounded by significant complexity (E7) and elevated risk (Group 4).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Nature of the conditionality.</strong> This is <u>not a clean progression</u>; three specific evidentiary gaps must close before ESA depth is warranted, listed below as key questions.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key question 1.</strong> Is the Fuel for Growth savings programme genuinely on track for the CHF 3.0bn target, and what evidence exists of delivered margin benefit beyond the CHF 1.1bn FY25 figure?</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Key question 2.</strong> What is the realistic commodity cost relief timeline, and <u>when does existing coffee/cocoa hedging roll off</u> to expose the P&amp;L to spot prices?</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Key question 3.</strong> Can Nestlé genuinely restore European market share, or is private-label displacement now a structural, permanent feature of the category?</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Key question 4.</strong> What is the realistic EPS trajectory under explicit base, bull, and bear scenarios, given the current CHF 4.42 base and the CHF 5.0+ upside case?</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Key question 5.</strong> How does Navratil compare operationally to Schneider and Freixe, and is there early evidence of a genuinely different leadership approach?</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Key question 6.</strong> Is the dividend sustainable on organic cash flow alone, or does it structurally depend on asset disposal proceeds going forward?</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Key question 7.</strong> What is the GLP-1 volume impact specifically on Nestlé's portfolio mix, versus the broader packaged-food sector average?</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>If progressing.</strong> IA commissions a Business Foundation deep read and a Leadership Foundation report through the RESEARCHER role, targeting completion by <u>15-Aug-26</u>.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>If parking instead.</strong> <em>Three explicit triggers</em> would warrant parking rather than progressing: (1) H2-26 margin fails to improve above <strong>16.1%</strong>; (2) commodity costs re-accelerate rather than normalise; (3) Q2-26 organic growth decelerates below <strong>2%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Reassessment cadence if parked.</strong> Revisit at the next quarterly results release, using the same three triggers as the reassessment checklist rather than a fresh triage from scratch.</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>Two downstream actions (memo-level).</strong> (1) IA to commission the Business Foundation deep read and Leadership Foundation report via RESEARCHER by 15-Aug-26; (2) APM to add NESN-CH to the weekly monitoring dashboard tracking European scanner data, coffee/cocoa commodity prices, and quarterly organic growth delivery against the three parking triggers above.</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>Conviction framing.</strong> <em>Low-to-medium conviction</em> reflects a genuine tension: E1 and E8's primary setup fit argue for progression, while E7's hard guardrail failures argue for caution; ESA should resolve, not defer, this tension.</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>What would raise conviction.</strong> <u>Two consecutive quarters</u> of margin delivery at or above <strong>16.1%</strong> combined with confirmed commodity surplus pricing would move this from low-to-medium toward medium-to-high conviction.</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>What would lower conviction.</strong> A second consecutive guidance miss, on top of the FY24 precedent, would be sufficient grounds to park the case rather than progress it, regardless of valuation support.</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Sizing discipline note.</strong> Given the market-cap sweet-spot breach (E5 RA4) and the four-fulcrum-driver complexity (E7 RA1), any eventual position should be sized as a smaller, monitored allocation rather than a core holding.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">12 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">4 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>[AS] Change Forces report</strong> (<code>41-change-forces/raw-AS.md</code>), produced 23-Jun-26.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>[AS] Business Foundation report</strong> (<code>42-business-foundations/raw-AS.md</code>), produced 23-Jun-26.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong><span class="g gC">C</span> Master dashboard:</strong> <code>factset-valuation.json</code>, <code>factset-ssem.json</code>.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong><span class="g gC">C</span> Live price:</strong> web fetch, 17-Jul-26.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">8 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>NESN absent from prices.json.</strong> Live price, 52-week range, and momentum were sourced via web fetch (17-Jul-26) rather than the standard dashboard feed.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>200-day moving average unavailable.</strong> <em>prices.json is absent for this ticker</em>; momentum was assessed qualitatively from the 52-week range position instead.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>No compact-watson.md digests available.</strong> raw-AS.md was used as the fallback source, per the 06-RESEARCH-SOURCE-MAP protocol.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Wisdom library not accessible.</strong> This session did not have access to the wisdom library; models were not loaded as a result.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>ratings-snapshot.json not found.</strong> MR1 and MR2 grades were struck directly from raw data (web price plus <code>factset-ssem.json</code>).</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Briefing dials defaulted.</strong> RR-trust balanced, cohort integration normal, sector integration normal, reflecting unattended production of this memo.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Cohort sourced from CF metadata.</strong> "Diversified food and nutrition mega-caps" (CSM01); a formal <code>cohorts-v3.json</code> search returned no NESN match.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>No prior-stage A&amp;J memo exists.</strong> This memo was built from scratch in the new structure, per decision D-IA-4RR-15.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>Files/NESN-CH/A-J-memo/self-review-debriefs/NESN-CH-Triaging-self-review-2026-07-20.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"D","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"D","label":"Pillar II: Case building blocks"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"C.2":{"grade":"D","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"E5.RA1":{"grade":"C","label":"Suitability for bear market / downturn"},"E5.RA2":{"grade":"B","label":"Suitability for AI disruption"},"E5.RA4":{"grade":"D","label":"Paradigm fit"},"Group 2":{"grade":"D","label":"Case simplicity"},"E7.RA1":{"grade":"D","label":"Focused bet?"},"E7.RA2":{"grade":"D","label":"Narrow perimeter?"},"E7.RA3":{"grade":"F","label":"Zero headwinds?"},"E7.RA4":{"grade":"D","label":"Handful of change-from-current items?"},"E7.RA5":{"grade":"C","label":"Conservative investor relations?"},"Group 3":{"grade":"C","label":"Core philosophy"},"Group 4":{"grade":"D","label":"Case riskiness"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"B"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"D"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"C"},{"code":"MR5","label":"Case building blocks","grade":"D"},{"code":"MR6","label":"Investment case components","grade":null}],"pillars":[{"roman":"I","label":"Case change elements","grade":"C","elements":[{"code":"E1","label":"Required input change forces","grade":"C","ras":[{"code":"RA1","label":"Change forces present?","grade":null,"cqs":[]},{"code":"RA2","label":"Robust base?","grade":null,"cqs":[]}]},{"code":"E2","label":"Required case outputs","grade":null,"ras":[]},{"code":"E3","label":"Sufficient TSR / valuation upside","grade":null,"ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"D","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[{"code":"RA1","label":"Suitability for bear market / downturn","grade":"C","cqs":[]},{"code":"RA2","label":"Suitability for AI disruption","grade":"B","cqs":[]},{"code":"RA3","label":"Suitability for Iran oil-price inflation scenario","grade":null,"cqs":[]},{"code":"RA4","label":"Paradigm fit","grade":"D","cqs":[]}]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"D","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"D","ras":[{"code":"RA1","label":"Focused bet?","grade":"D","cqs":[]},{"code":"RA2","label":"Narrow perimeter?","grade":"D","cqs":[]},{"code":"RA3","label":"Zero headwinds?","grade":"F","cqs":[]},{"code":"RA4","label":"Handful of change-from-current items?","grade":"D","cqs":[]},{"code":"RA5","label":"Conservative investor relations?","grade":"C","cqs":[]}]},{"code":"E8","label":"Fit with acceptable case setups","grade":"C","ras":[{"code":"RA1","label":"Mis-modelled high-quality EPS upgrader","grade":null,"cqs":[]},{"code":"RA2","label":"Big demand change-driven EPSU/EPT","grade":null,"cqs":[]},{"code":"RA3","label":"Strong corporate change driven EPSU/EPT","grade":null,"cqs":[]},{"code":"RA4","label":"Change-from-current clearing in high-quality compounder","grade":null,"cqs":[]},{"code":"RA5","label":"Huge change-from-current clearing event in solid quality","grade":null,"cqs":[]},{"code":"RA6","label":"Trough-on-trough turn in solid quality cyclical","grade":null,"cqs":[]},{"code":"RA7","label":"Unacceptable case setups (negative guardrail)","grade":null,"cqs":[]},{"code":"RA8","label":"False friend case setups (negative guardrail)","grade":null,"cqs":[]}]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"C","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"C","ras":[{"code":"RA1","label":"Demand side strong/fragile","grade":null,"cqs":[]},{"code":"RA2","label":"Competitive supportiveness/aggression","grade":null,"cqs":[]},{"code":"RA3","label":"Disruption forces","grade":null,"cqs":[]},{"code":"RA4","label":"Political/regulatory","grade":null,"cqs":[]},{"code":"RA5","label":"Supportive supplier side","grade":null,"cqs":[]}]},{"code":"E12","label":"Supportive industry structure","grade":null,"ras":[]},{"code":"E13","label":"High secular growth potential","grade":null,"ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"D","elements":[{"code":"E15","label":"Invalidating attributes","grade":null,"ras":[]},{"code":"E16","label":"Strenuously seek-to-avoid attributes","grade":null,"ras":[]},{"code":"E17","label":"Capital-constraining attributes","grade":null,"ras":[]},{"code":"E18","label":"Clear transmission mechanism, inputs to earnings per share","grade":null,"ras":[]},{"code":"E19","label":"Monitorable transmission mechanism, leading tracking indicators to earnings per share","grade":null,"ras":[]}]},{"code":"GROUP 5","label":"Case optionality","grade":null,"elements":[{"code":"E20","label":"Nice-to-have attributes","grade":null,"ras":[]}]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

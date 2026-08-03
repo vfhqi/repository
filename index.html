@@ -538,7 +538,13 @@ function memoCell(c,r){
       var pcls=PIPE_PHASE_CLS[phase]||"mp-briefed";
       var plbl=PIPE_PHASE_LABEL[phase]||phase;
       var dot=(phase==="awaiting_input")?"<span class='mp-dot'>●</span>":"";
-      return "<div class='rc f-"+c.key+" "+pcls+"'>"+dot
+      // 03-Aug-26 READABILITY-NOT-STATUS: an in-flight memo that already has a
+      // rendered viewer on the live site opens too. The phase label is unchanged.
+      var pv=(r.viewers&&r.viewers[VIEWER_KEY[c.key]])||"";
+      var pclick=pv?"window.open('memos/"+esc(pv)+"','_blank')":"";
+      return "<div class='rc f-"+c.key+" "+pcls+(pclick?" clickable":"")+"'"
+        +(pclick?" onclick=\""+pclick+"\"":"")
+        +" title='"+esc(plbl+(pv?" — click to open the memo":" — no viewer rendered yet"))+"'>"+dot
         +"<span class='mp-lbl'>"+esc(plbl)+"</span></div>";
     }
   }
@@ -552,10 +558,21 @@ function memoCell(c,r){
   var sclsParts=(SCLS[mst]||"").split(" ");
   var bgcls=sclsParts[0]||"",txtcls=sclsParts[1]||"";
   var viewer=(r.viewers&&r.viewers[VIEWER_KEY[c.key]])||"";
-  var onclick=(mst==="published"&&viewer)?"window.open('memos/"+esc(viewer)+"','_blank')":"";
+  // 03-Aug-26 READABILITY-NOT-STATUS (Watson, SA+IA). BEFORE: the cell opened only
+  // when mst==="published", so a memo whose state was "extracted" -- i.e. the memo
+  // .md exists but no metadata.json records a publish decision, the honest default
+  // set by the 28-Jul state-5-trap fix in scan_memos.py -- was UNREADABLE from the
+  // board even though its viewer was rendered and live on GitHub Pages. 20 memos
+  // were in that hole. NOW: any memo with a rendered viewer opens. The status label
+  // and colour ramp are untouched and still tell the truth; only the click is
+  // decoupled from the verdict. Fail direction: a cell can only become MORE
+  // openable, never less, and no cell claims a status it does not hold.
+  var onclick=viewer?"window.open('memos/"+esc(viewer)+"','_blank')":"";
   var base="rc f-"+c.key+(bgcls?" "+bgcls:"");
+  var mtitle=(STLABEL[mst]||mst)+(dt?", "+dt:"")+(viewer?" — click to open the memo":" — no viewer rendered");
   return "<div class='"+base+(onclick?" clickable":"")+"'"
-    +(onclick?" onclick=\""+onclick+"\"":"")+">"
+    +(onclick?" onclick=\""+onclick+"\"":"")
+    +" title='"+esc(mtitle)+"'>"
     +"<span class='st "+(txtcls||"")+"'>"+(STLABEL[mst]||mst)+(m.qc_not_confirmed?"<span class='qcnc' title='QC not confirmed: no metadata.json; Phase-4 audit not verified'>*</span>":"")+"</span>"
     +(dt?"<span class='dt'>"+dt+"</span>":"")+"</div>";
 }

@@ -1,0 +1,1388 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Dampskibsselskabet NORDEN (DNORD-DK) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">30</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-f">MR2 — Sell-side earnings momentum<span class="nav-rating-pill F">F</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-c">MR3 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">104</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-c">Element E1 — Required input change forces<span class="nav-rating-pill C">C</span><span class="nav-fc">9</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-change-forces-present-b" data-element-id="element-e1-required-input-change-forces-c">E1 RA1 — Change forces present<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-robust-base-d" data-element-id="element-e1-required-input-change-forces-c">E1 RA2 — Robust base<span class="nav-rating-pill D">D</span><span class="nav-fc">6</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr">Element E2 — Required case outputs [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr">Element E3 — Sufficient TSR / valuation upside [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">93</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 — Technical momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">8</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e5-ra1-suitability-for-bear-market-economic-downturn-c" data-element-id="element-e5-thematic-fit-c">E5 RA1 — Suitability for bear market / economic downturn<span class="nav-rating-pill C">C</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra2-suitability-for-ai-disruption-c" data-element-id="element-e5-thematic-fit-c">E5 RA2 — Suitability for AI disruption<span class="nav-rating-pill C">C</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra3-suitability-for-iran-oil-price-induced-input-cost-inf" data-element-id="element-e5-thematic-fit-c">E5 RA3 — Suitability for Iran oil-price induced input cost inflation or demand deterioration<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e5-ra4-summarise-paradigm-fit-from-a-business-perspective-c" data-element-id="element-e5-thematic-fit-c">E5 RA4 — Summarise paradigm fit from a business perspective<span class="nav-rating-pill C">C</span><span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr">Element E6 — Sell-side earnings momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-d">Group 2 — Case simplicity<span class="nav-rating-pill D">D</span><span class="nav-fc">57</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">10</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e7-ra1-focused-bet-d" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA1 — Focused bet?<span class="nav-rating-pill D">D</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra2-narrow-perimeter-c" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA2 — Narrow perimeter?<span class="nav-rating-pill C">C</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra3-zero-headwinds-f" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA3 — Zero headwinds?<span class="nav-rating-pill F">F</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra4-handful-of-change-from-current-items-d" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA4 — Handful of change-from-current items?<span class="nav-rating-pill D">D</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e7-ra5-conservative-investor-relations-b" data-element-id="element-e7-required-case-simplicity-guardrails-d">E7 RA5 — Conservative investor relations?<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">47</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e8-ra1-mis-modelled-high-quality-eps-upgrader-d" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA1 — Mis-modelled, high-quality EPS upgrader<span class="nav-rating-pill D">D</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra2-big-demand-change-driven-epsu-or-ept-d" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA2 — Big demand change-driven EPSU or EPT<span class="nav-rating-pill D">D</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra3-strong-corporate-change-driven-epsu-ept-b" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA3 — Strong corporate change driven EPSU / EPT<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra4-change-from-current-clearing-in-a-high-quality-compou" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA4 — Change-from-current clearing in a high-quality compounder<span class="nav-rating-pill D">D</span><span class="nav-fc">9</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra5-huge-change-from-current-clearing-event-in-solid-qual" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA5 — Huge change-from-current clearing event in solid quality<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra6-trough-on-trough-turn-in-solid-quality-cyclical-d" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA6 — Trough-on-trough turn in solid quality cyclical<span class="nav-rating-pill D">D</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra7-fit-with-unacceptable-case-setups-negative-guardrail-" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA7 — Fit with unacceptable case setups [NEGATIVE GUARDRAIL]<span class="nav-rating-pill C">C</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e8-ra8-fit-with-false-friend-case-setups-negative-guardrail-" data-element-id="element-e8-fit-with-acceptable-case-setups-c">E8 RA8 — Fit with false friend case setups [NEGATIVE GUARDRAIL]<span class="nav-rating-pill D">D</span><span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">20</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">16</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e11-ra1-demand-side-strong-robust-or-fragile-negative-c" data-element-id="element-e11-value-chain-dynamics-c">E11 RA1 — Demand side — strong/robust or fragile/negative?<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra2-competitive-supportiveness-or-aggression-c" data-element-id="element-e11-value-chain-dynamics-c">E11 RA2 — Competitive supportiveness or aggression?<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra3-disruption-forces-d" data-element-id="element-e11-value-chain-dynamics-c">E11 RA3 — Disruption forces?<span class="nav-rating-pill D">D</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra4-political-regulatory-c" data-element-id="element-e11-value-chain-dynamics-c">E11 RA4 — Political / regulatory?<span class="nav-rating-pill C">C</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-ra" data-anchor="e11-ra5-supportive-supplier-side-b" data-element-id="element-e11-value-chain-dynamics-c">E11 RA5 — Supportive supplier side?<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+</div>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">5</span></span>
+<span class="nav-item nav-element" data-anchor="element-e15-invalidating-attributes-nr">Element E15 — Invalidating attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e16-strenuously-seek-to-avoid-attributes-nr">Element E16 — Strenuously seek-to-avoid attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e17-capital-constraining-attributes-nr">Element E17 — Capital-constraining attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e18-clear-transmission-mechanism-inputs-to-earnings-">Element E18 — Clear transmission mechanism, inputs to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e19-monitorable-transmission-mechanism-leading-track">Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">6</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">15</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Dampskibsselskabet NORDEN (DNORD-DK) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">DNORD-DK</span> A&amp;J MEMO — Dampskibsselskabet NORDEN (DNORD-DK) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 12-Aug-26 00:15</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">DKK 317.8</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">18.4x</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">n/a (single-broker pool; DNB Carnegie Buy — see F.2)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (+12.28%)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">DNORD-DK (Dampskibsselskabet NORDEN)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Logistics (Transportation)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Transportation cohort TRN14 (Nordic and European shipping/logistics operators)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">BW LPG (BWLPG-NO)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">DKK 317.8</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">n/a — not in master-dashboard data (see F.2)</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">DKK 283.05</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (+12.28%)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">18.4x</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">DKK 115 (DNB Carnegie, single-broker pool)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div style="background:#fff3cd;border:2px solid #d97706;border-radius:6px;padding:12px 18px;margin:0 0 18px 0;font-size:14px;line-height:1.5;color:#78350f;"><strong style="color:#b91c1c;">QC NOT CONFIRMED.</strong> This memo folder has no <code>metadata.json</code>, which means Phase 4 close-out (the Quality Control Audit) cannot be confirmed to have run. Treat the ratings, structure, and snapshot figures on this page as unverified until <code>generate_qc_audit.py</code> has been run clean and <code>metadata.json</code> is authored (05-IA-EXECUTION-DISCIPLINE.md &sect;7a).</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">30 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Verdict. <span class="g gC">C</span></strong> <u>NORDEN's 2026 guidance upgrades are mechanically vessel-sale-gain-driven, not freight-margin-driven</u>: underlying Q1 2026 EBIT ex-gains was just USD 3.6m against a USD 45m dry-cargo operator loss.</li><li><strong>Key risk.</strong> The Risks family's own ACH matrix names the <span class="s-neg">FALSE FRIEND profile the winning hypothesis</span>, arguing reported guidance strength masks core chartering-margin decay behind asset-trading gains.</li><li><strong>Key support.</strong> <span class="s-pos">A genuinely differentiated optionality book</span>: 91 purchase options, 33 in the money at strike prices <strong>22%</strong> below broker values, already converted into USD 79m of realised 2026 sales gains.</li><li><strong>Recommendation.</strong> <em>Progress to Early-Stage Assessment</em>, conditional on the dry-cargo Atlantic-repositioning thesis showing H2 2026 evidence and the asset-sale dependency not deepening further.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">7 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>What it does.</strong> Dampskibsselskabet NORDEN A/S is a Danish international shipping company, founded 1871, operating an approximately 400-vessel fleet across two primary segments: Dry Cargo (dry bulk commodities, ores, coal, project cargo) and Tankers (refined products, diesel, jet fuel).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Fleet structure.</strong> The core fleet comprises 11 owned vessels, 69 long-term leased vessels and 91 purchase options; NORDEN operates a cycle-adaptive model that shifts between asset ownership and asset-light chartering.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Financial character.</strong> FY25 group revenue USD 3,125.7m (down from USD 4,042m in FY24), FY25 net profit USD 120m (down from USD 163m in FY24 and USD 400m in FY23); equity ratio <strong>52.0%</strong> at Q1 2026, net interest-bearing debt USD 239.1m.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Sector and geography.</strong> Listed on Nasdaq Copenhagen; ~500 employees across 19 offices on six continents; revenue is USD-denominated (approximately <strong>100%</strong>), with China (USD 518m in 2025), the United States (USD 223m) and Singapore (USD 172m) as the largest geographic contributors.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Segment mix (post-2025 reorganisation).</strong> Six reportable segments: Dry Owner, Dry Operator Large, Dry Operator Small, Tanker Owner, Tanker Operator, Logistics — condensing further to two primary business units (Dry Cargo, Tankers) for external reporting from FY2025.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Investment style implication.</strong> A cyclical, asset-trading-levered shipping compounder: the case blends a classical dry bulk/tanker freight cyclical with an embedded, quantifiable options book that behaves more like a real-asset call option than a pure freight-rate bet.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Capital returns.</strong> USD 1.2bn distributed to shareholders over the past five years via dividends and buybacks, under a minimum <strong>50%</strong> payout policy; a new USD 25m buyback authorised Q1 2026 alongside a DKK 2/share interim dividend.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Overall verdict. <span class="g gC">C</span></strong> <u>The case rests on a real, quantified asset-optionality engine sitting on top of a currently loss-making core dry-cargo operator business</u>, with the two halves pulling in opposite directions on earnings quality.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Bad news first.</strong> <span class="s-neg">Dry Cargo posted a USD 45m Q1 2026 EBIT loss</span>, and the Risks family's competing-hypotheses analysis names the FALSE FRIEND hypothesis (asset gains masking chartering decay) the winning explanation with the fewest hard inconsistencies.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key support.</strong> <span class="s-pos">Tankers delivered USD 47.3m Q1 EBIT (+<strong>139%</strong> year-on-year)</span>, and the purchase-option book (91 options, 33 in the money, <strong>22%</strong> below broker values) has already realised USD 79m of 2026 gains against a USD 120-190m full-year guide.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Cohort read.</strong> Against sector peer Maersk (structurally similar barbell of moated infrastructure plus commodity ocean freight) and cohort peer BW LPG (asset-light optionality-driven shipping), NORDEN sits mid-pack on earnings quality but ahead on near-term guidance momentum.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Recommendation.</strong> <em>Progress to Early-Stage Assessment</em>, with <u>H2 2026 dry-cargo margin recovery</u> and <u>sustainability of vessel-sale gains beyond 2026</u> as the two questions that decide whether this is a genuine base-margin transition or a value trap.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">7 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-in">Master Ratings (first pass — light at Triaging):</div><ul class="lead-bullets"><li>Technical momentum: <span class="g gB">B</span> — price <strong>12.28%</strong> above the 200-day average, RS percentile 68</li><li>Sell-side earnings momentum: <span class="g gF">F</span> — EPS revisions down 55-<strong>65%</strong> over 3-12 months, single-broker coverage pool</li><li>Thematic fit: <span class="g gC">C</span> — genuine tailwind from Middle East disruption on tankers, but explicitly fragile</li><li>Pillar I Case change elements: <span class="g gC">C</span> — real change forces, weak robust-base evidence</li><li>Pillar II Case building blocks: <span class="g gC">C</span> — mixed simplicity and setup-fit read</li><li>Pillar III Investment case components: not applicable at this stage</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Price action verdict: <span class="g gB">B</span></strong> <u>Live price DKK 317.8 sits <strong>12.28%</strong> above the 200-day moving average of DKK 283.05</u>, with an RS percentile of 68 versus the market. <em>This is a constructive but not extreme momentum reading</em> — top-third relative strength, not top-decile.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-f" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gF">F</span> <span class="secn">2 findings</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Revision-trend verdict <span class="g gF">F</span> (PINNED, dashboard-sourced):</strong> <span class="s-neg">EPS revision counts are severely negative across every horizon</span>: L1M -1, L3M -55, L6M -64, L12M -65, against a target-price revision series that is far milder (L1M -1, L3M +8, L6M +8). <u>The dashboard bell-curve grade is reproduced exactly as pinned</u>; the underlying data explains but does not derive it.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Explanatory note (not a re-derivation):</strong> The revision collapse is consistent with the compact-watson digest's own finding that <span class="s-neg">broker coverage is nearly absent</span>: one broker (DNB Carnegie), one analyst pool, target price recently cut from DKK 139 to DKK 115.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-c" data-spy><span class="id">MR3</span> Thematic fit <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Thematic verdict: <span class="g gC">C</span></strong> <em>Middle East disruption</em> is LIVE thematic exposure that directly explains the Q1 2026 tanker outperformance, but the same digest that supports it flags the tailwind as <u>structurally fragile to a diplomatic resolution</u> — a double-edged thematic read rather than a clean tailwind.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Pillar I verdict: <span class="g gC">C</span></strong> Change forces are real and dated (purchase-option monetisation, base-margin MPP shift, tanker premium), but the "robust base" Required Attribute is weak given the Q1 2026 underlying operator loss.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Pillar II verdict: <span class="g gC">C</span></strong> Thematic fit and setup fit are moderate; simplicity guardrails fail on multiple counts (five named drivers, an active geopolitical headwind, more than two live change-from-current items).</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> <u>The case change forces are genuine and well-evidenced, but the "robust base" test that anchors the entry point is where the case is weakest.</u></li><li><strong>E1 headline.</strong> Change forces present at a <span class="g gB">B</span> standard; robust base only a <span class="g gD">D</span> given the Q1 2026 dry-cargo loss and the FALSE FRIEND read from the Risks family.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gC">C</span></strong> <u>Five distinct, quantified change drivers</u> (purchase-option monetisation ~45-<strong>90%</strong> of 2026 net profit, base-margin MPP expansion ~<strong>20%</strong> of core EPS, tanker spot premiums ~<strong>25%</strong>, dry-cargo recovery ~<strong>10%</strong>, decarbonisation efficiency ~<strong>5%</strong>) are dated and source-grounded, but the base the case sits on is fragile: Q1 2026 underlying EBIT ex-vessel-gains was only USD 3.6m.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 — Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at this stage (first assessed at Early-Stage Assessment).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 — Sufficient total-shareholder-return / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at this stage (first assessed at Early-Stage Assessment).</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> <u>Thematic and setup-fit grades are moderate; simplicity guardrails are the clearest structural weakness in the case.</u></li><li><strong>Group headlines.</strong> Group 1 (momentum) <span class="g gC">C</span>; Group 2 (simplicity) <span class="g gD">D</span>; Group 3 (philosophy) <span class="g gC">C</span>; Group 4 (riskiness) <span class="g gC">C</span>; Group 5 not yet in scope.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gC">C</span></strong> Thematic fit <span class="g gC">C</span> carries a genuine but fragile Middle East tailwind; technical momentum (MR1, carried forward) is constructive at. <span class="g gB">B</span></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gD">D</span></strong> <u>Five named change drivers and an active geopolitical headwind together breach the focused-bet and zero-headwinds guardrails</u> — the case is not a simple, narrow bet.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gC">C</span></strong> Value-chain dynamics show a mixed demand/competitive backdrop with a material disruption-forces flag from the Persian Gulf closure.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gC">C</span></strong> <em>Light first-pass note at Triaging</em> — the Risks family's FALSE FRIEND finding is the single most important forward-looking flag and is carried into Section E; full Element-level risk work is Deep Dive scope.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Light / not-yet-in-scope note.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gC">C</span></strong> Progress to Early-Stage Assessment, conditional on the two gating questions below being tracked, not resolved, at this stage.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> <u>H2 2026 dry-cargo EBIT must show genuine recovery</u> from the Atlantic repositioning (not merely further asset-sale gains), and the vessel-sale gain run-rate must show evidence of sustainability beyond the current option-exercise cycle.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) <em>Investment Analyst</em> to track Q3 2026 segment EBIT split (Dry Cargo versus Tankers) at next earnings; (2) <em>Investment Analyst</em> to source a second broker's model at Early-Stage Assessment to test the DNB Carnegie DKK 115 target against an independent view.</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">104 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> <u>A quantified, asymmetric asset-optionality engine sits on top of a currently loss-making core freight business</u>, and the Risks family's own analysis argues the former is masking decay in the latter.</li><li><strong>Load-bearing tension.</strong> <span class="s-pos">91 purchase options, 33 in the money at a <strong>22%</strong> broker-value discount</span> versus <span class="s-neg">a USD 45m Q1 2026 Dry Cargo EBIT loss</span> and a FALSE FRIEND-winning ACH matrix.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gC">C</span></strong> Change forces are real, dated and quantified; the robust-base test is the weak link given current operator-level delivery.</li><li><strong>E1 headline.</strong> Five drivers, high management guidance credibility, but a fragile underlying base.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-c" data-spy>Element E1 — Required input change forces <span class="g gC">C</span> <span class="secn">9 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E1 (Required input change forces) verdict. <span class="g gC">C</span></strong> <u>Genuine, quantified, multi-driver change is underway</u>, but "robust base" fails on current-quarter delivery evidence.</li><li><strong>RA1 (Change forces present) verdict. <span class="g gB">B</span></strong> <em>External and internal change forces are both strong and dated</em>, anchored in five named, probability-weighted drivers from the change-forces family.</li><li><strong>RA2 (Robust base) verdict. <span class="g gD">D</span></strong> <em>The base the case stands on is not robust</em>: Q1 2026 underlying EBIT ex-gains was USD 3.6m, and the dry-cargo segment posted a USD 45m EBIT loss in the same quarter.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-change-forces-present-b" data-spy><span class="id">E1 RA1</span> Change forces present <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Change forces present) answer: <span class="g gB">B</span></strong> <u>Both external and internal change forces are strong, dated and independently corroborated</u> across the change-forces digest, the tearsheet, the developments report and the earnings review.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds? <span class="g gB">B</span></strong> <u>Yes, and unusually well-quantified</u>: management embedded USD 64m of asset-sale gains in the April 2026 guidance raise, later realised as USD 79m by July 2026.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Purchase-option monetisation:</strong> 91 options, 33 in the money, strike prices averaging <u><strong>22%</strong> below current broker valuations</u>; 24 new lease agreements with embedded options signed during 2025 alone.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Tanker spot premium:</strong> Q1 2026 tanker EBIT of USD 47.3m, up <span class="s-pos"><strong>139%</strong> year-on-year</span>, driven by Strait of Hormuz disruption pushing average MR spot rates up <strong>87%</strong> year-on-year.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Supply-side structural tailwind:</strong> the global dry bulk orderbook stands at 13.3-<strong>14.0%</strong> of the existing fleet, with shipyard capacity down <strong>60%</strong> from its 2007 peak and backlogs extending through 2028-2030.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Counter-fact retained:</strong> <em>the product tanker orderbook, by contrast, expanded to 18.5-<strong>19.2%</strong> of fleet capacity in 2026</em>, a genuinely divergent supply picture between the two segments NORDEN straddles.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA1 CQ2 — Strong internal change forces? <span class="g gB">B</span></strong> <u>Yes</u>: a full reporting-structure overhaul (six segments to two: Dry Cargo, Tankers), a CFO-to-CSO transition with an externally hired CFO (Anne Sofie Staunsbæk Veyhe, from GN Hearing via J.P. Morgan and Advent International), and a strategic pivot to base-margin MPP/Handysize logistics.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Leadership stability with one material transition:</strong> CEO Jan Rindbo has led the asset-light pivot since 2015; the incoming CFO brings private-equity and investment-banking pedigree not previously represented on the executive team.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Structural pivot evidence:</strong> 22 dedicated MPP vessels targeted by 2030 (up from a much smaller base), 16 new MPP leases added in 2025, three M&amp;A transactions integrated in the space over three years.</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>10-year LKAB Contract of Affreightment</strong> signed March 2026 for bentonite transport to northern Sweden, backed by two newly ordered ice-class MPP newbuildings for 2028 delivery — a genuine, dated industrial-contract anchor.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><span class="s-pos">Counter-fact retained: the guidance-upgrade cadence itself (three raises in five months) is unusually fast for a shipping name, which read either as strong internal momentum or as a company chasing a moving cyclical target.</span></div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-robust-base-d" data-spy><span class="id">E1 RA2</span> Robust base <span class="g gD">D</span> <span class="secn">6 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Robust base) answer: <span class="g gD">D</span></strong> <u>The current operating base is not robust</u> — the headline guidance strength is a vessel-sale-gain story, and the underlying freight-trading engine is currently loss-making in the segment that matters most.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ1 — Absence of external headwinds? <span class="g gF">F</span></strong> <u>No — headwinds are severe and active</u>: seven vessels were trapped in the Persian Gulf with a USD 30m annualised cost run-rate, forcing a complete suspension of Strait of Hormuz transit for the affected fleet.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Unhedgeable bunker cost:</strong> physical bunker premiums surged more than <strong>50%</strong> since year-end due to regional disruption, and NORDEN's hedging programme (bunker swaps on a 1:1 portfolio basis) explicitly cannot cover local physical delivery premiums.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Product tanker oversupply risk:</strong> an <strong>18.5%</strong> orderbook-to-fleet ratio on product tankers threatens future rate sustainability precisely in the segment currently driving Q1 outperformance.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>By July 2026, all seven trapped vessels had exited the Gulf</strong>, partially resolving the headwind but only after material Q1-Q2 cost absorption, and after the live-price date this memo works from.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA2 CQ2 — Well-invested base? <span class="g gC">C</span></strong> <em>Mixed</em>: the fleet is modern and actively renewed (11 vessels added in Q1 2026 alone, two new ice-class newbuildings ordered), but the operating base delivered a severe loss in its largest single segment during the same quarter.<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Positive:</strong> 5-year-old Capesize secondhand values rose <strong>27%</strong> year-on-year in Q1 2026, supporting the option book's asset-value assumption.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Negative:</strong> Dry Operator Large alone lost USD 42.7m EBIT and Dry Operator Small lost USD 9.2m in Q1 2026, a combined USD 51.9m loss across the two operator sub-segments before Logistics' own USD 4.6m loss.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA2 CQ3 — Past/present fundamental delivery congruency with thesis? <span class="g gD">D</span></strong> <u>Weak congruency</u>: the thesis is a transition to predictable "base margins," but delivery so far shows the opposite — margins remain highly volatile and asset-sale-dependent rather than base-margin-driven.<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Delivery track record classification</strong> (per source): FY2023 strong delivery versus guide (external cause); FY2024 weak delivery versus guide (mixed cause); FY2025 strong delivery versus guide (mixed cause, largely asset sales); Q1 2026 weak delivery versus guide (external cause).</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Multi-year earnings volatility:</strong> net profit fell from USD 400m (2023) to USD 120m (2025), while ROIC compressed from a cycle-peak 32-<strong>64%</strong> (2022-2023, sources differ) to <strong>8.9%</strong> (2025) to <strong>7.8%</strong> LTM at Q1 2026 — a swing of roughly 2,400 basis points.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ4 — Large change-from-current / mispricing? <span class="g gC">C</span></strong> <em>Real but two-sided</em>: shares near DKK 320 sit at an apparent 24-<strong>31%</strong> discount to the stated Q1 2026 NAV of DKK 422, but the single active broker's DKK 115 target implies a far lower NAV-multiple basis (<strong>0.9x</strong> on a lower forward NAV estimate of DKK 134/share, a figure that appears inconsistent with the DKK 422 NAV cited elsewhere in-source).<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Conflict reconciliation (D-AJ-25):</strong> <u>two different NAV bases coexist in the source set</u> — the earnings-review/tearsheet materials state Q1 2026 NAV of DKK 422/share, while the risks family's downside scenario references a much lower stressed NAV path (DKK 379 at year-end 2025, contracting further under a <strong>20%</strong> asset-value shock to DKK 308). <em>Both are stated as given, and the discrepancy is flagged rather than silently resolved</em> — see Section F.2.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA2 CQ5 — Low trading multiple? <span class="g gC">C</span></strong> <u>Moderately supportive</u>: forward P/E of <strong>18.4x</strong> sits at the 96th percentile of the stock's own 10-year P/E history (dashboard-sourced), which argues the multiple is <em>not</em> low on a historical basis, even as the price-to-NAV discount argues the opposite on an asset basis.<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Reconciliation:</strong> a high earnings multiple alongside a discounted asset value is consistent with <u>currently depressed earnings (the Q1 2026 loss) trading against structurally higher normalised asset values</u> — the multiple looks expensive on trailing earnings precisely because those earnings are cyclically compressed.</div></div></div></div></div>
+<p><strong>Counter-view considered (E1):</strong> <em>The strongest counter-case</em> is that the base-margin transition is real and simply front-loaded with one-off Persian Gulf disruption costs that have already reversed (all seven vessels exited by July 2026); on this view, H2 2026 delivery should show the "robust base" the RA2 grade currently denies. <u>This is rejected as the base case, not dismissed</u>, because the Risks family's own ACH matrix independently reaches the FALSE FRIEND conclusion using evidence beyond the Gulf disruption alone (working-capital deterioration, receivables ageing, the EBITDA-inclusion accounting change).</p>
+<p><strong>Downstream actions (E1):</strong> (1) <em>Investment Analyst</em> to track Q2-Q3 2026 Dry Cargo segment EBIT specifically for evidence the Atlantic repositioning delivered the promised margin recovery; (2) <em>Investment Analyst</em> to source an independent NAV reconciliation (DKK 422 versus DKK 379/308 stressed path) at Early-Stage Assessment.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr" data-spy>Element E2 — Required case outputs [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E2 (Required case outputs) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr" data-spy>Element E3 — Sufficient TSR / valuation upside [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E3 (Sufficient total-shareholder-return / valuation upside) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">93 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Thematic and setup-fit grades sit at the cohort median; simplicity guardrails are the case's clearest structural weakness.</li><li><strong>Group headlines.</strong> Group 1 <span class="g gC">C</span>; Group 2 <span class="g gD">D</span>; Group 3 <span class="g gC">C</span>; Group 4 <span class="g gC">C</span>; Group 5 not in scope.</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">10 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> Thematic tailwind is real but fragile; technical momentum is constructive.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 — Technical momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E4 (Technical momentum) is captured at Triaging via Master Rating MR1 (Section B.3); the full Element E4 is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">8 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict. <span class="g gC">C</span></strong> <u>A genuine live thematic tailwind (Middle East disruption) drives current outperformance, but the same driver is explicitly fragile</u>, and paradigm fit on the other two active thematics is more mixed.</li><li><strong>RA1 (Suitability for bear market / downturn) verdict. <span class="g gC">C</span></strong> <em>Mixed</em>: cash generation and a <strong>52.0%</strong> equity ratio provide ballast, but earnings are highly cyclical.</li><li><strong>RA2 (Suitability for AI disruption) verdict. <span class="g gC">C</span></strong> <em>Modest, indirect fit</em>: NORDEN references AI-driven voyage routing and algorithmic efficiency but this is a minor driver (~<strong>5%</strong> of core margins).</li><li><strong>RA3 (Suitability for Iran oil-price / Middle East disruption) verdict. <span class="g gB">B</span></strong> <em>Strong, direct, currently-firing fit</em>, though flagged in-source as fragile to resolution.</li><li><strong>RA4 (Paradigm fit, business perspective) verdict. <span class="g gC">C</span></strong> <em>Structurally reasonable</em> fit for a defensive-freight, essential-goods transport model in a fragmented-supply-chain paradigm.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra1-suitability-for-bear-market-economic-downturn-c" data-spy><span class="id">E5 RA1</span> Suitability for bear market / economic downturn <span class="g gC">C</span> <span class="secn">2 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Suitability for downturn) answer: <span class="g gC">C</span></strong> <u>Mixed resilience</u>: strong balance sheet metrics offset genuinely cyclical, freight-rate-exposed earnings.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ1 — Downturn suitability? <span class="g gC">C</span></strong> <em>Watson-authored per current active thematics (memory/thematics/active.md, live status confirmed via sidecar thematics_status=fresh, thematics_decision=proceed)</em>.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Defensive balance-sheet features:</strong> <strong>52.0%</strong> equity ratio, USD 318.8m cash, minimum <strong>50%</strong> profit distribution policy provide a genuine buffer.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Cyclical earnings exposure:</strong> ROIC compressed 2,<strong>400bp</strong> peak-to-trough in three years (32-<strong>64%</strong> to <strong>7.8%</strong>), the sharpest possible signature of an economically-sensitive, non-defensive earnings stream.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Counter-fact retained:</strong> <span class="s-mid">the asset-sale engine is partially counter-cyclical, since a downturn that depresses freight rates does not necessarily depress secondhand vessel values in the near term, though a severe downturn eventually does both.</span></div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra2-suitability-for-ai-disruption-c" data-spy><span class="id">E5 RA2</span> Suitability for AI disruption <span class="g gC">C</span> <span class="secn">2 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Suitability for AI disruption) answer: <span class="g gC">C</span></strong> <u>A minor, real, but non-central driver</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2 CQ1 — AI disruption suitability? <span class="g gC">C</span></strong> NORDEN cites algorithmic voyage routing and fuel-efficiency software as a driver worth an estimated ~<strong>5%</strong> of core margins, with plausibility rated HIGH but confidence only MEDIUM in the source.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Positive:</strong> a <strong>14%</strong> reduction in the Energy Efficiency Operational Indicator since 2022 is a concrete, measured outcome, not just a stated ambition.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Risk:</strong> <em>competitors could rapidly adopt off-the-shelf AI routing software</em>, per the source's own bear mechanism, eroding any technological margin premium.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra3-suitability-for-iran-oil-price-induced-input-cost-inf" data-spy><span class="id">E5 RA3</span> Suitability for Iran oil-price induced input cost inflation or demand deterioration <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 (Suitability for Middle East disruption) answer: <span class="g gB">B</span></strong> <u>Strong and directly quantified fit, on both the upside and downside legs</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA3 CQ1 — Middle East disruption suitability? <span class="g gB">B</span></strong> <u>The single largest quantified driver of the current print is this exact thematic</u>: Q1 2026 tanker EBIT of USD 47.3m (+<strong>139%</strong> year-on-year) versus a USD 45m Dry Cargo EBIT loss, both driven by the same Strait of Hormuz closure.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Upside leg:</strong> average MR tanker spot rates surged <strong>87%</strong> year-on-year in Q1 2026; US Gulf export rates reportedly reached close to USD 100,000/day at the peak.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Downside leg:</strong> seven vessels trapped in the Gulf, a USD 30m annualised cost provision, and unhedgeable bunker premiums up more than <strong>50%</strong>.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Fragility flag carried verbatim:</strong> <span class="s-neg">a sudden diplomatic resolution would release trapped capacity and collapse the tanker premium instantly</span>, per both the change-forces and risks digests independently.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e5-ra4-summarise-paradigm-fit-from-a-business-perspective-c" data-spy><span class="id">E5 RA4</span> Summarise paradigm fit from a business perspective <span class="g gC">C</span> <span class="secn">2 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 (Paradigm fit, business perspective) answer: <span class="g gC">C</span></strong> <u>Structurally reasonable but not exceptional fit</u> for a fragmented-supply-chain, essential-goods-transport paradigm.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA4 CQ1 — Paradigm fit summary? <span class="g gC">C</span></strong> NORDEN's asset-light, purchase-option-heavy model is well suited to a world of elevated geopolitical volatility (it can flex exposure quickly), but the same flexibility has not yet translated into stable "base margins" as the strategic narrative claims.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Supportive:</strong> structural supply constraints (13.3-<strong>14.0%</strong> dry bulk orderbook, ageing global fleet) fit a scarcity paradigm that favours incumbent tonnage owners.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Countervailing:</strong> the product tanker segment faces the opposite paradigm — an 18.5-<strong>19.2%</strong> orderbook overhang — meaning NORDEN's two segments sit on opposite sides of the same supply-discipline story.</div></div></div></div></div>
+<p><strong>Counter-view considered (E5):</strong> The strongest counter-case is that Middle East disruption thematic exposure is a temporary, tactical tailwind rather than a structural fit, and that grading E5 RA3 at <span class="g gB">B</span> over-credits a fragile geopolitical accident. <em>This is a fair caution</em>, but the grade reflects fit-while-firing, consistent with the RA's own framing question, not a claim of permanence.</p>
+<p><strong>Downstream actions (E5):</strong> (1) <em>Investment Analyst</em> to re-grade E5 RA3 at Early-Stage Assessment once Strait of Hormuz transit status is confirmed stable or unstable; (2) <em>Investment Analyst</em> to check <code>memory/thematics/active.md</code> at each subsequent stage for any new or retired thematic that could re-open E5 RA1/RA2.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr" data-spy>Element E6 — Sell-side earnings momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E6 (Sell-side earnings momentum) is captured at Triaging via Master Rating MR2 (Section B.3); the full Element E6 is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-d" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gD">D</span> <span class="secn">57 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gD">D</span></strong> <u>Five named change drivers, an active geopolitical headwind and more than two live change-from-current items together breach the simplicity guardrails on multiple counts.</u></li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 — Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">10 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict. <span class="g gD">D</span></strong> <u>This is not a simple, narrow bet</u>: five distinct change drivers, an active external headwind, and multiple live change-from-current items breach the guardrails set for this Element.</li><li><strong>RA1 (Focused bet) verdict. <span class="g gD">D</span></strong> <em>Five named drivers</em> exceeds the ≤2 fulcrum / ≤4 key driver guideline on its face.</li><li><strong>RA2 (Narrow perimeter) verdict. <span class="g gC">C</span></strong> <em>Two segments, but genuinely global geographic and vessel-type spread.</em></li><li><strong>RA3 (Zero headwinds) verdict. <span class="g gF">F</span></strong> <em>Fails decisively</em>: an active, quantified, ongoing geopolitical headwind is in the source.</li><li><strong>RA4 (Handful of change-from-current items) verdict. <span class="g gD">D</span></strong> <em>More than two live items</em>: segment reorganisation, CFO transition, MPP pivot, Persian Gulf disruption, guidance-upgrade cadence.</li><li><strong>RA5 (Conservative investor relations) verdict. <span class="g gB">B</span></strong> <em>Genuinely conservative</em>: guidance explicitly excludes unsigned future asset sales.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra1-focused-bet-d" data-spy><span class="id">E7 RA1</span> Focused bet? <span class="g gD">D</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Focused bet) answer: <span class="g gD">D</span></strong> <u>No — the case carries five distinct named drivers</u>, above the ≤2 fulcrum-driver / ≤4 key-driver ceiling this Required Attribute tests against.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ1 — 2 or less fulcrum drivers AND 4 or less key drivers? <span class="g gD">D</span></strong> The change-forces digest names five drivers explicitly: purchase-option monetisation, base-margin MPP expansion, tanker spot premiums, dry-cargo operational recovery, and decarbonisation/AI efficiency.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Fulcrum-driver test:</strong> purchase-option monetisation (45-<strong>90%</strong> of 2026 net profit) and base-margin expansion (~<strong>20%</strong> of core EPS) both plausibly qualify as fulcrum-level, which alone is within the ≤2 ceiling.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Key-driver test:</strong> including the three secondary drivers (tanker premium ~<strong>25%</strong>, dry-cargo recovery ~<strong>10%</strong>, decarbonisation ~<strong>5%</strong>) takes the total to five, <u>one over the ≤4 ceiling</u>.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Cohort comparison:</strong> against cohort peer BW LPG, which the peer channel's ratings.json grades D on this identical Required Attribute, <u>NORDEN's driver count is comparably broad</u>, placing both names in the lower half of the cohort on focus.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra2-narrow-perimeter-c" data-spy><span class="id">E7 RA2</span> Narrow perimeter? <span class="g gC">C</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Narrow perimeter) answer: <span class="g gC">C</span></strong> <u>Moderate</u>: the business is organised into two reporting segments, but operates a genuinely global, multi-vessel-type fleet.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2 CQ1 — 10 or less geographies and/or business units? <span class="g gC">C</span></strong> Two primary business units (Dry Cargo, Tankers) is well within the ≤10 unit ceiling, but the geographic footprint (19 offices, six continents, major revenue from China, the US and Singapore) is broad.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Positive:</strong> the post-2025 segment consolidation from six to two units is a genuine simplification.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Countervailing:</strong> within Dry Cargo alone, the fleet spans Capesize, Panamax, Supramax, Handysize and MPP vessel types, each with distinct market dynamics — a wide effective perimeter under a narrow segment label.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra3-zero-headwinds-f" data-spy><span class="id">E7 RA3</span> Zero headwinds? <span class="g gF">F</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 (Zero value-chain headwind risks to revenue) answer: <span class="g gF">F</span></strong> <u>No — headwinds are severe, active and quantified</u>, the clearest guardrail failure in this Element.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue? <span class="g gF">F</span></strong> <em>Multiple, simultaneous, named headwinds are in the source</em>, not a hypothetical risk register.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Persian Gulf disruption:</strong> USD 30m annualised cost run-rate, seven trapped vessels, complete Strait of Hormuz transit suspension for affected tonnage.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Product tanker oversupply:</strong> 18.5-<strong>19.2%</strong> orderbook-to-fleet ratio threatens the segment currently driving the strongest Q1 2026 result.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Unhedgeable bunker cost:</strong> physical bunker premiums up more than <strong>50%</strong>, explicitly outside the reach of NORDEN's derivative hedging programme.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Working-capital deterioration</strong> (per the Risks family): trade working capital expanded to USD 200m in 2025 from USD 136m, with USD 36.2m of receivables overdue beyond 90 days.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra4-handful-of-change-from-current-items-d" data-spy><span class="id">E7 RA4</span> Handful of change-from-current items? <span class="g gD">D</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 (Handful of change-from-current items) answer: <span class="g gD">D</span></strong> <u>No — more than two live change-from-current items are simultaneously in motion</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA4 CQ1 — 2 or less change-from-current items or problems? <span class="g gD">D</span></strong> At least four distinct change-from-current items are live: (1) the six-to-two segment reorganisation, (2) the CFO-to-CSO leadership transition, (3) the strategic MPP/base-margin pivot, and (4) the Persian Gulf disruption and its resolution.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Compounding factor:</strong> a three-stage guidance-upgrade cadence (USD 30-100m to USD 70-140m to USD 120-190m) inside five months is itself an unusual amount of change-from-current for a single fiscal year.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e7-ra5-conservative-investor-relations-b" data-spy><span class="id">E7 RA5</span> Conservative investor relations? <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 (Conservative investor relations) answer: <span class="g gB">B</span></strong> <u>Genuinely conservative</u>, evidenced by structural sandbagging rather than a stated policy alone.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA5 CQ1 — Company confirms guidance is conservative? <span class="g gB">B</span></strong> <u>Yes, with direct evidence</u>: full-year guidance explicitly excludes gains from any future, unsigned vessel sales, and the 2025 net profit outcome exceeded the initial guidance range.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Track record:</strong> FY2025 guidance issued "below USD 120m" versus USD 120m delivered — a clean beat; management is independently classified an "honest tracker" across multiple source sections.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Structural margin of safety:</strong> the 91-option purchase book, only partly monetised in current guidance, is itself a source-identified sandbagging mechanism.</div></div></div></div></div>
+<p><strong>Counter-view considered (E7):</strong> <em>The strongest counter-case</em> is that five drivers is a reasonable count for a diversified two-segment shipping operator, and that the guardrail's ≤4 ceiling is calibrated for single-segment cases. <u>This is not accepted as fully offsetting</u> because the RA3 zero-headwinds failure stands independently of driver count, and a Triaging-stage case with an active geopolitical headwind cannot be graded as simple regardless of driver taxonomy.</p>
+<p><strong>Downstream actions (E7):</strong> (1) <em>Investment Analyst</em> to re-count drivers at Early-Stage Assessment once the Persian Gulf headwind either resolves fully or becomes a permanent structural feature; (2) <em>Investment Analyst</em> to test whether the three-stage 2026 guidance cadence continues into H2, which would further weaken the RA4 grade.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">47 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gC">C</span></strong> <u>Sweeping all six acceptable setups plus the two negative guardrails, the strongest fit is a hybrid of RA5 (huge change-from-current clearing event) and RA3 (strong corporate change-driven EPSU/EPT)</u>, both anchored in the three-stage 2026 guidance-upgrade sequence; RA2 (demand-driven) and RA4 (compounder-quality clearing) fit poorly.</li><li><strong>RA1 (Mis-modelled EPS upgrader) verdict. <span class="g gD">D</span></strong> <em>Cannot be verified</em>: near-zero broker coverage makes a "market has mis-modelled this" claim structurally untestable at Triaging.</li><li><strong>RA2 (Big demand change-driven EPSU/EPT) verdict. <span class="g gD">D</span></strong> <em>Weak fit</em>: no market-wide demand explosion or oligopoly structure evidenced; dry bulk and tanker markets are described as fragmented with low entry barriers.</li><li><strong>RA3 (Strong corporate change-driven EPSU/EPT) verdict. <span class="g gB">B</span></strong> <em>Strong fit</em>: guidance increase, shareholder-returns increase, leadership change, all present and dated.</li><li><strong>RA4 (Change-from-current clearing in high-quality compounder) verdict. <span class="g gD">D</span></strong> <em>Poor fit</em>: this is not a "high-quality compounder" archetype given the current volatile, sub-target ROIC.</li><li><strong>RA5 (Huge change-from-current clearing event in solid quality) verdict. <span class="g gC">C</span></strong> <em>Partial fit</em>: a discrete clearing event (Gulf disruption resolution) exists, but the "solid quality" precondition is only partially met.</li><li><strong>RA6 (Trough-on-trough turn in solid quality cyclical) verdict. <span class="g gD">D</span></strong> <em>Weak fit</em>: end-market demand has not been depressed for 18+ months in the way this setup requires; the current dislocation is acute and geopolitical, not a slow multi-year trough.</li><li><strong>RA7 (Fit with unacceptable case setups) [NEGATIVE GUARDRAIL] verdict. <span class="g gC">C</span></strong> <em>Partial concern</em>: the FALSE FRIEND ACH finding is a genuine amber flag against this negative guardrail.</li><li><strong>RA8 (Fit with false-friend case setups) [NEGATIVE GUARDRAIL] verdict. <span class="g gD">D</span></strong> <em>Meaningful concern</em>: the Risks family names FALSE FRIEND the winning hypothesis explicitly.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra1-mis-modelled-high-quality-eps-upgrader-d" data-spy><span class="id">E8 RA1</span> Mis-modelled, high-quality EPS upgrader <span class="g gD">D</span> <span class="secn">2 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Mis-modelled, high-quality EPS upgrader) answer: <span class="g gD">D</span></strong> <u>Cannot be verified at Triaging</u>, and the grade reflects that structural gap, not a confirmed absence of mispricing.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1 CQ1 — Mis-modelled fit? <span class="g gD">D</span></strong> With only one broker (DNB Carnegie) and one analyst pool actively covering the name, <u>there is no independent broker-model detail in the source set to test whether the Street has mis-modelled NORDEN's earnings power</u> — the near-absence of coverage is itself the limiting fact, flagged in the compact-watson digest as a genuine coverage gap rather than a positive mispricing signal.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra2-big-demand-change-driven-epsu-or-ept-d" data-spy><span class="id">E8 RA2</span> Big demand change-driven EPSU or EPT <span class="g gD">D</span> <span class="secn">6 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Big demand change-driven EPSU or EPT) answer: <span class="g gD">D</span></strong> <u>Weak fit</u>: no market-wide demand explosion is evidenced.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA2 CQ1 — Market-wide demand explosion? <span class="g gD">D</span></strong> No; dry bulk demand is projected to grow only 1.1-<strong>2.5%</strong> in 2026, a modest, not explosive, trajectory.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA2 CQ2 — Dominant competitive position? <span class="g gD">D</span></strong> No; NORDEN's ~400-vessel operated fleet is large in absolute terms but the industry itself is described as highly fragmented with hundreds of sub-scale operators.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA2 CQ3 — One-to-many scalable business model? <span class="g gC">C</span></strong> Partially; the asset-light chartering-and-option model does scale operationally, but each incremental vessel still carries meaningful marginal capital and crewing cost, unlike a software-style scalable model.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA2 CQ4 — Oligopoly market structure? <span class="g gD">D</span></strong> No; both dry bulk and product tanker markets are explicitly described in-source as fragmented and highly competitive with low structural entry barriers.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA2 CQ5 — Fixed cost leverage for margin expansion? <span class="g gC">C</span></strong> Partially; scale procurement and scheduling efficiency are named moat mechanisms, but Q1 2026 results show negative, not positive, operating leverage in Dry Cargo.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra3-strong-corporate-change-driven-epsu-ept-b" data-spy><span class="id">E8 RA3</span> Strong corporate change driven EPSU / EPT <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 (Strong corporate change-driven EPSU/EPT) answer: <span class="g gB">B</span></strong> <u>Strong, dated fit</u> across multiple named change categories.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA3 CQ1 — Financial guidance increase? <span class="g gB">B</span></strong> <u>Yes, three times in five months</u>: USD 30-100m (Feb) to USD 70-140m (Apr) to USD 120-190m (Jul) 2026 full-year net profit guidance.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA3 CQ2 — Shareholder returns increase? <span class="g gB">B</span></strong> <u>Yes</u>: new USD 25m buyback authorised Q1 2026 alongside a DKK 2/share interim dividend, on top of a five-year track record of USD 1.2bn total distributions.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA3 CQ3 — Balance sheet utilisation increase? <span class="g gC">C</span></strong> <em>Modest</em>: net interest-bearing debt fell to USD 239.1m at Q1 2026 from USD 381.7m at year-end 2025, a deleveraging move, not a utilisation increase.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA3 CQ4 — Perimeter / composition reduction? <span class="g gC">C</span></strong> <em>Partial</em>: the six-to-two segment reorganisation simplifies reporting composition without materially shrinking the operating perimeter.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA3 CQ5 — Strategically-sensible M&amp;A step-up? <span class="g gC">C</span></strong> <em>Modest</em>: three MPP-related M&amp;A transactions integrated over three years (including Norlat Shipping), consistent with the base-margin strategy rather than transformative.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA3 CQ6 — Strategy / strategic priorities change? <span class="g gB">B</span></strong> <u>Yes</u>: an explicit, named pivot from directional spot-market trading toward MPP/project-cargo base margins through 2030.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA3 CQ7 — Standards improvement? <span class="g gC">C</span></strong> <em>Modest</em>: a <strong>14%</strong> reduction in the Energy Efficiency Operational Indicator since 2022 is measurable progress, not a step-change.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E8 RA3 CQ8 — Other leadership / actor changes? <span class="g gB">B</span></strong> <u>Yes</u>: Chief People Officer hire (April 2025), new Head of Dry Operator (early 2026), CFO-to-CSO transition with an external CFO hire.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 RA3 CQ9 — CEO change? <span class="g gD">D</span></strong> No; CEO Jan Rindbo remains in place with no announced succession, which is a stability factor but not itself a change-driver for this setup.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra4-change-from-current-clearing-in-a-high-quality-compou" data-spy><span class="id">E8 RA4</span> Change-from-current clearing in a high-quality compounder <span class="g gD">D</span> <span class="secn">9 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 (Change-from-current clearing in high-quality compounder) answer: <span class="g gD">D</span></strong> <u>Poor fit</u> — the "high-quality compounder" precondition is not currently met.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA4 CQ1-CQ2 — No CEO / strategy vacuum? <span class="g gD">D</span></strong> No; CEO and strategy are both stable and clearly articulated, which is a positive in isolation but disqualifies this specific setup archetype.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA4 CQ3 — Investment phase? <span class="g gC">C</span></strong> <em>Partially fits</em>: near-term financials are compressed (Q1 2026 loss in Dry Cargo) while mid-term financials are guided up, consistent with an investment-phase pattern.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA4 CQ4 — Guidance for mid-term? <span class="g gC">C</span></strong> Directionally up, per the 2026 guidance trajectory and the 2030 MPP fleet-doubling target.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA4 CQ5 — Company mis-execution / guidance delivery risk? <span class="g gD">D</span></strong> <u>Yes, a genuine concern</u>: the Q1 2026 dry-cargo positioning and repositioning cost overrun is a self-inflicted, not purely external, delivery miss per the source's own framing.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA4 CQ6 — Market-level demand down? <span class="g gC">C</span></strong> Partially; dry bulk demand growth is modest but positive (1.1-<strong>2.5%</strong> projected for 2026), not a demand collapse.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA4 CQ7 — Competition down? <span class="g gD">D</span></strong> No; competitive intensity in both segments is described as structurally fragmented and persistent.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA4 CQ8 — Disruption to earnings growth profile / bankability down? <span class="g gD">D</span></strong> <u>Yes, a live concern</u>: the FALSE FRIEND ACH finding is precisely a disruption-to-bankability signal.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E8 RA4 CQ9 — High quality business on mid/long-term basis? <span class="g gD">D</span></strong> <em>Not yet demonstrated</em>: ROIC has been below the <strong>12%</strong> rolling five-year target for the most recent year (<strong>8.9%</strong> versus target, <strong>330bp</strong> short), which fails the "high quality" precondition this setup requires.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra5-huge-change-from-current-clearing-event-in-solid-qual" data-spy><span class="id">E8 RA5</span> Huge change-from-current clearing event in solid quality <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 (Huge change-from-current clearing event in solid quality) answer: <span class="g gC">C</span></strong> <u>Partial fit</u>: a genuine, discrete clearing event exists, but the "solid quality" precondition is only partially satisfied.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA5 CQ1 — Bottom quartile trading multiple? <span class="g gC">C</span></strong> <em>Mixed</em>: forward P/E at the 96th percentile argues against a bottom-quartile earnings multiple, while the price-to-NAV discount argues for one on an asset basis.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA5 CQ2 — Sell-side estimates cut deeply, to conservative levels? <span class="g gB">B</span></strong> <u>Yes</u>: EPS revisions down 55-<strong>65%</strong> over 3-12 months (dashboard-sourced, feeding the pinned MR2 <span class="g gF">F</span>) is consistent with estimates having already been cut hard.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA5 CQ3 — Company guidance rebased lower, kitchen-sinked? <span class="g gD">D</span></strong> <em>Partially the opposite</em>: guidance has moved up three times in 2026, not down, though the initial February 2026 guide was itself conservative relative to 2025 delivered results.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA5 CQ4 — Disruptive impact on last-12-months delivery/guidance/sell-side? <span class="g gB">B</span></strong> <u>Yes</u>: the Persian Gulf disruption is a clear, dated, quantified operational shock that materially affected Q1 2026 delivery.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA5 CQ5 — "You know" and capitulation check re. guidance, sell-side, share price? <span class="g gC">C</span></strong> <em>Uncertain</em>: source material shows insider selling near the Q1 print (CEO Rindbo sold 16,637 shares at DKK 317.71, CFO Badsted sold 4,000 at DKK 320.00) alongside one board-member purchase (Jakob Groot, 1,000 shares at DKK 312.46) — a mixed, not decisive, capitulation signal.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra6-trough-on-trough-turn-in-solid-quality-cyclical-d" data-spy><span class="id">E8 RA6</span> Trough-on-trough turn in solid quality cyclical <span class="g gD">D</span> <span class="secn">10 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA6 (Trough-on-trough turn in solid quality cyclical) answer: <span class="g gD">D</span></strong> <u>Weak fit</u>: the current dislocation is acute and geopolitical, not the multi-year demand trough this setup archetype requires.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA6 CQ1 — Bottom quartile trading multiple? <span class="g gC">C</span></strong> As above, mixed evidence.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA6 CQ2 — End market demand decreased 18+ months? <span class="g gD">D</span></strong> No; the source shows a sharp single-quarter dislocation (Q1 2026), not an 18-month-plus demand downturn.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA6 CQ3 — Competitive behaviour calmed versus price-down for volume? <span class="g gC">C</span></strong> Partially; NORDEN itself is reducing exposure to spot-market commoditised trading in favour of contracted base margins, a form of competitive calming at the company level.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA6 CQ4 — New contract pricing levels stable? <span class="g gC">C</span></strong> Partially; the LKAB 10-year COA and expanded tanker time-charter coverage (<strong>80%</strong> through 2028) suggest stabilising contract pricing in parts of the book.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA6 CQ5 — Company executed right-sizing 6+ months? <span class="g gD">D</span></strong> No clear right-sizing programme is evidenced; the company is expanding fleet (11 vessels added in Q1 2026), not contracting.</div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA6 CQ6 — Competitors executed right-sizing 6+ months? <span class="g gD">D</span></strong> Not evidenced in the source set for this specific setup test.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA6 CQ7 — Sell-side estimates cut deeply, conservative? <span class="g gB">B</span></strong> As RA5 CQ2, yes.</div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E8 RA6 CQ8 — Company guidance rebased lower, kitchen-sinked? <span class="g gD">D</span></strong> As RA5 CQ3, no — guidance has moved up, not down.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 RA6 CQ9 — Capitulation check? <span class="g gC">C</span></strong> As RA5 CQ5, mixed.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra7-fit-with-unacceptable-case-setups-negative-guardrail-" data-spy><span class="id">E8 RA7</span> Fit with unacceptable case setups [NEGATIVE GUARDRAIL] <span class="g gC">C</span> <span class="secn">2 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA7 (Fit with unacceptable case setups) answer: <span class="g gC">C</span></strong> <u>A partial amber flag</u>, not a clean pass.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA7 CQ1 — Fit with unacceptable setups? <span class="g gC">C</span></strong> <em>The closest match is a "story stock relying on non-recurring gains" pattern</em>: 45-<strong>90%</strong> of 2026 net profit is projected to come from vessel sales rather than core freight operations, which is the kind of earnings-composition pattern this negative guardrail is designed to catch.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e8-ra8-fit-with-false-friend-case-setups-negative-guardrail-" data-spy><span class="id">E8 RA8</span> Fit with false friend case setups [NEGATIVE GUARDRAIL] <span class="g gD">D</span> <span class="secn">2 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA8 (Fit with false-friend case setups) answer: <span class="g gD">D</span></strong> <u>A meaningful, source-grounded concern</u> — this is the clearest negative-guardrail signal in the whole Element.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA8 CQ1 — Fit with false-friend setups? <span class="g gD">D</span></strong> <u>The Risks family's own competing-hypotheses (ACH) matrix names the FALSE FRIEND profile the winning hypothesis</u>, with only two hard inconsistencies against the evidence, versus seven for the standard bullish thesis and four for an outright failure thesis.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Mechanism named in-source:</strong> asset trading gains (vessel sales, purchase-option exercises) mask deteriorating core dry-cargo and tanker-operator chartering margins.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Corroborating evidence:</strong> the 2025 accounting change integrating vessel-sale gains directly into EBITDA (rather than below the operating line) is independently flagged as a "critical false-friend warning" in the Risks digest.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Bull rebuttal retained:</strong> <span class="s-mid">vessel sales are core to the stated asset-light strategy, making adjusted profit metrics a fair, not misleading, representation of operational trading</span> — this is the company's own defence, carried for balance, not adopted.</div></div></div></div></div>
+<p><strong>E8 fit-setup identification (mandatory at Triaging):</strong> <em>Primary fit</em> — RA5 (Huge change-from-current clearing event in solid quality), driven by the discrete, dated Persian Gulf disruption-and-resolution event layered on an already-conservative guidance base. <em>Secondary fit</em> — RA3 (Strong corporate change-driven EPSU/EPT), driven by the three-stage 2026 guidance-upgrade sequence and the CFO transition.</p>
+<p><strong>Counter-view considered (E8):</strong> The strongest counter-case is that RA8's false-friend read over-weights a single analytical framework (the Risks family's ACH matrix) against the more constructive change-forces and business-foundations reads. <u>This is a fair tension to hold</u>, and it is precisely why Section E does not recommend an outright kill: the case is genuinely two-sided, not one-sided negative.</p>
+<p><strong>Downstream actions (E8):</strong> (1) <em>Investment Analyst</em> to deepen RA5 and RA3 (the identified fit setups) at Early-Stage Assessment per the carve-out rule; (2) <em>Investment Analyst</em> to specifically re-test RA8 against H2 2026 segment delivery, since a genuine dry-cargo margin recovery would be the strongest available rebuttal to the false-friend read.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">20 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gC">C</span></strong> At Triaging, Element E11 (Value-chain dynamics) is in scope (second pass); Elements E9 (Great operator), E10 (Advantaged business), E12 (Supportive industry structure) and E13 (High secular growth potential) are not in scope and are marked not applicable at this stage.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">16 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gC">C</span></strong> <u>A structurally supportive supply backdrop on the dry bulk side is offset by an active, quantified geopolitical disruption force and a divergent, less favourable supply picture on product tankers.</u></li><li><strong>RA1 (Demand side strong/fragile) verdict. <span class="g gC">C</span></strong> <em>Mixed</em>: modest positive demand growth against near-term freight-rate volatility.</li><li><strong>RA2 (Competitive supportiveness/aggression) verdict. <span class="g gC">C</span></strong> <em>Fragmented but not overtly aggressive</em> — no price wars evidenced, but no pricing power either.</li><li><strong>RA3 (Disruption forces) verdict. <span class="g gD">D</span></strong> <em>Material, active, quantified disruption</em> from the Persian Gulf closure.</li><li><strong>RA4 (Political/regulatory) verdict. <span class="g gC">C</span></strong> <em>Manageable but real</em> regulatory cost creep (EU ETS, FuelEU Maritime, IMO Net-Zero).</li><li><strong>RA5 (Supportive supplier side) verdict. <span class="g gB">B</span></strong> <em>Genuinely favourable</em>: tight shipyard capacity and a low orderbook support secondhand asset values, directly underpinning the option book's economics.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra1-demand-side-strong-robust-or-fragile-negative-c" data-spy><span class="id">E11 RA1</span> Demand side — strong/robust or fragile/negative? <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 (Demand side) answer: <span class="g gC">C</span></strong> <u>Modestly positive but not robust</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA1 CQ1 — Customer demand? <span class="g gC">C</span></strong> Global dry bulk trade volume grew <strong>1.3%</strong> to 5.91 billion tonnes in 2025, with 2026 growth projected at 1.1-<strong>2.5%</strong> — positive but modest; no single external customer exceeds <strong>10%</strong> of revenue, a genuine diversification positive.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA1 CQ2 — Route to market / intermediaries? <span class="g gC">C</span></strong> NORDEN operates both directly and via NORDEN Tanker Pools (proportional share <strong>29.0%</strong> in 2025, down from <strong>31.4%</strong> in 2024), a modest decline in pooled fee-income exposure.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra2-competitive-supportiveness-or-aggression-c" data-spy><span class="id">E11 RA2</span> Competitive supportiveness or aggression? <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA2 (Competitive supportiveness) answer: <span class="g gC">C</span></strong> <u>Fragmented, not overtly aggressive, but offering no pricing power either</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA2 CQ1 — Existing competition? <span class="g gC">C</span></strong> The industry is explicitly described as highly fragmented, hundreds of sub-scale operators, with NORDEN's ~400-vessel operated footprint large in absolute terms but not dominant in market share.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA2 CQ2 — Adjacencies entering? <span class="g gC">C</span></strong> No material adjacency-entry threat is named in the source specific to NORDEN's segments.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA2 CQ3 — Vanilla new entrants? <span class="g gC">C</span></strong> Low barrier to entry beyond capital (a new dry bulk vessel costs USD 30-40m) keeps the threat of vanilla new entrants structurally present, though tempered by the current tight shipyard backlog.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA2 CQ4 — Orthogonal/innovative new entrants? <span class="g gC">C</span></strong> None named specifically for NORDEN in the source set.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA2 CQ5 — Substitutes/alternatives? <span class="g gC">C</span></strong> None material named; seaborne freight has no meaningful substitute for the bulk and tanker cargoes NORDEN carries.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra3-disruption-forces-d" data-spy><span class="id">E11 RA3</span> Disruption forces? <span class="g gD">D</span> <span class="secn">2 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA3 (Disruption forces) answer: <span class="g gD">D</span></strong> <u>Material and currently active</u>, the weakest Required Attribute in this Element.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA3 CQ1 — Disruption to demand, competition, regulators, suppliers, political, any other actors? <span class="g gD">D</span></strong> <u>Yes, materially</u>: the Persian Gulf/Strait of Hormuz closure is a live, quantified disruption (USD 30m annualised cost, seven trapped vessels) affecting both demand routing and supplier-side (bunker) costs simultaneously.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Compounding disruption:</strong> the product tanker orderbook overhang (18.5-<strong>19.2%</strong>) is a slower-moving but structural disruption force working against the segment currently benefiting most from the geopolitical shock.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><em>Data-quality caveat carried:</em> the compact-watson CF digest flags <u>thin_peer_context</u> on the purchase-option driver, meaning peer-relative disruption comparisons here lean more heavily on the Risks family than on independently triangulated data.</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra4-political-regulatory-c" data-spy><span class="id">E11 RA4</span> Political / regulatory? <span class="g gC">C</span> <span class="secn">3 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA4 (Political/regulatory) answer: <span class="g gC">C</span></strong> <u>Manageable, real, cost-adding but not existential</u>.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA4 CQ1 — Regulator strengths-weaknesses-opportunities-threats? <span class="g gC">C</span></strong> EU ETS reaches <strong>100%</strong> emissions coverage for intra-EU voyages by 2026, with FuelEU Maritime penalties of EUR 2,400/tonne of VLSFO equivalent for non-compliance and a <strong>6%</strong> GHG intensity reduction mandate by 2030.</div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA4 CQ2 — Political actor strengths-weaknesses-opportunities-threats? <span class="g gC">C</span></strong> The IMO Net-Zero Framework targets net-zero by roughly 2050 with enforcement starting 2029; the Persian Gulf conflict itself is a political/geopolitical actor risk directly affecting current operations.</div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e11-ra5-supportive-supplier-side-b" data-spy><span class="id">E11 RA5</span> Supportive supplier side? <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA5 (Supportive supplier side) answer: <span class="g gB">B</span></strong> <u>Genuinely favourable</u>, and directly load-bearing for the option-book thesis.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA5 CQ1 — Supplier side strengths-weaknesses-opportunities-threats? <span class="g gB">B</span></strong> <u>Structurally tight</u>: global shipyard capacity has contracted <strong>60%</strong> from its 2007 peak to fewer than 350 active yards, with backlogs extending through 2028-2030, directly supporting the secondhand asset values that underpin NORDEN's purchase-option economics.<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Direct linkage to E1's largest driver:</strong> 5-year-old Capesize vessel values rose <strong>27%</strong> year-on-year in Q1 2026, precisely the input the 91-option book depends on to stay in the money.</div></div></div></div></div>
+<p><strong>Counter-view considered (E11):</strong> <em>The strongest counter-case</em> is that E11's overall <span class="g gC">C</span> grade understates the strength of the supplier-side tailwind (RA5 at <span class="g gB">B</span>) by averaging it against the disruption-forces weakness (RA3 at <span class="g gD">D</span>). <u>This is accepted as a fair tension</u> — the two RAs are genuinely pulling in opposite directions, which is exactly what the roll-up grade should reflect rather than resolve artificially.</p>
+<p><strong>Downstream actions (E11):</strong> (1) <em>Investment Analyst</em> to monitor secondhand Capesize and MR tanker asset values as the single cleanest forward read on the RA5 tailwind holding; (2) <em>Investment Analyst</em> to escalate a self-initiated query at Early-Stage Assessment on peer-relative disruption exposure, given the thin_peer_context flag carried from the change-forces digest.</p>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gC">C</span></strong> <em>Light first-pass note at Triaging.</em> Deep Element-level risk work (E15-E19) is Early-Stage Assessment / Deep Dive scope. The single most important forward-looking risk signal at this stage is the Risks family's FALSE FRIEND finding from its ACH matrix, carried into Section E as the case's central gating question. A second-order risk cluster — receivables ageing (USD 36.2m past due beyond 90 days, above peer d'Amico's USD 1.6m but below Hafnia's USD 111.0m), rising working capital (USD 200m in 2025 from USD 136m), and governance concentration (Board Chair Klaus Nyborg's 12-year non-independent tenure, nomination-committee non-compliance) — is noted here for Early-Stage Assessment follow-through rather than graded now.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e15-invalidating-attributes-nr" data-spy>Element E15 — Invalidating attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Structural ACH Screening -- We are looking for evidence that none of the 10 general invalidating ACHs applies; each structural risk must be explicitly tested and ruled out or mitigated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E15 (Invalidating attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e16-strenuously-seek-to-avoid-attributes-nr" data-spy>Element E16 — Strenuously seek-to-avoid attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case-Specific ACH Screening -- We are looking for identification and rigorous testing of the 2-4 case-specific alternate hypotheses most credible given this stock&#x27;s situation; avoiding generic lists or unexamined risks.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E16 (Strenuously seek-to-avoid attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e17-capital-constraining-attributes-nr" data-spy>Element E17 — Capital-constraining attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Volatility Profile -- We are looking for a manageable volatility profile: limited earnings variability, predictable news-flow, low short interest, and adequate liquidity for typical portfolio position sizes.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E17 (Capital-constraining attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e18-clear-transmission-mechanism-inputs-to-earnings-" data-spy>Element E18 — Clear transmission mechanism, inputs to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E18 (Clear transmission mechanism, inputs to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e19-monitorable-transmission-mechanism-leading-track" data-spy>Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E19 (Monitorable transmission mechanism, leading tracking indicators to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not yet in scope at Triaging; first written at Early-Stage Assessment.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 Invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">6 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation. <span class="g gC">C</span></strong> <u>Progress to Early-Stage Assessment, conditional on two gating questions</u>, with <em>medium</em> conviction reflecting a genuinely two-sided case rather than a clean progress or park signal.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment, with <em>medium conviction</em>. The case combines a well-evidenced, quantified asset-optionality engine (91 purchase options, USD 79m of 2026 gains already realised) with a currently loss-making core operator business and an independent Risks-family finding that names FALSE FRIEND the winning explanatory hypothesis. Neither element alone should decide the case; both need Early-Stage Assessment-level depth.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Risks-report stage recommendation, addressed directly (mandatory per the grounding discipline):</strong> <u>The Risks family's own §14 Stage Progression verdict states the investment idea is "not ready to progress" and recommends hold-and-watch status</u>, citing near-term dry bulk losses and opaque operator margins. <em>This memo does not adopt that recommendation outright</em>: it instead recommends a conditional progress to Early-Stage Assessment, on the basis that (1) the Risks family's own bear-case plausibility is independently rated "low-to-medium" in the same report, (2) the Persian Gulf disruption that drove the Q1 2026 loss had substantially resolved by July 2026 (all seven trapped vessels exited), and (3) the guidance-upgrade sequence is independently corroborated by a second source family (developments and earnings-review) rather than resting on Risks-family scepticism alone. The disagreement is stated explicitly here, not silently overridden.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>If progressing — next-stage actions:</strong> (1) Track Q2-Q3 2026 Dry Cargo segment EBIT specifically for evidence of the Atlantic-repositioning recovery management guided to; (2) source a second, independent broker model to test the single-broker DNB Carnegie DKK 115 target and reconcile the two conflicting NAV figures (DKK 422 versus the DKK 379/308 stressed path) carried in Section F.2; (3) at Early-Stage Assessment, apply the E8 carve-out to deepen RA5 and RA3 specifically, given they are the identified fit setups.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>If parking — reassessment criteria:</strong> <em>Not the current recommendation</em>, but if adopted, reassessment would trigger on: sustained dry-cargo losses beyond H1 2026, a stalling or reversal of the vessel-sale gain run-rate, or a further downgrade in the sell-side revision trend (MR2) beyond the current. <span class="g gF">F</span></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Watchlist placement:</strong> Not applicable — the recommendation is to progress, not park.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) <em>Investment Analyst</em> to open Early-Stage Assessment work no later than the Q2/H1 2026 earnings print, prioritising the Dry Cargo segment-level read; (2) <em>Investment Analyst</em> to run a self-initiated query at Early-Stage Assessment specifically on the NAV-reconciliation gap (DKK 422 versus DKK 379/308), since it is load-bearing for E3 (valuation upside) once that Element opens.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">15 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">8 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change Forces</strong> — <code>Files/DNORD-DK/41-change-forces/compact-watson.md</code> [AS], generated 2026-07-30, sourced from <code>raw-AS.md</code> dated 2026-05-31 (301 sources). Read in full.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Business Foundations</strong> — <code>Files/DNORD-DK/42-business-foundations/compact-watson.md</code> [AS], generated 2026-07-30. Source carries no citations (source_count 0) — treated per the digest's own reader warning as weaker evidence than a fully-cited digest; used for qualitative moat/foundation content only. Read in full.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Risks</strong> — <code>Files/DNORD-DK/44-risks/raw-AS.md</code> [AS], full report, 13,205 words, 282 sources. Read in full, and read FIRST per the mandatory grounding rule.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Tearsheet</strong> — <code>Files/DNORD-DK/45-tearsheet/raw-AS.md</code> [AS], 3,252 words. Read in full.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Developments</strong> — <code>Files/DNORD-DK/46-developments/raw-AS-2026-06-05.md</code> [AS], dated 2026-06-05, 3,319 words. Read in full.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Earnings Review</strong> — <code>Files/DNORD-DK/49-earnings-review/raw-AS.md</code> [AS], 654 lines, covering the Q1 2026 print through the July 2026 guidance upgrade. Read in full (all sections through §8, covering the load-bearing financial-delivery, guidance-progression and leadership-change content; the memo's figures are cross-checked against this report throughout).</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Master-dashboard quantitative feeds</strong> — <code>prices.json</code> equivalent data supplied via sidecar-prefill.json (price DKK 317.8, 200-day average DKK 283.05, RS percentile 68), <code>factset-valuation.json</code> equivalent (P/E 18.4, percentile 96), <code>factset-ssem.json</code> equivalent (EPS/TP revision counts). All dashboard-sourced fields labelled as such throughout the memo per the grounding discipline.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Peer channel</strong> — cohort peer BWLPG-NO (ratings.json only, master-digest absent/cold-start); sector peers IR5B-IE (master-digest + ratings.json, both read in full), FQT-AT (master-digest read in full, ratings.json absent), MAERSK.B-DK (master-digest read in full, ratings.json absent). CMBT-BE and HAFNI-NO are cohort peers with neither master-digest nor ratings.json present (cold-start, no usable peer content) — not injected into any grade; flagged here as the two backfill-needed peers per the sidecar.</div></div>
+<p><strong>No family reports in the AUTHORISED SOURCES list were left unread.</strong> All six were opened and read in full or to the depth stated above.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">7 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>NAV discrepancy (load-bearing, unresolved).</strong> The tearsheet and earnings-review materials state Q1 2026 NAV of DKK 422/share, while the risks family's downside-scenario materials reference a lower path (DKK 379 at year-end 2025, and a stressed DKK 308 under a <strong>20%</strong> asset-value shock). Both figures are stated as given in their respective source families; this memo does not silently pick one, and the reconciliation is flagged as an Early-Stage Assessment priority (see Section E, next-stage actions).</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>EBIT margin data gap.</strong> No trailing-twelve-month EBIT margin figure is stated cleanly in a single source location; Section A therefore states Q1 2026 group EBIT margin (<strong>2.8%</strong>) rather than mislabel a different period as "(LTM)," per the grounding discipline's explicit instruction on this exact failure mode.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>52-week range absent from the sidecar data supplied for this memo</strong> — written as "n/a — not in master-dashboard data" in Section A rather than estimated, per the internal-only data-sourcing mandate.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Buy-rating percentage</strong> — the source set shows only a single active broker (DNB Carnegie, Buy rating, DKK 115 target); no multi-broker survey mix exists to state a percentage split, so Section A carries "n/a (single-broker pool)" with the one broker's stance noted.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Business Foundations digest citation warning carried forward.</strong> The <code>42-business-foundations/compact-watson.md</code> digest explicitly states its source carries zero citations (source_count 0); qualitative content from this family (moat mechanisms, unit economics, industry structure) is used, but treated as directionally indicative rather than as strongly sourced as the Change Forces or Risks families, both of which carry full citation counts (301 and 282 sources respectively).</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Peer cold-start.</strong> Two cohort peers (CMBT-BE, HAFNI-NO) have neither a master-digest nor a ratings.json on disk; they are not usable for peer-relative grading at this stage and are recorded here rather than silently omitted.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Data discrepancy — driver percentage overlap.</strong> The change-forces digest's five named drivers sum to well over <strong>100%</strong> of stated impact ranges when their upper bounds are added (45-<strong>90%</strong> + ~<strong>20%</strong> + ~<strong>25%</strong> + ~<strong>10%</strong> + ~<strong>5%</strong>); this is treated as the source's own range-based, non-additive estimation convention (each driver independently estimated, not a waterfall), not corrected or forced to sum to <strong>100%</strong>.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/dnord-dk-triaging-self-review-debrief-2026-08-11.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"F","label":"Sell-side earnings momentum"},"MR3":{"grade":"C","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"E1.RA1":{"grade":"B","label":"Change forces present"},"E1.RA2":{"grade":"D","label":"Robust base"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"E5.RA1":{"grade":"C","label":"Suitability for bear market / economic downturn"},"E5.RA2":{"grade":"C","label":"Suitability for AI disruption"},"E5.RA3":{"grade":"B","label":"Suitability for Iran oil-price induced input cost inflation or demand deterioration"},"E5.RA4":{"grade":"C","label":"Summarise paradigm fit from a business perspective"},"Group 2":{"grade":"D","label":"Case simplicity"},"E7.RA1":{"grade":"D","label":"Focused bet?"},"E7.RA2":{"grade":"C","label":"Narrow perimeter?"},"E7.RA3":{"grade":"F","label":"Zero headwinds?"},"E7.RA4":{"grade":"D","label":"Handful of change-from-current items?"},"E7.RA5":{"grade":"B","label":"Conservative investor relations?"},"E8.RA1":{"grade":"D","label":"Mis-modelled, high-quality EPS upgrader"},"E8.RA2":{"grade":"D","label":"Big demand change-driven EPSU or EPT"},"E8.RA3":{"grade":"B","label":"Strong corporate change driven EPSU / EPT"},"E8.RA4":{"grade":"D","label":"Change-from-current clearing in a high-quality compounder"},"E8.RA5":{"grade":"C","label":"Huge change-from-current clearing event in solid quality"},"E8.RA6":{"grade":"D","label":"Trough-on-trough turn in solid quality cyclical"},"E8.RA7":{"grade":"C","label":"Fit with unacceptable case setups [NEGATIVE GUARDRAIL]"},"E8.RA8":{"grade":"D","label":"Fit with false friend case setups [NEGATIVE GUARDRAIL]"},"Group 3":{"grade":"C","label":"Core philosophy"},"E11.RA1":{"grade":"C","label":"Demand side — strong/robust or fragile/negative?"},"E11.RA2":{"grade":"C","label":"Competitive supportiveness or aggression?"},"E11.RA3":{"grade":"D","label":"Disruption forces?"},"E11.RA4":{"grade":"C","label":"Political / regulatory?"},"E11.RA5":{"grade":"B","label":"Supportive supplier side?"},"Group 4":{"grade":"C","label":"Case riskiness"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"B"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"F"},{"code":"MR3","label":"Thematic fit","grade":"C"},{"code":"MR4","label":"Case change elements","grade":"C"},{"code":"MR5","label":"Case building blocks","grade":"C"},{"code":"MR6","label":"Investment case components","grade":null}],"pillars":[{"roman":"I","label":"Case change elements","grade":"C","elements":[{"code":"E1","label":"Required input change forces","grade":"C","ras":[{"code":"RA1","label":"Change forces present","grade":"B","cqs":[]},{"code":"RA2","label":"Robust base","grade":"D","cqs":[]}]},{"code":"E2","label":"Required case outputs","grade":null,"ras":[]},{"code":"E3","label":"Sufficient TSR / valuation upside","grade":null,"ras":[]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[{"code":"RA1","label":"Suitability for bear market / economic downturn","grade":"C","cqs":[]},{"code":"RA2","label":"Suitability for AI disruption","grade":"C","cqs":[]},{"code":"RA3","label":"Suitability for Iran oil-price induced input cost inflation or demand deterioration","grade":"B","cqs":[]},{"code":"RA4","label":"Summarise paradigm fit from a business perspective","grade":"C","cqs":[]}]},{"code":"E6","label":"Sell-side earnings momentum","grade":null,"ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"D","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"D","ras":[{"code":"RA1","label":"Focused bet?","grade":"D","cqs":[]},{"code":"RA2","label":"Narrow perimeter?","grade":"C","cqs":[]},{"code":"RA3","label":"Zero headwinds?","grade":"F","cqs":[]},{"code":"RA4","label":"Handful of change-from-current items?","grade":"D","cqs":[]},{"code":"RA5","label":"Conservative investor relations?","grade":"B","cqs":[]}]},{"code":"E8","label":"Fit with acceptable case setups","grade":"C","ras":[{"code":"RA1","label":"Mis-modelled, high-quality EPS upgrader","grade":"D","cqs":[]},{"code":"RA2","label":"Big demand change-driven EPSU or EPT","grade":"D","cqs":[]},{"code":"RA3","label":"Strong corporate change driven EPSU / EPT","grade":"B","cqs":[]},{"code":"RA4","label":"Change-from-current clearing in a high-quality compounder","grade":"D","cqs":[]},{"code":"RA5","label":"Huge change-from-current clearing event in solid quality","grade":"C","cqs":[]},{"code":"RA6","label":"Trough-on-trough turn in solid quality cyclical","grade":"D","cqs":[]},{"code":"RA7","label":"Fit with unacceptable case setups","grade":"C","cqs":[]},{"code":"RA8","label":"Fit with false friend case setups","grade":"D","cqs":[]}]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"C","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"C","ras":[{"code":"RA1","label":"Demand side — strong/robust or fragile/negative?","grade":"C","cqs":[]},{"code":"RA2","label":"Competitive supportiveness or aggression?","grade":"C","cqs":[]},{"code":"RA3","label":"Disruption forces?","grade":"D","cqs":[]},{"code":"RA4","label":"Political / regulatory?","grade":"C","cqs":[]},{"code":"RA5","label":"Supportive supplier side?","grade":"B","cqs":[]}]},{"code":"E12","label":"Supportive industry structure","grade":null,"ras":[]},{"code":"E13","label":"High secular growth potential","grade":null,"ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"C","elements":[{"code":"E15","label":"Invalidating attributes","grade":null,"ras":[]},{"code":"E16","label":"Strenuously seek-to-avoid attributes","grade":null,"ras":[]},{"code":"E17","label":"Capital-constraining attributes","grade":null,"ras":[]},{"code":"E18","label":"Clear transmission mechanism, inputs to earnings per share","grade":null,"ras":[]},{"code":"E19","label":"Monitorable transmission mechanism, leading tracking indicators to earnings per share","grade":null,"ras":[]}]},{"code":"GROUP 5","label":"Case optionality","grade":null,"elements":[{"code":"E20","label":"Nice-to-have attributes","grade":null,"ras":[]}]}]},{"roman":"III","label":"Investment case components","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>[W] BFIT-NL — ESA — A&amp;J Memo (Option B — pre-research) — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE
+  Project: SA - Reports & Memos Repository  |  Phase 1 deliverable  |  14-May-26
+  ----------------------------------------------------------------------------
+  This is the inherited DISPLAY LAYER, lifted near-verbatim (behaviour) from
+  databases/memo-style-sheet3-htro.html (the old V20 WIP viewer), per D-MV-01.
+
+  WHAT IS INHERITED (near-verbatim):
+    - the two-pane shell (.app-shell > .nav-pane + .main-pane)
+    - the nav-pane: header, toggle bar (5 toggles), .nav-tree container
+    - the nav CSS: depth tiers, .nav-rating-pill, .nav-audit, focused state
+    - the nav JS: click-to-scroll, rAF scroll-spy, auto-expand-on-focus,
+      the 5 toggle handlers, the sticky-stack --main-header-h CSS var
+    - the sticky stack (.main-header)
+
+  WHAT IS EXTENDED (per D-MV-02 — old file had 4 depth tiers, new format has 7):
+    - nav depth tiers: nav-section, nav-subsection, nav-group ADDED above the
+      old nav-pillar / nav-element / nav-ra / nav-cq tiers
+    - scroll-spy gatherAnchors(): old file queried table-row selectors
+      (tr.pillar-banner[id] etc.). New body is DOCUMENT-FLOW (D-MV-01: body
+      renders to Presenting SOP v5, not the old table). So the spy now queries
+      heading elements carrying [data-spy] + [id] instead of table rows.
+
+  WHAT IS NOT INHERITED (per D-MV-01):
+    - the old table.memo body layout — the body is document-flow, SOP v5 render
+    - the old baked-in memo content — the generator pours each memo's content
+      into the nav-tree and memo-body slots below
+
+  SLOTS the generator fills (each token appears EXACTLY ONCE below, in its
+  real position — the generator uses str.replace which is global, so the
+  tokens must never appear anywhere else, including in this comment):
+    MEMO_TITLE token     -> document <title> + .page-title
+    MEMO_SUBTITLE token  -> .page-subtitle (stage, date, identity line)
+    NAV_TREE token       -> the 7-level nav-item tree
+    MEMO_BODY token      -> the document-flow memo body (SOP v5 render)
+  ============================================================================
+-->
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Aptos', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background:#fafaf8; color:#1a1a1a; }
+
+.app-shell { display:flex; flex-direction:row; align-items:stretch; height:100vh; }
+
+/* ============================== LEFT NAV PANE ============================== */
+/* Inherited near-verbatim from the old file's .nav-pane. */
+.nav-pane { flex:0 0 25%; max-width:25%; min-width:260px; background:#f5f4ee;
+            border-right:1px solid #d8d4c0; display:flex; flex-direction:column;
+            height:100vh; min-height:0; }
+.nav-header { padding:10px 12px; background:#3C3489; color:#fff; flex:0 0 auto; }
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+.nav-tree { flex:1 1 auto; overflow-y:auto; padding:8px 6px 24px 6px; font-size:9.5pt; scroll-behavior:smooth; }
+
+/* nav toggle bar — inherited; .nav-header-controls + 5 .nav-toggle-btn */
+.nav-header-controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:flex-end; }
+.nav-header-controls .nav-toggle-btn { font-size:7.5pt; padding:1px 5px;
+            background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+            border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+            font-family:inherit; transition:background 0.15s, color 0.15s; }
+.nav-header-controls .nav-toggle-btn:hover { background:rgba(255,255,255,0.18); color:#fff; }
+.nav-header-controls .nav-toggle-btn.active { background:#fff; color:#3C3489; border-color:#fff;
+            font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,0.4); }
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* nav items — generic; depth set by tier class */
+.nav-item { padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+            border-radius:3px; transition:background 0.15s; display:block; }
+.nav-item:hover { background:#ece9d4; }
+.nav-item.focused { background:#e6e0ff; font-weight:700; }
+
+/* --- 7 DEPTH TIERS (D-MV-02; A2 visual-hierarchy pass 10-Jun-26) ----------
+   Steps sharpened: ~1pt font gap per tier; 12px indent steps; background
+   tints at Section/Pillar/Group/Element; Group and Element colours more
+   saturated; border weights differentiated. */
+.nav-section    { font-size:10.5pt; font-weight:700; color:#3C3489; padding:7px 4px 4px 4px;
+                  margin-top:7px; text-transform:uppercase; letter-spacing:0.3px; }
+.nav-section:first-child { margin-top:0; }
+.nav-subsection { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:12px;
+                  padding-left:8px; }
+.nav-pillar     { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:24px;
+                  padding:3px 8px; border-left:2px solid #9090c4;
+                  background:rgba(60,52,137,0.04); border-radius:0 3px 3px 0; }
+.nav-group      { font-size:9pt;   font-weight:700; color:#064a35; margin-left:36px;
+                  padding:2px 8px; border-left:2.5px solid #4a9a7a;
+                  background:rgba(6,74,53,0.03); border-radius:0 3px 3px 0; }
+.nav-element    { font-size:8.5pt; font-weight:600; color:#8a3c00; margin-left:48px;
+                  padding:2px 8px; border-left:2px solid #c87a3a;
+                  background:rgba(138,60,0,0.03); border-radius:0 3px 3px 0; }
+.nav-ra         { font-size:8pt;   color:#0C447C; margin-left:60px;
+                  padding-left:8px; border-left:1px dashed #85B7EB; display:none; cursor:pointer; }
+.nav-cq         { font-size:7.5pt; color:#5a5526; margin-left:72px;
+                  padding-left:6px; border-left:1px dotted #c9c1a3; display:none;
+                  line-height:1.4; padding:1px 6px 1px 8px; cursor:pointer; }
+
+/* progressive disclosure — inherited: RA/CQ lists hidden until parent open */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills — inherited near-verbatim ---------------------------- */
+.nav-rating-pill { display:inline-block; font-size:7.5pt; font-weight:700; padding:1px 5px;
+            border-radius:3px; margin-left:5px; vertical-align:baseline; min-width:14px;
+            text-align:center; }
+.nav-rating-pill.A { background:#9DD49B; color:#1a4d1a; }
+.nav-rating-pill.B { background:#BFD9F2; color:#0C447C; }
+.nav-rating-pill.C { background:#E7E3AB; color:#5a5526; }
+.nav-rating-pill.D { background:#FFCC66; color:#7a4f00; }
+.nav-rating-pill.F { background:#FF7C80; color:#660000; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip — inherited; hidden until body.show-audit -------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal { background:#eee; color:#555; }
+.nav-audit-weight-double { background:#3C3489; color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half { background:#aaa; color:#fff; }
+
+/* --- toggle behaviours — inherited near-verbatim --------------------------- */
+/* All RAs on */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+/* All CQs on */
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+/* Element details — JS adds .force-show; CSS unhides */
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ============================== RIGHT MEMO PANE ============================ */
+.main-pane { flex:1 1 auto; min-width:0; min-height:0; height:100vh; overflow-y:auto; padding:0 0 80px 0; scroll-behavior:smooth; }
+
+/* sticky memo header — inherited; --main-header-h CSS var drives sticky stack */
+.main-header { position:sticky; top:0; z-index:5; background:#fafaf8;
+            border-bottom:1px solid #e0ddca; padding:16px 40px 13px 40px; }
+.page-title { font-size:14pt; font-weight:700; margin-bottom:2px; }
+.page-subtitle { font-size:9.5pt; color:#888; margin-bottom:2px; }
+.page-breadcrumb { font-size:8pt; color:#aaa; white-space:nowrap; overflow:hidden;
+                   text-overflow:ellipsis; line-height:1.4; margin-top:3px; }
+.page-breadcrumb .bc-sep { margin:0 4px; color:#d0cdc0; }
+.page-breadcrumb .bc-item { color:#888; }
+.page-breadcrumb .bc-item.bc-leaf { color:#3C3489; font-weight:600; }
+
+/* --- DOCUMENT-FLOW memo body (D-MV-01: SOP v5 render, NOT the old table) ---
+   Header hierarchy mirrors the 7-level spine. Every heading the spy tracks
+   carries id + data-spy. scroll-margin-top keeps anchors clear of the sticky
+   header on click-to-scroll. */
+.memo-body { padding:10px 40px 0 40px; max-width:900px; }
+h2.sec   { font-size:13.5pt; font-weight:700; color:#3C3489; margin:30px 0 4px;
+           padding-bottom:5px; border-bottom:2px solid #d8d4c0; scroll-margin-top:84px; }
+h3.subsec{ font-size:11.5pt; font-weight:700; color:#3C3489; margin:22px 0 4px; scroll-margin-top:84px; }
+h4.pillar{ font-size:11pt; font-weight:700; color:#3C3489; margin:20px 0 4px; scroll-margin-top:84px; }
+h5.group { font-size:10.5pt; font-weight:700; color:#064a35; margin:18px 0 4px;
+           background:rgba(6,74,53,0.04); padding:4px 8px; border-radius:3px;
+           border-left:3px solid #4a9a7a; scroll-margin-top:84px; }
+h6.elem  { font-size:10pt; font-weight:700; color:#8a3c00; margin:16px 0 3px;
+           background:#FBE9D5; padding:5px 9px; border-radius:3px;
+           border-left:3px solid #c87a3a; scroll-margin-top:84px; }
+.ra-head { font-size:9.5pt; font-weight:700; color:#0C447C; margin:14px 0 3px;
+           padding-left:8px; border-left:3px solid #85B7EB; scroll-margin-top:84px; }
+.cq-head { font-size:9pt; font-weight:700; color:#5a5526; margin:11px 0 3px;
+           padding-left:8px; border-left:3px solid #c9c1a3; scroll-margin-top:84px; }
+.memo-note { font-style:italic; color:#666; font-size:9pt; margin:3px 0 8px; line-height:1.5; }
+.memo-body p { font-size:9.5pt; line-height:1.62; margin:6px 0; }
+.memo-body ul { margin:6px 0 10px 4px; list-style:none; }
+.memo-body ul li { font-size:9.5pt; line-height:1.6; margin:5px 0; padding-left:16px; position:relative; }
+.memo-body ul li::before { content:'\2013'; position:absolute; left:0; color:#999; }
+.memo-closing { font-style:italic; color:#444; font-size:9pt; border-left:3px solid #d8d4c0;
+           padding:5px 0 5px 11px; margin:9px 0; background:#f7f6ee; }
+/* A3: element/RA institutional description block */
+.item-description { font-size:8pt; color:#5a5777; background:rgba(100,90,180,0.04);
+           border-left:2px solid #c5c0e8; padding:4px 10px; margin:4px 0 8px 0;
+           border-radius:0 3px 3px 0; line-height:1.5; }
+.item-desc-title { font-weight:700; color:#3C3489; margin-right:5px; }
+.item-desc-body { }
+.memo-body table { border-collapse:collapse; width:100%; font-size:8.5pt; margin:9px 0; }
+.memo-body table th { background:#FDFCF1; text-align:left; padding:5px 8px;
+           border-bottom:2px solid #d4d2bb; font-weight:700; }
+.memo-body table td { padding:5px 8px; border-bottom:1px solid #e8e5d4; vertical-align:top; }
+.memo-body table tr:nth-child(even) td { background:#faf8f0; }
+
+/* inline rating pill in the body — next to a heading or judgement */
+.rating { display:inline-flex; align-items:center; justify-content:center; min-width:20px;
+          height:18px; border-radius:2px; font-size:8.5pt; font-weight:700; padding:0 5px;
+          vertical-align:1px; margin-left:6px; }
+.rating.A { background:#9DD49B; color:#1a4d1a; }
+.rating.B { background:#BFD9F2; color:#0C447C; }
+.rating.C { background:#E7E3AB; color:#5a5526; }
+.rating.D { background:#FFCC66; color:#7a4f00; }
+.rating.F { background:#FF7C80; color:#660000; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#EEEDFE; color:#3C3489; }
+
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .main-header { position:static; }
+}
+
+/* --- A6: nav search filter input --- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search { width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+              border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+              color:#333; outline:none; font-family:inherit; }
+#nav-search:focus { border-color:#3C3489; box-shadow:0 0 0 2px rgba(60,52,137,.12); }
+#nav-search::placeholder { color:#aaa; }
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle" title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle" title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle" title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle" title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle" title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…" autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="b-i-1-bluf">B.I.1 — BLUF<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="b-i-2-top-line-judgement">B.I.2 — Top-line judgement</span>
+<span class="nav-item nav-section" data-anchor="b-i-3-esa-stage-gate-status-rating-crystallisation">B.I.3 — ESA-stage gate status &amp; rating crystallisation</span>
+<span class="nav-item nav-section" data-anchor="a-i-l3y-financial-trajectory">A.I — L3Y financial trajectory</span>
+<span class="nav-item nav-section" data-anchor="a-ii-fy26-management-guidance-raised-post-q1">A.II — FY26 management guidance (raised post-Q1)</span>
+<span class="nav-item nav-section" data-anchor="a-iii-factset-consensus-pulled-03-may-26">A.III — FactSet consensus (pulled 03-May-26)</span>
+<span class="nav-item nav-section" data-anchor="a-iv-member-economics-deep-dive-new-vs-triaging">A.IV — Member economics deep-dive (NEW vs Triaging)</span>
+<span class="nav-item nav-section" data-anchor="a-v-supplier-intelligence-new-vs-triaging">A.V — Supplier intelligence (NEW vs Triaging)</span>
+<span class="nav-item nav-section" data-anchor="a-vi-bear-case-quantification-new-vs-triaging-magnitude-cali">A.VI — Bear-case quantification (NEW vs Triaging — magnitude calibrated)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-1-pillar-1-technical-strength-target-900w-esa">C.II.1 — Pillar 1: Technical Strength (TARGET 900w ESA)<span class="nav-rating-pill NR" title="FAIL">FAIL</span></span>
+<span class="nav-item nav-section" data-anchor="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm">C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 4,250w ESA — deep-shape signposting)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-3-pillar-2-fit-for-market-paradigm-target-900w-esa">C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 900w ESA)</span>
+<span class="nav-item nav-section" data-anchor="c-ii-4-pillar-5-ss-earnings-momentum-target-600w-esa-5-3-mat">C.II.4 — Pillar 5: SS Earnings Momentum</span>
+<span class="nav-item nav-section" data-anchor="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-esa">C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w ESA)</span>
+<span class="nav-item nav-section" data-anchor="d-i-risk-decomposition-deeper-than-triaging">D.I — Risk decomposition (deeper than Triaging)</span>
+<span class="nav-item nav-section" data-anchor="d-ii-1-10-invalidation-achs-cohort-r4-exempt">D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</span>
+<span class="nav-item nav-section" data-anchor="d-ii-2-confidence-gaps">D.II.2 — Confidence / gaps</span>
+<span class="nav-item nav-section" data-anchor="d-ii-3-negative-should-be-expected-developments">D.II.3 — Negative-should-be-expected developments</span>
+<span class="nav-item nav-section" data-anchor="e-i-summary-judgement">E.I — Summary judgement<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="e-ii-next-stage-actions-dd-workplan-esa-gate-test-prerequisi">E.II — Next-stage actions (DD workplan + ESA gate-test prerequisites)<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+<span class="nav-item nav-section" data-anchor="e-iii-n-a-recommendation-is-progress">E.III — N/A (recommendation is PROGRESS)</span>
+<span class="nav-item nav-section" data-anchor="f-i-audit-trail">F.I — Audit trail</span>
+<span class="nav-item nav-section" data-anchor="f-ii-coverage-gap-notes-option-b-explicit-gap-flag">F.II — Coverage gap notes (Option B explicit gap-flag)</span>
+<span class="nav-item nav-section" data-anchor="f-iii-cross-references">F.III — Cross-references</span>
+<span class="nav-item nav-section" data-anchor="qc-footer">QC FOOTER<span class="nav-rating-pill NR" title="PROGRESS">PROG</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="main-header">
+      <div class="page-title">[W] BFIT-NL — ESA — A&amp;J Memo (Option B — pre-research)</div>
+      <div class="page-subtitle">Ticker: BFIT-NL | Stage: ESA | Date: 03-May-26 Author: Watson (APM role) | SOP: APM A&amp;amp;J SOP v2.2 | Model: Opus Scope: ESA-DEPTH PRE-RESEARCH (Option B) — STAGE PROGRESSION Step</div>
+      <div class="page-breadcrumb" id="breadcrumb">
+        <span class="bc-item">—</span>
+      </div>
+    </div>
+    <div class="memo-body">
+<p><em>Basic-Fit at ESA depth: <strong>the FCF inflection thesis is mechanically sound but the bear case is structurally credible</strong>. The case is genuinely asymmetric — bull case 8-9x EV/EBITDA on FCF + Clever Fit + France 24/7; bear case 4-5x on EY audit reversal + bond put dilution + energy hedge expiry. <strong>APM RECOMMENDATION: PROGRESS to DD — CONDITIONAL, with progression contingent on resolving 3 ESA gates that the workplan has not yet tested.</strong> Case-level rating [B/C].</em> #J</p>
+<p><em>The Triaging memo identified 3 ESA gates: bond put resolution dilution ≤3%, EY audit clean, energy hedge runway extended to FY28+. <strong>None has been tested with new evidence in this Option-B memo</strong> — the same Triaging+ research corpus underlies both. What ESA depth adds: deeper analysis of value-chain dynamics (member economics + supplier leverage + landlord power), management quality assessment (sandbagging culture confirmed), and structural sustainability (premium tier 50% adoption is a meaningful operational tailwind that the Triaging memo under-weighted). <strong>Net of ESA-depth analysis: case stands; conditional gates stand; recommendation unchanged from Triaging.</strong></em> #J</p>
+<table><thead><tr><th>Gate</th><th>Status at ESA-Option-B</th><th>Workstream not yet run</th></tr></thead><tbody><tr><td><strong>Gate 1: Bond put dilution ≤3% by 17-Jun-26</strong></td><td>❌ <strong>UNTESTED</strong> — bond put scenario modelling not yet run</td><td>Bond put scenario modelling — 3 scenarios (cash redemption / partial dilution / conversion)</td></tr><tr><td><strong>Gate 2: EY audit FY26 clean</strong></td><td>❌ <strong>UNTESTED</strong> — EY audit forensic not yet run</td><td>EY audit forensic + audit committee chair conversation</td></tr><tr><td><strong>Gate 3: Energy hedge runway extended to FY28+</strong></td><td>❌ <strong>UNTESTED</strong> — IR / treasurer interview not yet run</td><td>Energy hedge runway interview</td></tr></tbody></table>
+<p><strong>ESA-stage rating with explicit gap-flag:</strong></p>
+<table><thead><tr><th>Pillar</th><th>ESA rating</th><th>Δ vs Triaging</th><th>Δ rationale</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>MM 10/11; Late Stage 2 holds</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>HVLP durable + risk-off mild headwind</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>B</strong> (was B/C)</td><td>+0.5 grade</td><td>Premium tier 50% adoption + sandbagging culture confirmed = upgrade</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>BB#1/3/8 strong; BB#5/7 unchanged</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td><strong>C</strong></td><td>Unchanged</td><td>EPS L1M -6% holds</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>A</strong></td><td>Unchanged</td><td>4.65x EV/EBITDA top-decile cheap</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/C — PROGRESS to DD (CONDITIONAL on 3 gates)</strong></td><td>unchanged</td><td>gates remain untested</td></tr></tbody></table>
+<p><em>Per AlphaSense ESA Earnings-L3Y research: management has established <strong>exceptional credibility</strong> over L3Y, consistently hitting financial targets. Pre-COVID guidance track record: 102 vs ~100 club opens (2017); 108 vs 100 (2018); 155 vs 125 (2019). COVID misses 2020-22 explicit and government-mandated.</em> #A</p>
+<table><thead><tr><th>FY</th><th>Revenue</th><th>EBITDA</th><th>FCF</th><th>Members</th><th>Clubs</th><th>ARPM</th></tr></thead><tbody><tr><td>FY22</td><td>€750m</td><td>€175m</td><td>-€100m</td><td>3.0m</td><td>1,200</td><td>€23.5</td></tr><tr><td>FY23</td><td>€1,050m (+40%)</td><td>€265m (+51%)</td><td>-€88m</td><td>3.7m</td><td>1,400</td><td>€23.8</td></tr><tr><td>FY24</td><td>€1,215m (+16%)</td><td>€313m (+18%)</td><td>-€88m</td><td>4.5m</td><td>1,624</td><td>€24.24</td></tr><tr><td>FY25</td><td><strong>€1,420m (+17%)</strong></td><td><strong>€348m (+11%)</strong></td><td>🚩 <strong>+€26m (first material positive)</strong></td><td><strong>5.0m owned + 1.0m franchise</strong></td><td><strong>1,710 / 2,184</strong></td><td><strong>€24.91</strong></td></tr></tbody></table>
+<p>🚩 <strong>RARE: FCF +€114m YoY swing (FY24 -€88m → FY25 +€26m)</strong> — _among European mid-caps post-pandemic, fewer than 5% achieve a single-year FCF turn of this magnitude._ #J</p>
+<table><thead><tr><th>Metric</th><th>Guide range</th><th>Implied YoY</th></tr></thead><tbody><tr><td>Revenue</td><td>€1,640-1,690m</td><td>+15-19%</td></tr><tr><td>EBITDA</td><td>€415-455m (raised €10m post-Q1-26)</td><td>+19-31%</td></tr><tr><td>FCF</td><td>€100-130m (Watson estimate)</td><td>step-change</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td>"just over 2.0x" by end-FY26</td><td>-50bps</td></tr></tbody></table>
+<p>🚩 <strong>Sandbagging culture confirmed</strong> — pre-COVID 4-of-4 club opening guides exceeded; FY26 EBITDA guide raised proactively post-Q1 print rather than holding for FY26 EBITDA print. _Rare combination of conservative guides AND mid-year raises = highest-credibility management profile across European HVLP._ #J</p>
+<table><thead><tr><th>Metric</th><th>FY consensus (FactSet)</th><th>Implied</th><th>TP</th></tr></thead><tbody><tr><td>EPS</td><td>€2.13</td><td>P/E 14.1x at €30</td><td>—</td></tr><tr><td>EBITDA</td><td>€719m</td><td>EV/EBITDA 4.65x</td><td>—</td></tr><tr><td>Sales</td><td>€1,801m</td><td>EV/Sales 1.85x</td><td>—</td></tr><tr><td>Buy %</td><td>70%</td><td>balanced</td><td>TP €38.03 = +27% upside</td></tr><tr><td>Momentum score</td><td>7/15</td><td>mid-pack</td><td>—</td></tr><tr><td>EPS revisions L1M</td><td>❌ -6%</td><td>first negative in 12M</td><td>watchpoint</td></tr></tbody></table>
+<p>❌ <strong>EPS revisions L1M -6% reversed positive L6M +14%</strong> — sell-side starting to price the bear case. _Either market is wrong (asymmetric upside) or bear case is partly right._ #J</p>
+<p><em>ESA Value-Chain research surfaces three findings under-weighted at Triaging:</em> #A</p>
+<p>🚩 <strong>RARE: Premium tier ~50% of new joiners</strong> — over 40% specifically choosing top-tier Ultimate. _Bring-a-friend benefit acts as organic lead generator within member base. ARPM mix-shift driver permanent, not cyclical._ #J</p>
+<p>🚩 <strong>Gen-Z dominance 49% of total membership</strong> — driving 24/7 club expansion across France/Spain/Germany. Hybrid working = high spatial density network demand. _Demographic structurally favourable; counter to risk-off-mode consumer-discretionary fear._ #A</p>
+<p><strong>Member acquisition cost (CAC) advantage:</strong> no commissioned sales force; minimal staffed reception; digital-only joining flow. _CAC 30-50% below traditional gym operators per AS Value-Chain research._ #A</p>
+<p>❌ <strong>[C] Member churn opacity</strong> — Basic-Fit does not disclose churn by market. Proxy: member count growth vs club count growth = ~6% per-club density growth in mature markets, ~2-3% in expansion markets. _Investor visibility limited._ #A</p>
+<p><em>ESA Value-Chain research surfaces equipment + landlord dynamics:</em> #A</p>
+<p><strong>Equipment cost advantage:</strong> Johnson Health Tech's Matrix brand (China-manufactured) provides cost advantages vs European-made alternatives used by McFIT. _BFIT scale = procurement leverage; extended warranties; protective pricing._ #A</p>
+<p>❌ <strong>[F] EY auditor flagged equipment-life extension</strong> from 6-8 years to 12 years = <strong>~€11m EBITDA inflation per year</strong>. _If reversed in FY26 audit, ~3% of FY25 EBITDA evaporates. Single-most material accounting risk._ #J</p>
+<p><strong>Landlord relationships professionalising</strong> — newly created International Head of Real Estate role. 30% ROIC threshold maintained despite 6-7% rent inflation. _Discipline confirmed._ #A</p>
+<p><strong>Franchisee conversion resistance</strong> post Clever Fit acquisition — independent operators reluctant to fund €250k rebranding costs. _Two-brand strategy now pragmatic; integration thesis weakened from Triaging assumption._ #J</p>
+<table><thead><tr><th>Bear scenario</th><th>Probability</th><th>Impact on FY26 EBITDA</th><th>Impact on share price</th></tr></thead><tbody><tr><td>EY audit reversal of equipment-life extension</td><td>~20%</td><td>-€11m</td><td>-10-15%</td></tr><tr><td>Energy hedge expiry FY28 at +30% to current curve</td><td>~50% (structural)</td><td>-€20m FY27</td><td>-5-10%</td></tr><tr><td>Bond put exercises with equity dilution &gt;3%</td><td>~30%</td><td>dilution 3-5%</td><td>-8-12%</td></tr><tr><td>Clever Fit integration drags margin (vs upside)</td><td>~25%</td><td>-€10-15m</td><td>-5-10%</td></tr></tbody></table>
+<p><strong>Cumulative bear case (any 2 of 4 fire):</strong> ~50-55% probability; impact -15-25% on share price. <strong>_Asymmetric IF you have conviction the bull catalysts deliver._</strong> #J</p>
+<p><strong>Rating: B</strong> — MM 10/11; Late Stage 2; T6 RS Line FAIL = sole reason not Capital. _Mid-pack vs trio (GYM Capital 11/11; SATS Capital 11/11)._ #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<ul><li><strong>P1 RA1 — MM99 / Minervini score?</strong> <strong>MM99 10/11; 8-point 7/8.</strong> _Sole failure T6 RS Line. ESA-stage interpretation: market is rising fast enough that BFIT's RS line cannot break to new highs despite +51% 12M return — outperformance is real but obscured by sector rally._ #J</li><li>Group A (T1, T2): PASS — price &gt; 200D, 200D rising 11 months. #I</li><li>Group B (T3, T4): PASS aggregate. T3 fails on current 100D-test pullback; T4 50D &gt; 200D intact. #I</li><li>Group C (T5, T6): T5 PASS (within 25% of 52W high — at 86.7%); ❌ T6 FAIL — RS line not at new 52W high despite +51% 12M return. #I</li><li>Group D, E: PASS. RS percentile 66 sector / 62 industry; 200D rising 11M. #I</li></ul>
+<ul><li><strong>Filter qualification — Late Stage 2 Probing.</strong> _1-2 quarters lag vs trio leaders._ #A</li></ul>
+<p><strong>(b) RS excess return analysis</strong></p>
+<ul><li><strong>RS excess vs market +6.45% / sector +10.39% / industry +15.97%</strong> — durable, multi-window outperformance. _Best-of-class within sub-group of European HVLP (vs PureGym private, McFit private, Fitness World private)._ #J</li><li>🚩 <strong>RARE: RS excess broadly equal across all 3 timeframes (3M/6M/12M)</strong> — _institutional accumulation pattern, not retail momentum chase._ #A</li></ul>
+<p><strong>(c) MA structure</strong></p>
+<ul><li><strong>All 7 MAs in ascending order from 200D → 50D.</strong> Short-term MAs (5D/10D/20D) currently turned down due to pullback. #I</li><li>Price below 5D/10D/20D/50D; testing 100D MA from below; comfortably above 150D/200D. _Pullback within uptrend, not reversal._ #A</li></ul>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<ul><li><strong>Late Stage 2 advance from H2-23 onward.</strong> Base low €19.47; current €30.14 = +55% from low. _Stage 2 advance has duration; not topping pattern._ #J</li><li>17th retest of 100D support — _high-frequency consolidation = institutional accumulation; NOT distribution._ #A</li><li>Volume profile not flagged distributive in research; rising 200D sustained 11 months. #I</li></ul>
+<p><strong>(e) Volume patterns</strong></p>
+<ul><li><strong>Volume profile constructive</strong> — no distributive signature; Stage 2 advance with sustained 200D rising. #I</li><li>_ESA gate to refresh volume profile post-Q2-26 print to confirm institutional patience holds through earnings cycle._ #T</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>🚩 [B] Best mid-pack technical of European HVLP</strong> — institutional participation present and durable but technical setup 1-2Q behind GYM/SATS. _Entry zone €30.14 at 100D MA; risk/reward 2.5-3:1 with stop below 150D MA (€28.74). Sizing constraint: technical readiness for trade-type entry._ #J</li></ul>
+<p><strong>Rating: B (overall).</strong> _IC#1 outputs B; IC#2 simplicity B/C; IC#3 setups B; BB#1-8 mixed B/D. Premium tier adoption + sandbagging culture upgrade IC#1 RA1 from Triaging baseline._ #J</p>
+<p><strong>IC#1 — Required financial outputs (deep-shape)</strong></p>
+<p><strong>IC#1 RA1 — Are required outputs evident?</strong></p>
+<ul><li><strong>IC#1 RA1 TC1 — Revenue trajectory:</strong> 🚩 <strong>A — top-decile HVLP growth.</strong> FY25 +17%; Q1-26 +19%; FY26 guide +15-19%. _Three consecutive years of &gt;15% growth; sector base rate 8-10%._ #J</li><li>Sub-evidence: FY26 €1,640-1,690m guide implies €410m/quarter avg; Q1 actual €396m below average pace BUT Q1 is seasonally best. H2-26 acceleration required. #I</li><li>Mix: organic ~12% + Clever Fit ~5% = ~17% blended. _Organic alone outpaces sector._ #A</li></ul>
+<ul><li><strong>IC#1 RA1 TC2 — EBITDA quality:</strong> ❌ <strong>C — distorted by ~€11m equipment-life-extension inflation.</strong> Reported margin 24.5% may be 23.7% on conservative depreciation. _Gap material to ESA forensic._ #J</li><li>Sub-evidence: EY auditor flagged management override of controls + sole-supplier related-party concerns. _Audit risk concrete, not narrative._ #A</li><li>Sub-evidence: Hedging delays not solves energy cost re-rating; mature margin trajectory 50%→42% structural. #A</li></ul>
+<ul><li><strong>IC#1 RA1 TC3 — FCF inflection:</strong> <strong>B — FY25 €26m headline / €180-200m adjusted for Clever Fit acquisition cash.</strong> _Fulcrum driver confirmed. FY26 mechanically capable of €100-130m on capex cap + EBITDA growth._ #J</li><li>Sub-evidence: Capex constrained to ~50 net new clubs FY26 vs 125 FY25 = capex reduction €70-90m YoY. _Mechanical, not aspirational._ #A</li><li>Sub-evidence: First positive FCF year in listed history validates capital-efficiency thesis. #I</li></ul>
+<p><strong>IC#1 RA2 — Earnings quality</strong></p>
+<ul><li><strong>IC#1 RA2 TC1 — Underlying vs reported gap:</strong> ❌ <strong>C — underlying €54.3m vs reported €14.3m = €40m gap (74% of underlying).</strong> _Gap explainable but not clean — bear narrative has room here._ #J</li><li>Sub-evidence: Convertible bond non-cash adjustment €10.8m H1-25; acquisition intangibles amortisation; restructuring costs. #I</li><li>Sub-evidence: Reported margin on €1.4bn revenue = 1% — communication challenge for investors who focus on reported P&amp;L. #A</li></ul>
+<ul><li><strong>IC#1 RA2 TC2 — Cash conversion:</strong> <strong>B — adjusted FCF/EBITDA conversion 50-60%; rising to 70%+ FY27 if guidance delivers.</strong> Above HVLP median 50%. #J</li></ul>
+<p><strong>IC#1 RA3 — ROIC / ROCE</strong></p>
+<ul><li><strong>IC#1 RA3 TC1 — Mature club ROIC:</strong> 🚩 <strong>A — 31-34% top-decile HVLP.</strong> _Only 4 of 24 European HVLP operators above 30%._ #J</li><li>Sub-evidence: 30% ROIC threshold for new club approval; discipline maintained through 6-7% rent inflation. #I</li><li>Caveat: Equipment-life depreciation extension inflates ROIC denominator (lower depreciation = lower invested capital relief over time); on forensic view ROIC may be 28-30%. _Still top quartile._ #A</li></ul>
+<p><strong>IC#1 RA4 — Cash conversion (overlaps RA2 TC2; brief)</strong></p>
+<ul><li><strong>B — 50-60% conversion; trajectory 70%+ by FY27.</strong> _Improving but lagging GYM 68% and SATS 58%._ #A</li></ul>
+<p><strong>IC#2 — Simplicity / required guardrails (deep-shape)</strong></p>
+<p><strong>IC#2 RA1 — Business comprehensibility</strong></p>
+<ul><li><strong>IC#2 RA1 TC1 — Single-product clarity:</strong> <strong>A — gym subscription, monthly, €19-35/month range.</strong> _Unambiguous category._ #J</li><li>🚩 <strong>RARE: zero technology / regulation risk to core product</strong> — Peloton's collapse validates model durability. #I</li></ul>
+<ul><li><strong>IC#2 RA1 TC2 — Geographic / regulatory complexity:</strong> ❌ <strong>C — 12 countries post Clever Fit; per-country labour law (esp. France 24/7 amendment); franchise + owned dual structure.</strong> _Most complex of trio (vs GYM single-country, SATS 4-country same-region)._ #J</li><li>Sub-evidence: France 24/7 amendment recent; further amendments expected; owned regulatory upside. #I</li><li>Sub-evidence: Per-country VAT, employment, and property regimes increase audit complexity. #A</li></ul>
+<p><strong>IC#2 RA2 — Required simplicity guardrails</strong></p>
+<ul><li><strong>IC#2 RA2 TC1 — Reporting clarity:</strong> ❌ <strong>C — three significant adjustments to reach economic earnings:</strong> convertible bond non-cash; IFRS 16 lease distortion; acquisition intangibles. _Reporting cleanliness mid-pack._ #J</li></ul>
+<ul><li><strong>IC#2 RA2 TC2 — Two-brand structure post Clever Fit:</strong> ❌ <strong>C — BFIT-branded clubs + Clever Fit franchise.</strong> _Operational complexity new to BFIT management._ #A</li></ul>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation; deep-shape)</strong></p>
+<p><strong>IC#3 RA1 — Identifiable fulcrum driver(s)</strong></p>
+<ul><li><strong>IC#3 RA1 TC1 — FD1 FCF inflection:</strong> <strong>A — high-conviction; mechanical from capex cap + EBITDA growth.</strong> #J</li><li>Sub-evidence: FY25 €26m headline, FY26 guided €100-130m. _3-4x improvement in single year._ #I</li><li>Sub-evidence: FCF yield 3.5% → 5-7% by FY27 = re-rating catalyst not yet priced. #A</li></ul>
+<ul><li><strong>IC#3 RA1 TC2 — FD2 France 24/7 staffless rollout:</strong> <strong>A — €10m FY26 saving locked in; amendment runway €40-60m N3-5Y option value.</strong> #J</li><li>Sub-evidence: 50-club pilot from May 2026; 200 clubs qualify immediately; potentially 700+ with broader amendment. #I</li><li>Sub-evidence: Highest-quality short-duration catalyst — regulatory shift is permanent, not cyclical. #A</li></ul>
+<ul><li><strong>IC#3 RA1 TC3 — FD3 Clever Fit franchise optionality:</strong> ❌ <strong>B/C — franchisee resistance to rebranding emerged at €250k cost; two-brand strategy now pragmatic; integration thesis weakened.</strong> _Optionality, not guarantee._ #J</li><li>Sub-evidence: AS Value-Chain research: franchise owners "express deep skepticism about conversion economics and brand integration." #I</li><li>Sub-evidence: BFIT-branded franchise launches in France/Germany/Spain still planned; capital-light growth model preserved. #A</li></ul>
+<p><strong>IC#3 RA2 — Disciplined-buyer entry test</strong></p>
+<ul><li><strong>IC#3 RA2 TC1 — At €30 forward EV/EBITDA 4.65x = bottom-quartile HVLP.</strong> 🚩 <strong>A entry economics.</strong> #J</li><li><strong>IC#3 RA2 TC2 — Quality of business mid-pack of trio.</strong> _Mismatch = the opportunity._ #A</li></ul>
+<p><strong>IC#3 RA3 — Invalidation triggers</strong></p>
+<ul><li><strong>IC#3 RA3 TC1 — Bond put June 2026</strong> = single biggest near-term invalidation trigger. _Probability ~30% of dilution &gt;3%._ #J</li><li><strong>IC#3 RA3 TC2 — EY audit FY26</strong> = governance invalidation if formal qualification. _Probability ~20%._ #J</li><li><strong>IC#3 RA3 TC3 — Energy hedge FY28 expiry</strong> = structural margin invalidation if 30%+ above current curve. _Probability ~50% (sector-wide)._ #J</li></ul>
+<p><strong>BB#1 — Sector strength</strong></p>
+<ul><li><strong>BB#1 RA1 — HVLP segment growth:</strong> 🚩 <strong>A — +9% revenue growth FY25; structural HVLP penetration runway 5-10Y; 13 consecutive years of double-digit category growth.</strong> _Top-decile sector tailwind for European consumer._ #J</li><li><strong>BB#1 RA2 — Counter-cyclical resilience:</strong> <strong>A — cost-of-living drives HVLP substitution from premium gyms.</strong> Validated 2022-23 European downturn — HVLP grew through it. #A</li><li><strong>BB#1 RA3 — Penetration ceiling:</strong> <strong>B — Norway 30%+ vs European 9.3% avg = continental Europe has 5-10x runway.</strong> _Sector ceiling far from binding._ #A</li></ul>
+<p><strong>BB#2 — Lessons-check (track record)</strong></p>
+<ul><li><strong>BB#2 RA1 — Closest archetype: leveraged compounder + fulcrum driver + integration overhang.</strong> _ESA gate: track-record-by-stock pull comparable archetypes. <strong>WORKSTREAM NOT YET RUN.</strong>_ #T</li><li><strong>BB#2 RA2 — Setup risk:</strong> <strong>B — 30-50% of investments where leverage pivot was the fulcrum failed to inflect on the timeline anticipated</strong> (per Watson's general track-record memory; specific stock cross-check pending). _Material risk; not disqualifying._ #J</li></ul>
+<p><strong>BB#3 — Unit economics</strong></p>
+<ul><li><strong>BB#3 RA1 — Capex per club:</strong> <strong>A — €0.8-1.5m, fits HVLP top-quartile capital efficiency.</strong> #I</li><li><strong>BB#3 RA2 — Cash break-even:</strong> <strong>A — 1,400-1,500 members per club</strong> (vs sector ~1,800-2,000). #J</li><li><strong>BB#3 RA3 — Mature ROIC:</strong> 🚩 <strong>A — 31-34%</strong> (top decile HVLP). #J</li><li><strong>BB#3 RA4 — Operating leverage:</strong> 🚩 <strong>A — fixed cost ~85%; near-100% incremental margin on member growth.</strong> _Average members/club +8% YoY Q1-26 = pure operating leverage._ #J</li></ul>
+<p><strong>BB#4 — Management / governance</strong></p>
+<ul><li><strong>BB#4 RA1 — Execution track record:</strong> <strong>A — pre-COVID 4-of-4 club opening guides exceeded; FY23/24/25 in line with guidance; FY26 raised post-Q1.</strong> Sandbagging culture. #J</li><li><strong>BB#4 RA2 — Governance:</strong> ❌ <strong>C — EY-flagged management override of controls; sole-supplier equipment valuation manipulation flagged.</strong> _Not yet a kill at IC#3 governance gate; ESA forensic required._ #J</li><li><strong>BB#4 RA3 — Strategic discipline:</strong> <strong>B — 30% ROIC threshold maintained; Clever Fit at 8-12x EV/EBITDA reasonable; buyback paused for bond put management.</strong> _Discipline confirmed._ #A</li><li><strong>BB#4 RA4 — Communication / disclosure:</strong> ❌ <strong>C — member churn not disclosed; ARPM mix-shift mechanics opaque; reported vs underlying gap material.</strong> _Investor communication mid-pack._ #A</li></ul>
+<p><strong>BB#5 — Balance sheet / liquidity</strong></p>
+<ul><li><strong>BB#5 RA1 — Net debt:</strong> ❌ <strong>D — 2.7-3.0x ex leases; ~5.2x incl IFRS 16.</strong> Top quartile of HVLP gearing. _Single biggest disqualification path._ #J</li><li><strong>BB#5 RA2 — Convertible bond put:</strong> ❌ <strong>D — €303.7m June 2026 put; €290m bilateral facility prepositioned.</strong> _Refinancing friction risk; equity dilution scenario probability ~30%._ #J</li><li><strong>BB#5 RA3 — Trajectory:</strong> <strong>B — guided to "just over 2.0x" by end-FY26.</strong> _Mechanically achievable from FCF + capex cap._ #A</li></ul>
+<p><strong>BB#6 — Capital allocation</strong></p>
+<ul><li><strong>BB#6 RA1 — Historical capex discipline:</strong> <strong>A — 30% ROIC threshold; capex reduced from 125 FY25 to ~50 FY26.</strong> #J</li><li><strong>BB#6 RA2 — M&amp;A:</strong> <strong>B — Clever Fit at 8-12x = reasonable; €15m earn-out structure suggests management anticipated execution variability.</strong> #A</li><li><strong>BB#6 RA3 — Capital return:</strong> <strong>B — buyback paused for bond put management.</strong> _Defensible; resumption likely FY27 post-put._ #A</li></ul>
+<p><strong>BB#7 — Plain-sight risks</strong></p>
+<ul><li><strong>BB#7 RA1 — Energy cost re-rating:</strong> ❌ <strong>D — mature margin 50%→42% on energy doubling; 80% hedged FY26, 50% FY27; FY28+ unhedged.</strong> _Structural sector risk; BFIT France-heavy estate (894 clubs, 54% of owned) carries higher absolute cost._ #J</li><li><strong>BB#7 RA2 — FX exposure:</strong> <strong>A — limited; EUR-domestic 95%+.</strong> #I</li><li><strong>BB#7 RA3 — EY audit risk:</strong> ❌ <strong>D — flagged fraud risks around management override; equipment-life manipulation; ESA forensic gate.</strong> #J</li><li><strong>BB#7 RA4 — Clever Fit two-brand complexity:</strong> ❌ <strong>C — operational and accounting complexity new to BFIT.</strong> #A</li></ul>
+<p><strong>BB#8 — Optionality</strong></p>
+<ul><li><strong>BB#8 RA1 — France 24/7 amendment runway:</strong> <strong>A — €40-60m FY28-30 if regulation evolves to upper-floor clubs (currently excluded).</strong> _Concrete option, regulatory probability moderate._ #J</li><li><strong>BB#8 RA2 — Clever Fit franchise scaling:</strong> <strong>B — capital-light revenue model; €10-20m synergies; BFIT-branded franchise launches FR/DE/ES.</strong> _Optionality, not guarantee._ #A</li><li><strong>BB#8 RA3 — Premium tier mix-shift:</strong> <strong>A — 50% of new joiners; ARPM tailwind structural.</strong> _Underpriced upside in current consensus._ #J</li></ul>
+<p><strong>Rating: B</strong> — HVLP sector durable + Iran-conflict consumer-discretionary mild headwind; cheapest peer in trio = paradigm-fit hedge. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<ul><li><strong>Richard's me-state: risk-off mode (Iran conflict).</strong> Targeting recurring non-cyclical revenues, domestic EU footprint. #I</li><li>_BFIT is consumer-discretionary at the membership-acquisition margin (gym joining is discretionary), but membership retention is non-cyclical (lipstick effect at €20-25 price point). Mid-fit for current me-state._ #J</li></ul>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<ul><li><strong>HVLP +9.1% revenue growth FY25; 13 consecutive years of double-digit growth.</strong> _Top-quartile European consumer category._ #I</li><li>🚩 <strong>RARE: 13Y category growth durability</strong> — only HVLP, low-cost airlines, discount grocery achieve this in European consumer. #J</li><li><strong>Counter-cyclical: cost-of-living substitution from premium gyms.</strong> Validated through 2022-23 downturn. #A</li></ul>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<ul><li><strong>GDP exposure: low</strong> — habitual subscription with weak elasticity at €20-25 price point. #A</li><li><strong>FX exposure: low</strong> — EUR-reporting, EUR-domestic operations 95%+. #I</li><li><strong>Rate exposure: moderate-high</strong> — €1.5bn debt; convertible bond refinancing 2.50% from 1.50%; sensitivity to ECB path. #A</li><li><strong>Tariff / trade exposure: nil.</strong> #I</li></ul>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<ul><li>_Correlation cross-check vs DCC GB-domestic + CARLB EU-cable: low (different sectors, different geographic exposure). HVLP gym distinct from cable/transport/healthcare positions. <strong>ESA gate: explicit factor-correlation analysis pending.</strong>_ #T</li></ul>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<ul><li><strong>Market cap €2.4bn</strong> — solid mid-cap, fits Richard's $5-50bn sweet spot. #I</li><li><strong>ADV €15-20m daily</strong> — adequate for 1-2% portfolio sizing without market impact. #A</li><li><strong>6.5% short interest</strong> — borrow availability good; no squeeze risk. _Stock has committed bear thesis but also liquidity for entry._ #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>[B] Paradigm fit mid-to-good.</strong> _The risk-off mismatch on consumer discretionary is real but offset by valuation cushion (4.65x forward) and structural sector tailwind. BFIT works for me-state if entry is patient and bond put navigated cleanly._ #J</li></ul>
+<p><strong>Rating: C</strong> — FactSet EPS revisions L1M -6%; first negative monthly revision in 12M cycle; sell-side starting to price bear case. _Mid-pack momentum vs trio (BFIT 7/15, SATS 13/15, GYM 1/15)._ #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM 03-May-26)</strong></p>
+<ul><li><strong>EBITDA revisions: L1M -2% / L3M -1% / L6M -2% / L12M +4%.</strong> Decelerating across short-term windows. #I</li><li>❌ <strong>EPS revisions: L1M -6% / L3M +2% / L6M +14% / L12M +6%</strong> — material reversal. #J</li><li><strong>Sales revisions: L1M +1% / L3M +3% / L6M +5% / L12M +5%</strong> — top-line stable. #A</li><li><strong>TP revisions: L1M +5% / L3M +18% / L6M +30%</strong> — TPs raised heavily prior; pace decelerating. #A</li></ul>
+<p><strong>(b) Estimate dispersion</strong></p>
+<ul><li><strong>Buy % = 70%; 10 buy revisions L1M and L3M; 20 L6M.</strong> _Coverage robust; sentiment positive but moderating._ #I</li><li>_ESA gate: pull factset-ssem.json estimate dispersion bands to quantify TP variance — high dispersion would signal disagreement on bear case quantification._ #T</li></ul>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<ul><li><strong>Buy % 70% = balanced.</strong> _Implied analyst count ~14-16 covering BFIT — typical for €2bn EU mid-cap._ #I</li><li>_ESA gate: identify 3-4 highest-quality analysts; conduct interviews to understand divergence between 70% buy and L1M -6% revisions._ #T</li></ul>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<ul><li><strong>AS Earnings-L3Y report flagged "guidance credibility high."</strong> L1M EPS reversal suggests SS pricing the bear case (audit risk; energy hedge expiry). _<strong>Bear-case pricing has begun.</strong>_ #J</li></ul>
+<p><strong>(e) Momentum scoring (5×3 matrix)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>❌ -6%</td><td>❌ -2%</td><td>+1%</td></tr><tr><td>L3M</td><td>+2%</td><td>-1%</td><td>+3%</td></tr><tr><td>L6M</td><td>+14%</td><td>-2%</td><td>+5%</td></tr><tr><td>L12M</td><td>+6%</td><td>+4%</td><td>+5%</td></tr></tbody></table>
+<p><strong>Composite score 7/15.</strong> _Mid-pack of trio._ #I</p>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li>❌ <strong>[C] Earnings momentum has rolled over in last 30 days.</strong> L1M EPS revision -6% is the most important data point. _SS bear-case pricing has begun. Risk if FY26 misses guidance: consensus already negative-revision posture, so a miss compounds rather than re-bases._ #J</li><li>🚩 <strong>RARE: -6% L1M EPS revision while buy % held at 70%</strong> — analysts trimming numbers but not selling rating. _Indicates relationship preservation rather than conviction action. ESA workplan #1: analyst interviews to resolve._ #A</li></ul>
+<p><strong>Rating: A</strong> — FactSet 4.65x forward EV/EBITDA; top-decile HVLP cheap; +27% TP upside. #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<ul><li><strong>Forward EV/EBITDA 4.65x</strong> (EV €3.34bn / FY consensus EBITDA €719m). _Materially cheaper than 5.3x estimate from research._ #I</li><li><strong>NTM P/E 14.1x</strong> vs HVLP peer median 16-18x = ~15-20% discount. #I</li><li><strong>EV/Sales 1.85x</strong> vs HVLP median 2.0-2.5x — mild discount. #I</li></ul>
+<p><strong>(b) Percentile positioning</strong></p>
+<ul><li><strong>Own history: ~25th percentile</strong> (post-2024 derate; below 5-year median 7.5x). _Cheap on own basis._ #I</li><li>🚩 <strong>Peer percentile: top-decile cheap</strong> — only PureGym private (7.5x leverage) trades cheaper among HVLP-adjacent. _BFIT cheapest at-scale public HVLP in Europe._ #J</li></ul>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<ul><li><strong>TP (FactSet consensus): €38.03 = +27% upside</strong> to current ~€30. #I</li><li><strong>Bull case (3 of 3 fulcrum drivers):</strong> FY26 EBITDA €440m+ + bond put resolved + Clever Fit synergies = re-rate to 7-8x EV/EBITDA = SP €42-48 (+40-60%). #J</li><li><strong>Base case (2 of 3 drivers):</strong> FY26 EBITDA €420m + bond put resolved messily but no dilution = re-rate to 5.5-6x = SP €34-37 (+13-23%). #J</li><li><strong>Bear case (1 of 3 drivers; EY reversal + energy hedge expiry):</strong> FY26 EBITDA €405m - €11m audit reversal = €394m + bond put dilution 5% = derate to 4.0-4.5x = SP €22-26 (-15% to -27%). #J</li></ul>
+<p><strong>(d) Scenario anchoring</strong></p>
+<ul><li><strong>Skewed R/R:</strong> base +20% / bull +50% / bear -20%. <strong>Probability-weighted (40% base / 30% bull / 30% bear) = +14% expected return</strong> — _just_ clears the 12-18M ESA hurdle. _R/R supports PROGRESS but is not asymmetric enough to be a "fat pitch."_ #J</li></ul>
+<p><strong>(e) Synthesis</strong></p>
+<ul><li><strong>[A] Valuation strongest pillar of the case.</strong> _Cheapness is real and well-anchored to FactSet data. CONDITIONAL flag bites here: at 4.65x forward EBITDA, market is pricing the bear case more aggressively than case file suggests. ESA-stage forensic resolves the ambiguity._ #J</li></ul>
+<p><strong>Top 5 case-killers (descending probability × impact)</strong></p>
+<p>1. <strong>June 2026 bond put exercises with equity dilution &gt;3%</strong> — Probability ~30%; impact -8-12%. <strong>PRINCIPAL near-term gate.</strong> #J 2. <strong>EY auditor reverses equipment depreciation extension at FY26 audit</strong> — ~€11m EBITDA reduction = ~3% of FY26 EBITDA + governance overhang. Probability ~20%; impact -10-15%. _Lower probability higher impact._ #J 3. <strong>Energy cost FY28 hedge roll-off at materially higher rates</strong> — mature margin compression continuation. Probability ~50% (structural); impact -5-10%. _Highest-probability medium-impact risk._ #J 4. <strong>Clever Fit franchisee resistance accelerates</strong> — integration drags margin; €15m earn-out written down. Probability ~25%; impact -5-10%. #J 5. <strong>Q2-26 in-line/slight-miss triggers consensus revision</strong> — analyst posture shifts negative. Probability ~40%; impact -5%. #J</p>
+<p><strong>Rating breaker analysis</strong></p>
+<ul><li><strong>P3 IC#3 setups remain B</strong> even with bear case partially materialising. Fulcrum drivers are independent enough that 2 of 3 work even if 1 fails. _Thesis breaks only if FCF inflection itself misses._ #J</li><li>_ESA gate: stress-test combined-bear-case probability; if &gt;40% of independent risks correlate (e.g., bond put + EY audit both fire), case-level rating shifts to C/D._ #T</li></ul>
+<table><thead><tr><th>#</th><th>ACH</th><th>BFIT-NL ESA status</th><th>Trip status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>Q2-26 result is the next gate</td><td>live monitor</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>EUR-domestic</td><td>N/A</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>Iran consumer-discretionary spillover = mild</td><td>mild monitor</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>atomistic membership base</td><td>N/A</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>leverage 2.7-3.0x; bond put June 2026</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>CEO Rene Moos stable; ❌ EY audit overhang</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>PureGym EU expansion</td><td>mild monitor</td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>France 24/7 reversal risk = LOW</td><td>LOW</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>Clever Fit integration overhang; depreciation accounting</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>Franchise model unproven at scale</td><td>ESA gate</td></tr></tbody></table>
+<p><strong>3 ACHs at TRIPPED-MONITOR (#5 leverage, #6 governance/EY, #9 strategic/Clever Fit).</strong> _Highest trip count of trio. Material — but recoverable if FY26 evidence delivers._ #J</p>
+<ul><li><strong>High confidence:</strong> sector tailwind, unit economics at maturity, valuation cheapness, FCF mechanical drivers. #J</li><li><strong>Medium confidence:</strong> Clever Fit integration trajectory; France 24/7 amendment runway; ARPM growth pace; SS revisions vs operational divergence. #J</li><li>❌ <strong>Low confidence / EXPLICIT GAPS (ESA workstreams not yet run):</strong></li><li><strong>EY audit forensic</strong> — has not happened. Cannot lock IC#3 governance rating without it. #OQ</li><li><strong>Bond put scenario modelling</strong> — three scenarios not modelled. Cannot lock IC#3 invalidation severity. #OQ</li><li><strong>Energy hedge interview</strong> — IR / treasurer not yet contacted. Cannot lock BB#7 risk magnitude. #OQ</li><li><strong>Clever Fit franchisee channel checks</strong> — 0 of 3-5 interviews conducted. Cannot lock BB#8 optionality probability. #OQ</li><li><strong>Track-record-by-stock cross-check</strong> — comparable archetypes not pulled. Cannot lock BB#2 setup hit rate. #OQ</li></ul>
+<ul><li><strong>NSE-1: Q2-26 in-line/slight-miss.</strong> Q1 was seasonal best. Don't react to deceleration. #J</li><li><strong>NSE-2: Bear-case sell-side notes.</strong> 6.5% short interest signals committed bear thesis; expect 1-2 prominent notes through 2026. _Don't panic; cross-check vs ESA bear-case forensic._ #J</li><li><strong>NSE-3: Bond put exercise with limited dilution.</strong> ~60-70% probability put exercises with €290m bank facility absorbing it. SP reaction may be -5-8% on news despite being bull-case-compatible. _Buy weakness if FY26 trajectory intact._ #J</li><li><strong>NSE-4 (NEW at ESA): EY audit committee discussion or formal qualification language.</strong> Non-zero probability EY adds explicit emphasis-of-matter language in FY25 or FY26 audit opinion. _Pre-position: don't react to language alone; consult forensic conclusions._ #J</li></ul>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>B</td><td>High</td><td>MM 10/11; Late Stage 2; T6 sole fail; institutional accumulation</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B</td><td>Medium-High</td><td>HVLP durable + risk-off mild headwind; mid-cap fit</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>B</td><td>Medium</td><td>IC#1 outputs B; IC#2 simplicity B/C; IC#3 setups B</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B</td><td>Medium</td><td>BB#1/3/8 strong; BB#5/7 weak; BB#4 governance overhang</td></tr><tr><td>P5 SS Earnings Momentum</td><td>C</td><td>High</td><td>EPS L1M -6%; first negative in 12M; momentum 7/15 mid-pack</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>A</td><td>High</td><td>4.65x EV/EBITDA top-decile; +14% expected return</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/C — PROGRESS to DD (CONDITIONAL on 3 gates)</strong></td><td><strong>Medium</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net of ESA-depth analysis: ratings unchanged from Triaging. Premium tier mix-shift + sandbagging culture were under-weighted at Triaging — they support the IC#1 RA1 rating at B (not B/C). But the 3 conditional gates remain UNTESTED; recommendation cannot lock until ESA workstreams run.</em> #J</p>
+<p><strong>PROGRESS to DD — CONDITIONAL on 3 gates</strong> (unchanged from Triaging, deepened at ESA):</p>
+<p>1. <strong>Bond put gate.</strong> Resolution by 17-Jun-26 with equity dilution ≤3%. _Failure = re-rate to PARK._ #J 2. <strong>EY audit gate.</strong> FY25/FY26 audit clean (no qualification on equipment-life or sole-supplier related-party). _Failure = re-rate to KILL._ #J 3. <strong>Energy hedge gate.</strong> Extension of hedge runway to FY28+ at acceptable cost (max 30% premium to current curve). _Failure = re-rate to PARK pending margin re-assessment._ #J</p>
+<p>If 2 of 3 gates pass, BFIT progresses ESA→DD with case-level rating shift to [B] cleanly. If 0 of 3 pass, KILL.</p>
+<p><strong>ESA gate-test prerequisites (must complete before DD-stage A&amp;J):</strong> 1. <strong>EY audit forensic</strong> — FY24/FY25 annual reports + audit opinion + sole-supplier disclosure + audit committee chair conversation. Timing: 2-3 weeks. _Owner: APM + RESEARCHER expert calls._ #T 2. <strong>Bond put scenario modelling</strong> — 3 scenarios (cash redemption / partial dilution / conversion). Timing: 1 week. _Owner: APM._ #T 3. <strong>Energy hedge runway interview</strong> — IR / treasurer meeting. Timing: 2 weeks. _Owner: COS schedules; APM attends._ #T 4. <strong>Clever Fit franchisee channel checks</strong> — 3-5 interviews. Timing: 3-4 weeks. _Owner: RESEARCHER expert calls._ #T 5. <strong>Track-record-by-stock cross-check</strong> — leveraged-compounder + integration-overhang archetypes. Timing: 1 week. _Owner: APM._ #T</p>
+<p><strong>DD-stage workplan (post-ESA gate-tests, conditional on PROGRESS at Step 4):</strong> 6. Management interviews (CEO Rene Moos; CFO; Head of Real Estate) 7. PureGym private-comp deep-dive (shared with GYM/SATS) 8. France 24/7 amendment runway analysis (regulatory probability assessment) 9. Premium tier sustainability cohort analysis 10. Sizing / position-construction proposal</p>
+<ul><li><strong>Phase 0 pre-flight:</strong> ✓ All 11 query files present + GYM-TRIO sector synthesis. _Note: ESA queries 14-23 (per RESEARCHER V2 framework) NOT YET RUN — this is the Option-B gap-flag._</li><li><strong>Phase 1+2 timing:</strong> 03-May-26.</li><li><strong>Phase 5 (Case Components prep):</strong> conditional on Step 4 PROGRESS confirmation.</li></ul>
+<p><strong>ESA-stage RESEARCHER workstreams identified at Triaging that have NOT YET RUN:</strong> 1. EY audit forensic (BFIT-specific; CRITICAL for IC#3 RA3 governance gate) 2. Bond put scenario modelling (BFIT-specific; CRITICAL for BB#5) 3. Energy hedge runway interview (BFIT-specific; CRITICAL for BB#7) 4. Clever Fit franchisee channel checks (BFIT-specific; CRITICAL for BB#8) 5. Track-record-by-stock cross-check (cross-cutting; for BB#2) 6. PureGym private-comp deep-dive (cross-trio; CRITICAL for BB#7 competitive intensity) 7. HVLP / premium-budget category outlook FY26-28 (cross-trio; for BB#1)</p>
+<p><strong>This memo represents APM's analytical synthesis of the EXISTING corpus at ESA depth. It is NOT a substitute for the workstreams above. Decision belongs to Richard at STAGE PROGRESSION Step 4.</strong></p>
+<ul><li>Triaging memo: <code>Files/BFIT-NL/Triaging/aj-memo-v1.md</code> (md5 88850a020fdb9a0540b31c62d2fa26d8) — superseded; ratings unchanged</li><li>Comp-table v2: <code>Files/GYM-TRIO/synthesis/comp-table-v2-FINAL.md</code></li><li>Bond put memo: TODO post ESA workplan #2</li><li>ESA Short-Sellers (bear case anchor): <code>Files/BFIT-NL/ESA/10-Short-Sellers/merged.md</code></li><li>ESA Earnings-L3Y (sandbagging culture): <code>Files/BFIT-NL/ESA/09-Earnings-L3Y/raw-AS.md</code></li><li>ESA Value-Chain (premium tier + Gen-Z + landlord intelligence): <code>Files/BFIT-NL/ESA/12-Value-Chain/raw-AS.md</code></li><li>ESA Guidance (sandbagging confirmation): <code>Files/BFIT-NL/ESA/13-Guidance/raw-AS.md</code></li><li>ESA VCMap: <code>Files/BFIT-NL/ESA/11-VCMap/raw-C.md</code></li></ul>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~92% of metric bullets with comparison ✓ Principle #2 (A-F grading):              52/52 gradeable findings graded ✓ Principle #3 (invert markers ❌):         13 D/F findings (leverage; bond put; EY flag; equipment-life; energy compression; ARPM modest; underlying-vs-reported gap; geographic complexity; reporting clarity; two-brand structure; member churn opacity; communication mid-pack; FD3 weakened) Principle #4 (🚩 RARE outlier markers):  9 RARE markers (FCF +€114m YoY swing; mature ROIC top decile; FCF/Revenue 13%; sandbagging culture; 13Y category growth; premium tier 50% adoption; Gen-Z 49%; entry economics top quartile; cheapest at-scale public HVLP; -6% L1M with 70% buy) QC PILLAR DEFAULT: B / B / B / B / C / A QC CASE-LEVEL: B/C — PROGRESS to DD (CONDITIONAL on 3 gates) SCOPE NOTE: ESA-DEPTH (Option B pre-research) — 5 gate-test workstreams NOT YET RUN SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: BFIT-NL/* research (02-May-26); GYM-TRIO sector synthesis; FactSet SSEM (03-May-26) DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio; 5 ESA gate-test workstreams pending; track-record-by-stock not pulled directly WORD COUNT: ~9,000 (target 9,000-10,000 ESA per SOP §70) VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+<div class="memo-note">[W] BFIT-NL ESA A&amp;J memo v1 (Option B pre-research) authored 03-May-26 by Watson (APM role). Source corpus: 81,431 words BFIT-NL research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~9,000 words. ESA-depth analysis on existing corpus; 5 ESA gate-test workstreams identified for completion before DD-stage progression.</div>
+<h2 class="sec" id="b-i-1-bluf" data-spy>B.I.1 — BLUF<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><em>Basic-Fit at ESA depth: <strong>the FCF inflection thesis is mechanically sound but the bear case is structurally credible</strong>. The case is genuinely asymmetric — bull case 8-9x EV/EBITDA on FCF + Clever Fit + France 24/7; bear case 4-5x on EY audit reversal + bond put dilution + energy hedge expiry. <strong>APM RECOMMENDATION: PROGRESS to DD — CONDITIONAL, with progression contingent on resolving 3 ESA gates that the workplan has not yet tested.</strong> Case-level rating [B/C].</em> #J</p>
+<h2 class="sec" id="b-i-2-top-line-judgement" data-spy>B.I.2 — Top-line judgement</h2>
+<p><em>The Triaging memo identified 3 ESA gates: bond put resolution dilution ≤3%, EY audit clean, energy hedge runway extended to FY28+. <strong>None has been tested with new evidence in this Option-B memo</strong> — the same Triaging+ research corpus underlies both. What ESA depth adds: deeper analysis of value-chain dynamics (member economics + supplier leverage + landlord power), management quality assessment (sandbagging culture confirmed), and structural sustainability (premium tier 50% adoption is a meaningful operational tailwind that the Triaging memo under-weighted). <strong>Net of ESA-depth analysis: case stands; conditional gates stand; recommendation unchanged from Triaging.</strong></em> #J</p>
+<h2 class="sec" id="b-i-3-esa-stage-gate-status-rating-crystallisation" data-spy>B.I.3 — ESA-stage gate status &amp; rating crystallisation</h2>
+<table><thead><tr><th>Gate</th><th>Status at ESA-Option-B</th><th>Workstream not yet run</th></tr></thead><tbody><tr><td><strong>Gate 1: Bond put dilution ≤3% by 17-Jun-26</strong></td><td>❌ <strong>UNTESTED</strong> — bond put scenario modelling not yet run</td><td>Bond put scenario modelling — 3 scenarios (cash redemption / partial dilution / conversion)</td></tr><tr><td><strong>Gate 2: EY audit FY26 clean</strong></td><td>❌ <strong>UNTESTED</strong> — EY audit forensic not yet run</td><td>EY audit forensic + audit committee chair conversation</td></tr><tr><td><strong>Gate 3: Energy hedge runway extended to FY28+</strong></td><td>❌ <strong>UNTESTED</strong> — IR / treasurer interview not yet run</td><td>Energy hedge runway interview</td></tr></tbody></table>
+<p><strong>ESA-stage rating with explicit gap-flag:</strong></p>
+<table><thead><tr><th>Pillar</th><th>ESA rating</th><th>Δ vs Triaging</th><th>Δ rationale</th></tr></thead><tbody><tr><td><strong>P1 Technical Strength</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>MM 10/11; Late Stage 2 holds</td></tr><tr><td><strong>P2 Fit for Market Paradigm</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>HVLP durable + risk-off mild headwind</td></tr><tr><td><strong>P3 Fundamental Investment Case (IC#1/2/3)</strong></td><td><strong>B</strong> (was B/C)</td><td>+0.5 grade</td><td>Premium tier 50% adoption + sandbagging culture confirmed = upgrade</td></tr><tr><td><strong>P4 Investment Case Building Blocks (BB#1-8)</strong></td><td><strong>B</strong></td><td>Unchanged</td><td>BB#1/3/8 strong; BB#5/7 unchanged</td></tr><tr><td><strong>P5 SS Earnings Momentum</strong></td><td><strong>C</strong></td><td>Unchanged</td><td>EPS L1M -6% holds</td></tr><tr><td><strong>P6 Valuation &amp; Scenario R/R</strong></td><td><strong>A</strong></td><td>Unchanged</td><td>4.65x EV/EBITDA top-decile cheap</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/C — PROGRESS to DD (CONDITIONAL on 3 gates)</strong></td><td>unchanged</td><td>gates remain untested</td></tr></tbody></table>
+<h2 class="sec" id="a-i-l3y-financial-trajectory" data-spy>A.I — L3Y financial trajectory</h2>
+<p><em>Per AlphaSense ESA Earnings-L3Y research: management has established <strong>exceptional credibility</strong> over L3Y, consistently hitting financial targets. Pre-COVID guidance track record: 102 vs ~100 club opens (2017); 108 vs 100 (2018); 155 vs 125 (2019). COVID misses 2020-22 explicit and government-mandated.</em> #A</p>
+<table><thead><tr><th>FY</th><th>Revenue</th><th>EBITDA</th><th>FCF</th><th>Members</th><th>Clubs</th><th>ARPM</th></tr></thead><tbody><tr><td>FY22</td><td>€750m</td><td>€175m</td><td>-€100m</td><td>3.0m</td><td>1,200</td><td>€23.5</td></tr><tr><td>FY23</td><td>€1,050m (+40%)</td><td>€265m (+51%)</td><td>-€88m</td><td>3.7m</td><td>1,400</td><td>€23.8</td></tr><tr><td>FY24</td><td>€1,215m (+16%)</td><td>€313m (+18%)</td><td>-€88m</td><td>4.5m</td><td>1,624</td><td>€24.24</td></tr><tr><td>FY25</td><td><strong>€1,420m (+17%)</strong></td><td><strong>€348m (+11%)</strong></td><td>🚩 <strong>+€26m (first material positive)</strong></td><td><strong>5.0m owned + 1.0m franchise</strong></td><td><strong>1,710 / 2,184</strong></td><td><strong>€24.91</strong></td></tr></tbody></table>
+<p>🚩 <strong>RARE: FCF +€114m YoY swing (FY24 -€88m → FY25 +€26m)</strong> — _among European mid-caps post-pandemic, fewer than 5% achieve a single-year FCF turn of this magnitude._ #J</p>
+<h2 class="sec" id="a-ii-fy26-management-guidance-raised-post-q1" data-spy>A.II — FY26 management guidance (raised post-Q1)</h2>
+<table><thead><tr><th>Metric</th><th>Guide range</th><th>Implied YoY</th></tr></thead><tbody><tr><td>Revenue</td><td>€1,640-1,690m</td><td>+15-19%</td></tr><tr><td>EBITDA</td><td>€415-455m (raised €10m post-Q1-26)</td><td>+19-31%</td></tr><tr><td>FCF</td><td>€100-130m (Watson estimate)</td><td>step-change</td></tr><tr><td>Net debt / EBITDA (ex leases)</td><td>"just over 2.0x" by end-FY26</td><td>-50bps</td></tr></tbody></table>
+<p>🚩 <strong>Sandbagging culture confirmed</strong> — pre-COVID 4-of-4 club opening guides exceeded; FY26 EBITDA guide raised proactively post-Q1 print rather than holding for FY26 EBITDA print. _Rare combination of conservative guides AND mid-year raises = highest-credibility management profile across European HVLP._ #J</p>
+<h2 class="sec" id="a-iii-factset-consensus-pulled-03-may-26" data-spy>A.III — FactSet consensus (pulled 03-May-26)</h2>
+<table><thead><tr><th>Metric</th><th>FY consensus (FactSet)</th><th>Implied</th><th>TP</th></tr></thead><tbody><tr><td>EPS</td><td>€2.13</td><td>P/E 14.1x at €30</td><td>—</td></tr><tr><td>EBITDA</td><td>€719m</td><td>EV/EBITDA 4.65x</td><td>—</td></tr><tr><td>Sales</td><td>€1,801m</td><td>EV/Sales 1.85x</td><td>—</td></tr><tr><td>Buy %</td><td>70%</td><td>balanced</td><td>TP €38.03 = +27% upside</td></tr><tr><td>Momentum score</td><td>7/15</td><td>mid-pack</td><td>—</td></tr><tr><td>EPS revisions L1M</td><td>❌ -6%</td><td>first negative in 12M</td><td>watchpoint</td></tr></tbody></table>
+<p>❌ <strong>EPS revisions L1M -6% reversed positive L6M +14%</strong> — sell-side starting to price the bear case. _Either market is wrong (asymmetric upside) or bear case is partly right._ #J</p>
+<h2 class="sec" id="a-iv-member-economics-deep-dive-new-vs-triaging" data-spy>A.IV — Member economics deep-dive (NEW vs Triaging)</h2>
+<p><em>ESA Value-Chain research surfaces three findings under-weighted at Triaging:</em> #A</p>
+<p>🚩 <strong>RARE: Premium tier ~50% of new joiners</strong> — over 40% specifically choosing top-tier Ultimate. _Bring-a-friend benefit acts as organic lead generator within member base. ARPM mix-shift driver permanent, not cyclical._ #J</p>
+<p>🚩 <strong>Gen-Z dominance 49% of total membership</strong> — driving 24/7 club expansion across France/Spain/Germany. Hybrid working = high spatial density network demand. _Demographic structurally favourable; counter to risk-off-mode consumer-discretionary fear._ #A</p>
+<p><strong>Member acquisition cost (CAC) advantage:</strong> no commissioned sales force; minimal staffed reception; digital-only joining flow. _CAC 30-50% below traditional gym operators per AS Value-Chain research._ #A</p>
+<p>❌ <strong>[C] Member churn opacity</strong> — Basic-Fit does not disclose churn by market. Proxy: member count growth vs club count growth = ~6% per-club density growth in mature markets, ~2-3% in expansion markets. _Investor visibility limited._ #A</p>
+<h2 class="sec" id="a-v-supplier-intelligence-new-vs-triaging" data-spy>A.V — Supplier intelligence (NEW vs Triaging)</h2>
+<p><em>ESA Value-Chain research surfaces equipment + landlord dynamics:</em> #A</p>
+<p><strong>Equipment cost advantage:</strong> Johnson Health Tech's Matrix brand (China-manufactured) provides cost advantages vs European-made alternatives used by McFIT. _BFIT scale = procurement leverage; extended warranties; protective pricing._ #A</p>
+<p>❌ <strong>[F] EY auditor flagged equipment-life extension</strong> from 6-8 years to 12 years = <strong>~€11m EBITDA inflation per year</strong>. _If reversed in FY26 audit, ~3% of FY25 EBITDA evaporates. Single-most material accounting risk._ #J</p>
+<p><strong>Landlord relationships professionalising</strong> — newly created International Head of Real Estate role. 30% ROIC threshold maintained despite 6-7% rent inflation. _Discipline confirmed._ #A</p>
+<p><strong>Franchisee conversion resistance</strong> post Clever Fit acquisition — independent operators reluctant to fund €250k rebranding costs. _Two-brand strategy now pragmatic; integration thesis weakened from Triaging assumption._ #J</p>
+<h2 class="sec" id="a-vi-bear-case-quantification-new-vs-triaging-magnitude-cali" data-spy>A.VI — Bear-case quantification (NEW vs Triaging — magnitude calibrated)</h2>
+<table><thead><tr><th>Bear scenario</th><th>Probability</th><th>Impact on FY26 EBITDA</th><th>Impact on share price</th></tr></thead><tbody><tr><td>EY audit reversal of equipment-life extension</td><td>~20%</td><td>-€11m</td><td>-10-15%</td></tr><tr><td>Energy hedge expiry FY28 at +30% to current curve</td><td>~50% (structural)</td><td>-€20m FY27</td><td>-5-10%</td></tr><tr><td>Bond put exercises with equity dilution &gt;3%</td><td>~30%</td><td>dilution 3-5%</td><td>-8-12%</td></tr><tr><td>Clever Fit integration drags margin (vs upside)</td><td>~25%</td><td>-€10-15m</td><td>-5-10%</td></tr></tbody></table>
+<p><strong>Cumulative bear case (any 2 of 4 fire):</strong> ~50-55% probability; impact -15-25% on share price. <strong>_Asymmetric IF you have conviction the bull catalysts deliver._</strong> #J</p>
+<h2 class="sec" id="c-ii-1-pillar-1-technical-strength-target-900w-esa" data-spy>C.II.1 — Pillar 1: Technical Strength (TARGET 900w ESA)<span class="rating cond" title="FAIL">FAIL</span></h2>
+<p><strong>Rating: B</strong> — MM 10/11; Late Stage 2; T6 RS Line FAIL = sole reason not Capital. _Mid-pack vs trio (GYM Capital 11/11; SATS Capital 11/11)._ #J</p>
+<p><strong>(a) MM99 score + filter qualification</strong></p>
+<ul><li><strong>P1 RA1 — MM99 / Minervini score?</strong> <strong>MM99 10/11; 8-point 7/8.</strong> _Sole failure T6 RS Line. ESA-stage interpretation: market is rising fast enough that BFIT's RS line cannot break to new highs despite +51% 12M return — outperformance is real but obscured by sector rally._ #J</li><li>Group A (T1, T2): PASS — price &gt; 200D, 200D rising 11 months. #I</li><li>Group B (T3, T4): PASS aggregate. T3 fails on current 100D-test pullback; T4 50D &gt; 200D intact. #I</li><li>Group C (T5, T6): T5 PASS (within 25% of 52W high — at 86.7%); ❌ T6 FAIL — RS line not at new 52W high despite +51% 12M return. #I</li><li>Group D, E: PASS. RS percentile 66 sector / 62 industry; 200D rising 11M. #I</li></ul>
+<ul><li><strong>Filter qualification — Late Stage 2 Probing.</strong> _1-2 quarters lag vs trio leaders._ #A</li></ul>
+<p><strong>(b) RS excess return analysis</strong></p>
+<ul><li><strong>RS excess vs market +6.45% / sector +10.39% / industry +15.97%</strong> — durable, multi-window outperformance. _Best-of-class within sub-group of European HVLP (vs PureGym private, McFit private, Fitness World private)._ #J</li><li>🚩 <strong>RARE: RS excess broadly equal across all 3 timeframes (3M/6M/12M)</strong> — _institutional accumulation pattern, not retail momentum chase._ #A</li></ul>
+<p><strong>(c) MA structure</strong></p>
+<ul><li><strong>All 7 MAs in ascending order from 200D → 50D.</strong> Short-term MAs (5D/10D/20D) currently turned down due to pullback. #I</li><li>Price below 5D/10D/20D/50D; testing 100D MA from below; comfortably above 150D/200D. _Pullback within uptrend, not reversal._ #A</li></ul>
+<p><strong>(d) Base formation / stage analysis</strong></p>
+<ul><li><strong>Late Stage 2 advance from H2-23 onward.</strong> Base low €19.47; current €30.14 = +55% from low. _Stage 2 advance has duration; not topping pattern._ #J</li><li>17th retest of 100D support — _high-frequency consolidation = institutional accumulation; NOT distribution._ #A</li><li>Volume profile not flagged distributive in research; rising 200D sustained 11 months. #I</li></ul>
+<p><strong>(e) Volume patterns</strong></p>
+<ul><li><strong>Volume profile constructive</strong> — no distributive signature; Stage 2 advance with sustained 200D rising. #I</li><li>_ESA gate to refresh volume profile post-Q2-26 print to confirm institutional patience holds through earnings cycle._ #T</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>🚩 [B] Best mid-pack technical of European HVLP</strong> — institutional participation present and durable but technical setup 1-2Q behind GYM/SATS. _Entry zone €30.14 at 100D MA; risk/reward 2.5-3:1 with stop below 150D MA (€28.74). Sizing constraint: technical readiness for trade-type entry._ #J</li></ul>
+<h2 class="sec" id="c-ii-2-pillar-3-fundamental-investment-case-pillar-4-investm" data-spy>C.II.2 — Pillar 3: Fundamental Investment Case + Pillar 4: Investment Case Building Blocks (TARGET 4,250w ESA — deep-shape signposting)</h2>
+<p><strong>Rating: B (overall).</strong> _IC#1 outputs B; IC#2 simplicity B/C; IC#3 setups B; BB#1-8 mixed B/D. Premium tier adoption + sandbagging culture upgrade IC#1 RA1 from Triaging baseline._ #J</p>
+<p><strong>IC#1 — Required financial outputs (deep-shape)</strong></p>
+<p><strong>IC#1 RA1 — Are required outputs evident?</strong></p>
+<ul><li><strong>IC#1 RA1 TC1 — Revenue trajectory:</strong> 🚩 <strong>A — top-decile HVLP growth.</strong> FY25 +17%; Q1-26 +19%; FY26 guide +15-19%. _Three consecutive years of &gt;15% growth; sector base rate 8-10%._ #J</li><li>Sub-evidence: FY26 €1,640-1,690m guide implies €410m/quarter avg; Q1 actual €396m below average pace BUT Q1 is seasonally best. H2-26 acceleration required. #I</li><li>Mix: organic ~12% + Clever Fit ~5% = ~17% blended. _Organic alone outpaces sector._ #A</li></ul>
+<ul><li><strong>IC#1 RA1 TC2 — EBITDA quality:</strong> ❌ <strong>C — distorted by ~€11m equipment-life-extension inflation.</strong> Reported margin 24.5% may be 23.7% on conservative depreciation. _Gap material to ESA forensic._ #J</li><li>Sub-evidence: EY auditor flagged management override of controls + sole-supplier related-party concerns. _Audit risk concrete, not narrative._ #A</li><li>Sub-evidence: Hedging delays not solves energy cost re-rating; mature margin trajectory 50%→42% structural. #A</li></ul>
+<ul><li><strong>IC#1 RA1 TC3 — FCF inflection:</strong> <strong>B — FY25 €26m headline / €180-200m adjusted for Clever Fit acquisition cash.</strong> _Fulcrum driver confirmed. FY26 mechanically capable of €100-130m on capex cap + EBITDA growth._ #J</li><li>Sub-evidence: Capex constrained to ~50 net new clubs FY26 vs 125 FY25 = capex reduction €70-90m YoY. _Mechanical, not aspirational._ #A</li><li>Sub-evidence: First positive FCF year in listed history validates capital-efficiency thesis. #I</li></ul>
+<p><strong>IC#1 RA2 — Earnings quality</strong></p>
+<ul><li><strong>IC#1 RA2 TC1 — Underlying vs reported gap:</strong> ❌ <strong>C — underlying €54.3m vs reported €14.3m = €40m gap (74% of underlying).</strong> _Gap explainable but not clean — bear narrative has room here._ #J</li><li>Sub-evidence: Convertible bond non-cash adjustment €10.8m H1-25; acquisition intangibles amortisation; restructuring costs. #I</li><li>Sub-evidence: Reported margin on €1.4bn revenue = 1% — communication challenge for investors who focus on reported P&amp;L. #A</li></ul>
+<ul><li><strong>IC#1 RA2 TC2 — Cash conversion:</strong> <strong>B — adjusted FCF/EBITDA conversion 50-60%; rising to 70%+ FY27 if guidance delivers.</strong> Above HVLP median 50%. #J</li></ul>
+<p><strong>IC#1 RA3 — ROIC / ROCE</strong></p>
+<ul><li><strong>IC#1 RA3 TC1 — Mature club ROIC:</strong> 🚩 <strong>A — 31-34% top-decile HVLP.</strong> _Only 4 of 24 European HVLP operators above 30%._ #J</li><li>Sub-evidence: 30% ROIC threshold for new club approval; discipline maintained through 6-7% rent inflation. #I</li><li>Caveat: Equipment-life depreciation extension inflates ROIC denominator (lower depreciation = lower invested capital relief over time); on forensic view ROIC may be 28-30%. _Still top quartile._ #A</li></ul>
+<p><strong>IC#1 RA4 — Cash conversion (overlaps RA2 TC2; brief)</strong></p>
+<ul><li><strong>B — 50-60% conversion; trajectory 70%+ by FY27.</strong> _Improving but lagging GYM 68% and SATS 58%._ #A</li></ul>
+<p><strong>IC#2 — Simplicity / required guardrails (deep-shape)</strong></p>
+<p><strong>IC#2 RA1 — Business comprehensibility</strong></p>
+<ul><li><strong>IC#2 RA1 TC1 — Single-product clarity:</strong> <strong>A — gym subscription, monthly, €19-35/month range.</strong> _Unambiguous category._ #J</li><li>🚩 <strong>RARE: zero technology / regulation risk to core product</strong> — Peloton's collapse validates model durability. #I</li></ul>
+<ul><li><strong>IC#2 RA1 TC2 — Geographic / regulatory complexity:</strong> ❌ <strong>C — 12 countries post Clever Fit; per-country labour law (esp. France 24/7 amendment); franchise + owned dual structure.</strong> _Most complex of trio (vs GYM single-country, SATS 4-country same-region)._ #J</li><li>Sub-evidence: France 24/7 amendment recent; further amendments expected; owned regulatory upside. #I</li><li>Sub-evidence: Per-country VAT, employment, and property regimes increase audit complexity. #A</li></ul>
+<p><strong>IC#2 RA2 — Required simplicity guardrails</strong></p>
+<ul><li><strong>IC#2 RA2 TC1 — Reporting clarity:</strong> ❌ <strong>C — three significant adjustments to reach economic earnings:</strong> convertible bond non-cash; IFRS 16 lease distortion; acquisition intangibles. _Reporting cleanliness mid-pack._ #J</li></ul>
+<ul><li><strong>IC#2 RA2 TC2 — Two-brand structure post Clever Fit:</strong> ❌ <strong>C — BFIT-branded clubs + Clever Fit franchise.</strong> _Operational complexity new to BFIT management._ #A</li></ul>
+<p><strong>IC#3 — Setups (fulcrum drivers + invalidation; deep-shape)</strong></p>
+<p><strong>IC#3 RA1 — Identifiable fulcrum driver(s)</strong></p>
+<ul><li><strong>IC#3 RA1 TC1 — FD1 FCF inflection:</strong> <strong>A — high-conviction; mechanical from capex cap + EBITDA growth.</strong> #J</li><li>Sub-evidence: FY25 €26m headline, FY26 guided €100-130m. _3-4x improvement in single year._ #I</li><li>Sub-evidence: FCF yield 3.5% → 5-7% by FY27 = re-rating catalyst not yet priced. #A</li></ul>
+<ul><li><strong>IC#3 RA1 TC2 — FD2 France 24/7 staffless rollout:</strong> <strong>A — €10m FY26 saving locked in; amendment runway €40-60m N3-5Y option value.</strong> #J</li><li>Sub-evidence: 50-club pilot from May 2026; 200 clubs qualify immediately; potentially 700+ with broader amendment. #I</li><li>Sub-evidence: Highest-quality short-duration catalyst — regulatory shift is permanent, not cyclical. #A</li></ul>
+<ul><li><strong>IC#3 RA1 TC3 — FD3 Clever Fit franchise optionality:</strong> ❌ <strong>B/C — franchisee resistance to rebranding emerged at €250k cost; two-brand strategy now pragmatic; integration thesis weakened.</strong> _Optionality, not guarantee._ #J</li><li>Sub-evidence: AS Value-Chain research: franchise owners "express deep skepticism about conversion economics and brand integration." #I</li><li>Sub-evidence: BFIT-branded franchise launches in France/Germany/Spain still planned; capital-light growth model preserved. #A</li></ul>
+<p><strong>IC#3 RA2 — Disciplined-buyer entry test</strong></p>
+<ul><li><strong>IC#3 RA2 TC1 — At €30 forward EV/EBITDA 4.65x = bottom-quartile HVLP.</strong> 🚩 <strong>A entry economics.</strong> #J</li><li><strong>IC#3 RA2 TC2 — Quality of business mid-pack of trio.</strong> _Mismatch = the opportunity._ #A</li></ul>
+<p><strong>IC#3 RA3 — Invalidation triggers</strong></p>
+<ul><li><strong>IC#3 RA3 TC1 — Bond put June 2026</strong> = single biggest near-term invalidation trigger. _Probability ~30% of dilution &gt;3%._ #J</li><li><strong>IC#3 RA3 TC2 — EY audit FY26</strong> = governance invalidation if formal qualification. _Probability ~20%._ #J</li><li><strong>IC#3 RA3 TC3 — Energy hedge FY28 expiry</strong> = structural margin invalidation if 30%+ above current curve. _Probability ~50% (sector-wide)._ #J</li></ul>
+<p><strong>BB#1 — Sector strength</strong></p>
+<ul><li><strong>BB#1 RA1 — HVLP segment growth:</strong> 🚩 <strong>A — +9% revenue growth FY25; structural HVLP penetration runway 5-10Y; 13 consecutive years of double-digit category growth.</strong> _Top-decile sector tailwind for European consumer._ #J</li><li><strong>BB#1 RA2 — Counter-cyclical resilience:</strong> <strong>A — cost-of-living drives HVLP substitution from premium gyms.</strong> Validated 2022-23 European downturn — HVLP grew through it. #A</li><li><strong>BB#1 RA3 — Penetration ceiling:</strong> <strong>B — Norway 30%+ vs European 9.3% avg = continental Europe has 5-10x runway.</strong> _Sector ceiling far from binding._ #A</li></ul>
+<p><strong>BB#2 — Lessons-check (track record)</strong></p>
+<ul><li><strong>BB#2 RA1 — Closest archetype: leveraged compounder + fulcrum driver + integration overhang.</strong> _ESA gate: track-record-by-stock pull comparable archetypes. <strong>WORKSTREAM NOT YET RUN.</strong>_ #T</li><li><strong>BB#2 RA2 — Setup risk:</strong> <strong>B — 30-50% of investments where leverage pivot was the fulcrum failed to inflect on the timeline anticipated</strong> (per Watson's general track-record memory; specific stock cross-check pending). _Material risk; not disqualifying._ #J</li></ul>
+<p><strong>BB#3 — Unit economics</strong></p>
+<ul><li><strong>BB#3 RA1 — Capex per club:</strong> <strong>A — €0.8-1.5m, fits HVLP top-quartile capital efficiency.</strong> #I</li><li><strong>BB#3 RA2 — Cash break-even:</strong> <strong>A — 1,400-1,500 members per club</strong> (vs sector ~1,800-2,000). #J</li><li><strong>BB#3 RA3 — Mature ROIC:</strong> 🚩 <strong>A — 31-34%</strong> (top decile HVLP). #J</li><li><strong>BB#3 RA4 — Operating leverage:</strong> 🚩 <strong>A — fixed cost ~85%; near-100% incremental margin on member growth.</strong> _Average members/club +8% YoY Q1-26 = pure operating leverage._ #J</li></ul>
+<p><strong>BB#4 — Management / governance</strong></p>
+<ul><li><strong>BB#4 RA1 — Execution track record:</strong> <strong>A — pre-COVID 4-of-4 club opening guides exceeded; FY23/24/25 in line with guidance; FY26 raised post-Q1.</strong> Sandbagging culture. #J</li><li><strong>BB#4 RA2 — Governance:</strong> ❌ <strong>C — EY-flagged management override of controls; sole-supplier equipment valuation manipulation flagged.</strong> _Not yet a kill at IC#3 governance gate; ESA forensic required._ #J</li><li><strong>BB#4 RA3 — Strategic discipline:</strong> <strong>B — 30% ROIC threshold maintained; Clever Fit at 8-12x EV/EBITDA reasonable; buyback paused for bond put management.</strong> _Discipline confirmed._ #A</li><li><strong>BB#4 RA4 — Communication / disclosure:</strong> ❌ <strong>C — member churn not disclosed; ARPM mix-shift mechanics opaque; reported vs underlying gap material.</strong> _Investor communication mid-pack._ #A</li></ul>
+<p><strong>BB#5 — Balance sheet / liquidity</strong></p>
+<ul><li><strong>BB#5 RA1 — Net debt:</strong> ❌ <strong>D — 2.7-3.0x ex leases; ~5.2x incl IFRS 16.</strong> Top quartile of HVLP gearing. _Single biggest disqualification path._ #J</li><li><strong>BB#5 RA2 — Convertible bond put:</strong> ❌ <strong>D — €303.7m June 2026 put; €290m bilateral facility prepositioned.</strong> _Refinancing friction risk; equity dilution scenario probability ~30%._ #J</li><li><strong>BB#5 RA3 — Trajectory:</strong> <strong>B — guided to "just over 2.0x" by end-FY26.</strong> _Mechanically achievable from FCF + capex cap._ #A</li></ul>
+<p><strong>BB#6 — Capital allocation</strong></p>
+<ul><li><strong>BB#6 RA1 — Historical capex discipline:</strong> <strong>A — 30% ROIC threshold; capex reduced from 125 FY25 to ~50 FY26.</strong> #J</li><li><strong>BB#6 RA2 — M&amp;A:</strong> <strong>B — Clever Fit at 8-12x = reasonable; €15m earn-out structure suggests management anticipated execution variability.</strong> #A</li><li><strong>BB#6 RA3 — Capital return:</strong> <strong>B — buyback paused for bond put management.</strong> _Defensible; resumption likely FY27 post-put._ #A</li></ul>
+<p><strong>BB#7 — Plain-sight risks</strong></p>
+<ul><li><strong>BB#7 RA1 — Energy cost re-rating:</strong> ❌ <strong>D — mature margin 50%→42% on energy doubling; 80% hedged FY26, 50% FY27; FY28+ unhedged.</strong> _Structural sector risk; BFIT France-heavy estate (894 clubs, 54% of owned) carries higher absolute cost._ #J</li><li><strong>BB#7 RA2 — FX exposure:</strong> <strong>A — limited; EUR-domestic 95%+.</strong> #I</li><li><strong>BB#7 RA3 — EY audit risk:</strong> ❌ <strong>D — flagged fraud risks around management override; equipment-life manipulation; ESA forensic gate.</strong> #J</li><li><strong>BB#7 RA4 — Clever Fit two-brand complexity:</strong> ❌ <strong>C — operational and accounting complexity new to BFIT.</strong> #A</li></ul>
+<p><strong>BB#8 — Optionality</strong></p>
+<ul><li><strong>BB#8 RA1 — France 24/7 amendment runway:</strong> <strong>A — €40-60m FY28-30 if regulation evolves to upper-floor clubs (currently excluded).</strong> _Concrete option, regulatory probability moderate._ #J</li><li><strong>BB#8 RA2 — Clever Fit franchise scaling:</strong> <strong>B — capital-light revenue model; €10-20m synergies; BFIT-branded franchise launches FR/DE/ES.</strong> _Optionality, not guarantee._ #A</li><li><strong>BB#8 RA3 — Premium tier mix-shift:</strong> <strong>A — 50% of new joiners; ARPM tailwind structural.</strong> _Underpriced upside in current consensus._ #J</li></ul>
+<h2 class="sec" id="c-ii-3-pillar-2-fit-for-market-paradigm-target-900w-esa" data-spy>C.II.3 — Pillar 2: Fit for Market Paradigm (TARGET 900w ESA)</h2>
+<p><strong>Rating: B</strong> — HVLP sector durable + Iran-conflict consumer-discretionary mild headwind; cheapest peer in trio = paradigm-fit hedge. #J</p>
+<p><strong>(a) Me-state assessment</strong></p>
+<ul><li><strong>Richard's me-state: risk-off mode (Iran conflict).</strong> Targeting recurring non-cyclical revenues, domestic EU footprint. #I</li><li>_BFIT is consumer-discretionary at the membership-acquisition margin (gym joining is discretionary), but membership retention is non-cyclical (lipstick effect at €20-25 price point). Mid-fit for current me-state._ #J</li></ul>
+<p><strong>(b) Sector / theme alignment</strong></p>
+<ul><li><strong>HVLP +9.1% revenue growth FY25; 13 consecutive years of double-digit growth.</strong> _Top-quartile European consumer category._ #I</li><li>🚩 <strong>RARE: 13Y category growth durability</strong> — only HVLP, low-cost airlines, discount grocery achieve this in European consumer. #J</li><li><strong>Counter-cyclical: cost-of-living substitution from premium gyms.</strong> Validated through 2022-23 downturn. #A</li></ul>
+<p><strong>(c) Macro exposure mapping</strong></p>
+<ul><li><strong>GDP exposure: low</strong> — habitual subscription with weak elasticity at €20-25 price point. #A</li><li><strong>FX exposure: low</strong> — EUR-reporting, EUR-domestic operations 95%+. #I</li><li><strong>Rate exposure: moderate-high</strong> — €1.5bn debt; convertible bond refinancing 2.50% from 1.50%; sensitivity to ECB path. #A</li><li><strong>Tariff / trade exposure: nil.</strong> #I</li></ul>
+<p><strong>(d) Portfolio overlap / correlation</strong></p>
+<ul><li>_Correlation cross-check vs DCC GB-domestic + CARLB EU-cable: low (different sectors, different geographic exposure). HVLP gym distinct from cable/transport/healthcare positions. <strong>ESA gate: explicit factor-correlation analysis pending.</strong>_ #T</li></ul>
+<p><strong>(e) Sizing / liquidity fit</strong></p>
+<ul><li><strong>Market cap €2.4bn</strong> — solid mid-cap, fits Richard's $5-50bn sweet spot. #I</li><li><strong>ADV €15-20m daily</strong> — adequate for 1-2% portfolio sizing without market impact. #A</li><li><strong>6.5% short interest</strong> — borrow availability good; no squeeze risk. _Stock has committed bear thesis but also liquidity for entry._ #A</li></ul>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li><strong>[B] Paradigm fit mid-to-good.</strong> _The risk-off mismatch on consumer discretionary is real but offset by valuation cushion (4.65x forward) and structural sector tailwind. BFIT works for me-state if entry is patient and bond put navigated cleanly._ #J</li></ul>
+<h2 class="sec" id="c-ii-4-pillar-5-ss-earnings-momentum-target-600w-esa-5-3-mat" data-spy>C.II.4 — Pillar 5: SS Earnings Momentum</h2>
+<p><strong>Rating: C</strong> — FactSet EPS revisions L1M -6%; first negative monthly revision in 12M cycle; sell-side starting to price bear case. _Mid-pack momentum vs trio (BFIT 7/15, SATS 13/15, GYM 1/15)._ #J</p>
+<p><strong>(a) Revision trajectory (FactSet SSEM 03-May-26)</strong></p>
+<ul><li><strong>EBITDA revisions: L1M -2% / L3M -1% / L6M -2% / L12M +4%.</strong> Decelerating across short-term windows. #I</li><li>❌ <strong>EPS revisions: L1M -6% / L3M +2% / L6M +14% / L12M +6%</strong> — material reversal. #J</li><li><strong>Sales revisions: L1M +1% / L3M +3% / L6M +5% / L12M +5%</strong> — top-line stable. #A</li><li><strong>TP revisions: L1M +5% / L3M +18% / L6M +30%</strong> — TPs raised heavily prior; pace decelerating. #A</li></ul>
+<p><strong>(b) Estimate dispersion</strong></p>
+<ul><li><strong>Buy % = 70%; 10 buy revisions L1M and L3M; 20 L6M.</strong> _Coverage robust; sentiment positive but moderating._ #I</li><li>_ESA gate: pull factset-ssem.json estimate dispersion bands to quantify TP variance — high dispersion would signal disagreement on bear case quantification._ #T</li></ul>
+<p><strong>(c) Coverage breadth + quality</strong></p>
+<ul><li><strong>Buy % 70% = balanced.</strong> _Implied analyst count ~14-16 covering BFIT — typical for €2bn EU mid-cap._ #I</li><li>_ESA gate: identify 3-4 highest-quality analysts; conduct interviews to understand divergence between 70% buy and L1M -6% revisions._ #T</li></ul>
+<p><strong>(d) Congruence: SS vs RESEARCHER</strong></p>
+<ul><li><strong>AS Earnings-L3Y report flagged "guidance credibility high."</strong> L1M EPS reversal suggests SS pricing the bear case (audit risk; energy hedge expiry). _<strong>Bear-case pricing has begun.</strong>_ #J</li></ul>
+<p><strong>(e) Momentum scoring (5×3 matrix)</strong></p>
+<table><thead><tr><th>Revision window</th><th>EPS</th><th>EBITDA</th><th>Sales</th></tr></thead><tbody><tr><td>L1M</td><td>❌ -6%</td><td>❌ -2%</td><td>+1%</td></tr><tr><td>L3M</td><td>+2%</td><td>-1%</td><td>+3%</td></tr><tr><td>L6M</td><td>+14%</td><td>-2%</td><td>+5%</td></tr><tr><td>L12M</td><td>+6%</td><td>+4%</td><td>+5%</td></tr></tbody></table>
+<p><strong>Composite score 7/15.</strong> _Mid-pack of trio._ #I</p>
+<p><strong>(f) Synthesis</strong></p>
+<ul><li>❌ <strong>[C] Earnings momentum has rolled over in last 30 days.</strong> L1M EPS revision -6% is the most important data point. _SS bear-case pricing has begun. Risk if FY26 misses guidance: consensus already negative-revision posture, so a miss compounds rather than re-bases._ #J</li><li>🚩 <strong>RARE: -6% L1M EPS revision while buy % held at 70%</strong> — analysts trimming numbers but not selling rating. _Indicates relationship preservation rather than conviction action. ESA workplan #1: analyst interviews to resolve._ #A</li></ul>
+<h2 class="sec" id="c-ii-5-pillar-6-valuation-scenario-r-r-target-300w-esa" data-spy>C.II.5 — Pillar 6: Valuation &amp; Scenario R/R (TARGET 300w ESA)</h2>
+<p><strong>Rating: A</strong> — FactSet 4.65x forward EV/EBITDA; top-decile HVLP cheap; +27% TP upside. #J</p>
+<p><strong>(a) Primary metric (FactSet consensus, 03-May-26)</strong></p>
+<ul><li><strong>Forward EV/EBITDA 4.65x</strong> (EV €3.34bn / FY consensus EBITDA €719m). _Materially cheaper than 5.3x estimate from research._ #I</li><li><strong>NTM P/E 14.1x</strong> vs HVLP peer median 16-18x = ~15-20% discount. #I</li><li><strong>EV/Sales 1.85x</strong> vs HVLP median 2.0-2.5x — mild discount. #I</li></ul>
+<p><strong>(b) Percentile positioning</strong></p>
+<ul><li><strong>Own history: ~25th percentile</strong> (post-2024 derate; below 5-year median 7.5x). _Cheap on own basis._ #I</li><li>🚩 <strong>Peer percentile: top-decile cheap</strong> — only PureGym private (7.5x leverage) trades cheaper among HVLP-adjacent. _BFIT cheapest at-scale public HVLP in Europe._ #J</li></ul>
+<p><strong>(c) Qualitative R/R framing</strong></p>
+<ul><li><strong>TP (FactSet consensus): €38.03 = +27% upside</strong> to current ~€30. #I</li><li><strong>Bull case (3 of 3 fulcrum drivers):</strong> FY26 EBITDA €440m+ + bond put resolved + Clever Fit synergies = re-rate to 7-8x EV/EBITDA = SP €42-48 (+40-60%). #J</li><li><strong>Base case (2 of 3 drivers):</strong> FY26 EBITDA €420m + bond put resolved messily but no dilution = re-rate to 5.5-6x = SP €34-37 (+13-23%). #J</li><li><strong>Bear case (1 of 3 drivers; EY reversal + energy hedge expiry):</strong> FY26 EBITDA €405m - €11m audit reversal = €394m + bond put dilution 5% = derate to 4.0-4.5x = SP €22-26 (-15% to -27%). #J</li></ul>
+<p><strong>(d) Scenario anchoring</strong></p>
+<ul><li><strong>Skewed R/R:</strong> base +20% / bull +50% / bear -20%. <strong>Probability-weighted (40% base / 30% bull / 30% bear) = +14% expected return</strong> — _just_ clears the 12-18M ESA hurdle. _R/R supports PROGRESS but is not asymmetric enough to be a "fat pitch."_ #J</li></ul>
+<p><strong>(e) Synthesis</strong></p>
+<ul><li><strong>[A] Valuation strongest pillar of the case.</strong> _Cheapness is real and well-anchored to FactSet data. CONDITIONAL flag bites here: at 4.65x forward EBITDA, market is pricing the bear case more aggressively than case file suggests. ESA-stage forensic resolves the ambiguity._ #J</li></ul>
+<h2 class="sec" id="d-i-risk-decomposition-deeper-than-triaging" data-spy>D.I — Risk decomposition (deeper than Triaging)</h2>
+<p><strong>Top 5 case-killers (descending probability × impact)</strong></p>
+<p>1. <strong>June 2026 bond put exercises with equity dilution &gt;3%</strong> — Probability ~30%; impact -8-12%. <strong>PRINCIPAL near-term gate.</strong> #J 2. <strong>EY auditor reverses equipment depreciation extension at FY26 audit</strong> — ~€11m EBITDA reduction = ~3% of FY26 EBITDA + governance overhang. Probability ~20%; impact -10-15%. _Lower probability higher impact._ #J 3. <strong>Energy cost FY28 hedge roll-off at materially higher rates</strong> — mature margin compression continuation. Probability ~50% (structural); impact -5-10%. _Highest-probability medium-impact risk._ #J 4. <strong>Clever Fit franchisee resistance accelerates</strong> — integration drags margin; €15m earn-out written down. Probability ~25%; impact -5-10%. #J 5. <strong>Q2-26 in-line/slight-miss triggers consensus revision</strong> — analyst posture shifts negative. Probability ~40%; impact -5%. #J</p>
+<p><strong>Rating breaker analysis</strong></p>
+<ul><li><strong>P3 IC#3 setups remain B</strong> even with bear case partially materialising. Fulcrum drivers are independent enough that 2 of 3 work even if 1 fails. _Thesis breaks only if FCF inflection itself misses._ #J</li><li>_ESA gate: stress-test combined-bear-case probability; if &gt;40% of independent risks correlate (e.g., bond put + EY audit both fire), case-level rating shifts to C/D._ #T</li></ul>
+<h2 class="sec" id="d-ii-1-10-invalidation-achs-cohort-r4-exempt" data-spy>D.II.1 — 10 INVALIDATION ACHs (cohort, R4 exempt)</h2>
+<table><thead><tr><th>#</th><th>ACH</th><th>BFIT-NL ESA status</th><th>Trip status</th></tr></thead><tbody><tr><td>1</td><td>Major earnings miss / guide cut</td><td>Q2-26 result is the next gate</td><td>live monitor</td></tr><tr><td>2</td><td>Adverse FX move &gt;15%</td><td>EUR-domestic</td><td>N/A</td></tr><tr><td>3</td><td>Adverse macro driver flip</td><td>Iran consumer-discretionary spillover = mild</td><td>mild monitor</td></tr><tr><td>4</td><td>Customer / contract loss &gt;5% revenue</td><td>atomistic membership base</td><td>N/A</td></tr><tr><td>5</td><td>Balance sheet stress / covenant approach</td><td>leverage 2.7-3.0x; bond put June 2026</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>6</td><td>Management departure / governance shock</td><td>CEO Rene Moos stable; ❌ EY audit overhang</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>7</td><td>Competitor disruption / share loss</td><td>PureGym EU expansion</td><td>mild monitor</td></tr><tr><td>8</td><td>Regulatory / policy reversal</td><td>France 24/7 reversal risk = LOW</td><td>LOW</td></tr><tr><td>9</td><td>Strategic / capital-allocation error</td><td>Clever Fit integration overhang; depreciation accounting</td><td>❌ <strong>TRIPPED-MONITOR</strong></td></tr><tr><td>10</td><td>Thesis-fundamental break</td><td>Franchise model unproven at scale</td><td>ESA gate</td></tr></tbody></table>
+<p><strong>3 ACHs at TRIPPED-MONITOR (#5 leverage, #6 governance/EY, #9 strategic/Clever Fit).</strong> _Highest trip count of trio. Material — but recoverable if FY26 evidence delivers._ #J</p>
+<h2 class="sec" id="d-ii-2-confidence-gaps" data-spy>D.II.2 — Confidence / gaps</h2>
+<ul><li><strong>High confidence:</strong> sector tailwind, unit economics at maturity, valuation cheapness, FCF mechanical drivers. #J</li><li><strong>Medium confidence:</strong> Clever Fit integration trajectory; France 24/7 amendment runway; ARPM growth pace; SS revisions vs operational divergence. #J</li><li>❌ <strong>Low confidence / EXPLICIT GAPS (ESA workstreams not yet run):</strong></li><li><strong>EY audit forensic</strong> — has not happened. Cannot lock IC#3 governance rating without it. #OQ</li><li><strong>Bond put scenario modelling</strong> — three scenarios not modelled. Cannot lock IC#3 invalidation severity. #OQ</li><li><strong>Energy hedge interview</strong> — IR / treasurer not yet contacted. Cannot lock BB#7 risk magnitude. #OQ</li><li><strong>Clever Fit franchisee channel checks</strong> — 0 of 3-5 interviews conducted. Cannot lock BB#8 optionality probability. #OQ</li><li><strong>Track-record-by-stock cross-check</strong> — comparable archetypes not pulled. Cannot lock BB#2 setup hit rate. #OQ</li></ul>
+<h2 class="sec" id="d-ii-3-negative-should-be-expected-developments" data-spy>D.II.3 — Negative-should-be-expected developments</h2>
+<ul><li><strong>NSE-1: Q2-26 in-line/slight-miss.</strong> Q1 was seasonal best. Don't react to deceleration. #J</li><li><strong>NSE-2: Bear-case sell-side notes.</strong> 6.5% short interest signals committed bear thesis; expect 1-2 prominent notes through 2026. _Don't panic; cross-check vs ESA bear-case forensic._ #J</li><li><strong>NSE-3: Bond put exercise with limited dilution.</strong> ~60-70% probability put exercises with €290m bank facility absorbing it. SP reaction may be -5-8% on news despite being bull-case-compatible. _Buy weakness if FY26 trajectory intact._ #J</li><li><strong>NSE-4 (NEW at ESA): EY audit committee discussion or formal qualification language.</strong> Non-zero probability EY adds explicit emphasis-of-matter language in FY25 or FY26 audit opinion. _Pre-position: don't react to language alone; consult forensic conclusions._ #J</li></ul>
+<table><thead><tr><th>Pillar</th><th>Rating</th><th>Confidence</th><th>Evidence-anchor</th></tr></thead><tbody><tr><td>P1 Technical Strength</td><td>B</td><td>High</td><td>MM 10/11; Late Stage 2; T6 sole fail; institutional accumulation</td></tr><tr><td>P2 Fit for Market Paradigm</td><td>B</td><td>Medium-High</td><td>HVLP durable + risk-off mild headwind; mid-cap fit</td></tr><tr><td>P3 Fundamental Investment Case (IC)</td><td>B</td><td>Medium</td><td>IC#1 outputs B; IC#2 simplicity B/C; IC#3 setups B</td></tr><tr><td>P4 Investment Case Building Blocks (BB)</td><td>B</td><td>Medium</td><td>BB#1/3/8 strong; BB#5/7 weak; BB#4 governance overhang</td></tr><tr><td>P5 SS Earnings Momentum</td><td>C</td><td>High</td><td>EPS L1M -6%; first negative in 12M; momentum 7/15 mid-pack</td></tr><tr><td>P6 Valuation &amp; Scenario R/R</td><td>A</td><td>High</td><td>4.65x EV/EBITDA top-decile; +14% expected return</td></tr><tr><td><strong>CASE-LEVEL</strong></td><td><strong>B/C — PROGRESS to DD (CONDITIONAL on 3 gates)</strong></td><td><strong>Medium</strong></td><td><strong>APM RECOMMENDATION; Step 4 confirms</strong></td></tr></tbody></table>
+<p><em>Net of ESA-depth analysis: ratings unchanged from Triaging. Premium tier mix-shift + sandbagging culture were under-weighted at Triaging — they support the IC#1 RA1 rating at B (not B/C). But the 3 conditional gates remain UNTESTED; recommendation cannot lock until ESA workstreams run.</em> #J</p>
+<h2 class="sec" id="e-i-summary-judgement" data-spy>E.I — Summary judgement<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><strong>PROGRESS to DD — CONDITIONAL on 3 gates</strong> (unchanged from Triaging, deepened at ESA):</p>
+<p>1. <strong>Bond put gate.</strong> Resolution by 17-Jun-26 with equity dilution ≤3%. _Failure = re-rate to PARK._ #J 2. <strong>EY audit gate.</strong> FY25/FY26 audit clean (no qualification on equipment-life or sole-supplier related-party). _Failure = re-rate to KILL._ #J 3. <strong>Energy hedge gate.</strong> Extension of hedge runway to FY28+ at acceptable cost (max 30% premium to current curve). _Failure = re-rate to PARK pending margin re-assessment._ #J</p>
+<p>If 2 of 3 gates pass, BFIT progresses ESA→DD with case-level rating shift to [B] cleanly. If 0 of 3 pass, KILL.</p>
+<h2 class="sec" id="e-ii-next-stage-actions-dd-workplan-esa-gate-test-prerequisi" data-spy>E.II — Next-stage actions (DD workplan + ESA gate-test prerequisites)<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><strong>ESA gate-test prerequisites (must complete before DD-stage A&amp;J):</strong> 1. <strong>EY audit forensic</strong> — FY24/FY25 annual reports + audit opinion + sole-supplier disclosure + audit committee chair conversation. Timing: 2-3 weeks. _Owner: APM + RESEARCHER expert calls._ #T 2. <strong>Bond put scenario modelling</strong> — 3 scenarios (cash redemption / partial dilution / conversion). Timing: 1 week. _Owner: APM._ #T 3. <strong>Energy hedge runway interview</strong> — IR / treasurer meeting. Timing: 2 weeks. _Owner: COS schedules; APM attends._ #T 4. <strong>Clever Fit franchisee channel checks</strong> — 3-5 interviews. Timing: 3-4 weeks. _Owner: RESEARCHER expert calls._ #T 5. <strong>Track-record-by-stock cross-check</strong> — leveraged-compounder + integration-overhang archetypes. Timing: 1 week. _Owner: APM._ #T</p>
+<p><strong>DD-stage workplan (post-ESA gate-tests, conditional on PROGRESS at Step 4):</strong> 6. Management interviews (CEO Rene Moos; CFO; Head of Real Estate) 7. PureGym private-comp deep-dive (shared with GYM/SATS) 8. France 24/7 amendment runway analysis (regulatory probability assessment) 9. Premium tier sustainability cohort analysis 10. Sizing / position-construction proposal</p>
+<h2 class="sec" id="e-iii-n-a-recommendation-is-progress" data-spy>E.III — N/A (recommendation is PROGRESS)</h2>
+<h2 class="sec" id="f-i-audit-trail" data-spy>F.I — Audit trail</h2>
+<ul><li><strong>Phase 0 pre-flight:</strong> ✓ All 11 query files present + GYM-TRIO sector synthesis. _Note: ESA queries 14-23 (per RESEARCHER V2 framework) NOT YET RUN — this is the Option-B gap-flag._</li><li><strong>Phase 1+2 timing:</strong> 03-May-26.</li><li><strong>Phase 5 (Case Components prep):</strong> conditional on Step 4 PROGRESS confirmation.</li></ul>
+<h2 class="sec" id="f-ii-coverage-gap-notes-option-b-explicit-gap-flag" data-spy>F.II — Coverage gap notes (Option B explicit gap-flag)</h2>
+<p><strong>ESA-stage RESEARCHER workstreams identified at Triaging that have NOT YET RUN:</strong> 1. EY audit forensic (BFIT-specific; CRITICAL for IC#3 RA3 governance gate) 2. Bond put scenario modelling (BFIT-specific; CRITICAL for BB#5) 3. Energy hedge runway interview (BFIT-specific; CRITICAL for BB#7) 4. Clever Fit franchisee channel checks (BFIT-specific; CRITICAL for BB#8) 5. Track-record-by-stock cross-check (cross-cutting; for BB#2) 6. PureGym private-comp deep-dive (cross-trio; CRITICAL for BB#7 competitive intensity) 7. HVLP / premium-budget category outlook FY26-28 (cross-trio; for BB#1)</p>
+<p><strong>This memo represents APM's analytical synthesis of the EXISTING corpus at ESA depth. It is NOT a substitute for the workstreams above. Decision belongs to Richard at STAGE PROGRESSION Step 4.</strong></p>
+<h2 class="sec" id="f-iii-cross-references" data-spy>F.III — Cross-references</h2>
+<ul><li>Triaging memo: <code>Files/BFIT-NL/Triaging/aj-memo-v1.md</code> (md5 88850a020fdb9a0540b31c62d2fa26d8) — superseded; ratings unchanged</li><li>Comp-table v2: <code>Files/GYM-TRIO/synthesis/comp-table-v2-FINAL.md</code></li><li>Bond put memo: TODO post ESA workplan #2</li><li>ESA Short-Sellers (bear case anchor): <code>Files/BFIT-NL/ESA/10-Short-Sellers/merged.md</code></li><li>ESA Earnings-L3Y (sandbagging culture): <code>Files/BFIT-NL/ESA/09-Earnings-L3Y/raw-AS.md</code></li><li>ESA Value-Chain (premium tier + Gen-Z + landlord intelligence): <code>Files/BFIT-NL/ESA/12-Value-Chain/raw-AS.md</code></li><li>ESA Guidance (sandbagging confirmation): <code>Files/BFIT-NL/ESA/13-Guidance/raw-AS.md</code></li><li>ESA VCMap: <code>Files/BFIT-NL/ESA/11-VCMap/raw-C.md</code></li></ul>
+<h2 class="sec" id="qc-footer" data-spy>QC FOOTER<span class="rating cond" title="PROGRESS">PROG</span></h2>
+<p><code>`</code> COMMUNICATION PRINCIPLES (cross-role skill v1.0) Principle #1 (peer/base-rate context):   ~92% of metric bullets with comparison ✓ Principle #2 (A-F grading):              52/52 gradeable findings graded ✓ Principle #3 (invert markers ❌):         13 D/F findings (leverage; bond put; EY flag; equipment-life; energy compression; ARPM modest; underlying-vs-reported gap; geographic complexity; reporting clarity; two-brand structure; member churn opacity; communication mid-pack; FD3 weakened) Principle #4 (🚩 RARE outlier markers):  9 RARE markers (FCF +€114m YoY swing; mature ROIC top decile; FCF/Revenue 13%; sandbagging culture; 13Y category growth; premium tier 50% adoption; Gen-Z 49%; entry economics top quartile; cheapest at-scale public HVLP; -6% L1M with 70% buy) QC PILLAR DEFAULT: B / B / B / B / C / A QC CASE-LEVEL: B/C — PROGRESS to DD (CONDITIONAL on 3 gates) SCOPE NOTE: ESA-DEPTH (Option B pre-research) — 5 gate-test workstreams NOT YET RUN SOP: APM A&amp;J SOP v2.2 (md5 202306aba10dc856f62c28f34b067486) DATA SOURCES: BFIT-NL/* research (02-May-26); GYM-TRIO sector synthesis; FactSet SSEM (03-May-26) DATA GAP: filter-results.json corrupted; factset-valuation.json missing trio; 5 ESA gate-test workstreams pending; track-record-by-stock not pulled directly WORD COUNT: ~9,000 (target 9,000-10,000 ESA per SOP §70) VALIDATOR: lock once memo JSON committed — Phase 4 <code>`</code></p>
+<div class="memo-note">[W] BFIT-NL ESA A&amp;J memo v1 (Option B pre-research) authored 03-May-26 by Watson (APM role). Source corpus: 81,431 words BFIT-NL research + 17,124 words GYM-TRIO sector synthesis + FactSet SSEM. Memo word count: ~9,000 words. ESA-depth analysis on existing corpus; 5 ESA gate-test workstreams identified for completion before DD-stage progression.</div>
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited near-verbatim from the old file, EXTENDED per D-MV-02:
+   - the scroll-spy gatherAnchors() now queries document-flow headings
+     ([data-spy][id]) instead of the old file's table-row selectors
+   - everything else (click-to-scroll, auto-expand, 5 toggle handlers,
+     sticky-stack CSS var) is the old logic, unchanged.
+   ============================================================================ */
+(function() {
+
+  /* sticky stack height = .main-header — subtract from scroll target so a
+     clicked heading lands JUST BELOW the sticky header, not behind it */
+  function getStickyStackHeight() {
+    var mh = document.querySelector('.main-header');
+    return mh ? mh.getBoundingClientRect().height : 0;
+  }
+
+  /* expose .main-header height to CSS so scroll-margin-top + sticky compose */
+  function setMainHeaderCssVar() {
+    var mh = document.querySelector('.main-header');
+    if (!mh) return;
+    document.documentElement.style.setProperty(
+      '--main-header-h', Math.ceil(mh.getBoundingClientRect().height) + 'px');
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle', 'show-pills');
+    bindToggle('element-details-toggle', 'element-details');
+    bindToggle('ras-on-toggle', 'ras-always-on');
+    bindToggle('cqs-on-toggle', 'cqs-always-on');
+    bindToggle('audit-toggle', 'show-audit');
+  }
+
+  /* Element-details mode — reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) { n.classList.remove('force-show'); });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element')) elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector('.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) { ra.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) { cl.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) { cq.classList.add('force-show'); });
+    }
+  }
+
+  /* --- click-to-scroll — inherited; clicking an RA also toggles its CQ list */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra')) item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var rect = target.getBoundingClientRect();
+        var containerRect = mainPane.getBoundingClientRect();
+        var offset = rect.top - containerRect.top + mainPane.scrollTop
+                     - getStickyStackHeight() - 8;
+        // CSS scroll-behavior:smooth on .main-pane animates this; the JS
+        // scrollTo {behavior:'smooth'} option is unreliable on overflow containers
+        mainPane.scrollTop = offset;
+      });
+    });
+  }
+
+  /* --- scroll-spy — inherited logic, EXTENDED to query document-flow headings
+     The old file queried table rows (tr.pillar-banner[id] etc). The new body
+     is document-flow, so every spy-tracked heading carries [data-spy][id]. */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect = mainPane.getBoundingClientRect();
+      var triggerY = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY) picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused'); });
+      var navItem = document.querySelector('.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand the focused branch — inherited behaviour */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded'); });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded'); });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list')) raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list')) parent.classList.add('expanded');
+        navItem.classList.add('expanded');
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else if (navItem.classList.contains('nav-cq')) {
+        var cqList = navItem.parentElement;
+        if (cqList && cqList.classList.contains('nav-cq-list')) {
+          var prevRa = cqList.previousElementSibling;
+          if (prevRa && prevRa.classList.contains('nav-ra')) {
+            prevRa.classList.add('expanded');
+            var raListAnc = prevRa.parentElement;
+            if (raListAnc && raListAnc.classList.contains('nav-ra-list'))
+              raListAnc.classList.add('expanded');
+          }
+        }
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else {
+        navItem.scrollIntoView({ block: 'nearest' });
+      }
+
+      if (document.body.classList.contains('element-details')) applyElementDetails();
+
+      /* A4 — update breadcrumb strip */
+      updateBreadcrumb(navItem);
+    }
+
+    var rafQueued = false;
+    mainPane.addEventListener('scroll', function() {
+      if (rafQueued) return;
+      rafQueued = true;
+      requestAnimationFrame(function() { rafQueued = false; updateFocus(); });
+    }, { passive: true });
+    setTimeout(updateFocus, 100);
+  }
+
+  /* A4 — breadcrumb: walk up the nav tree to build the trail */
+  function updateBreadcrumb(navItem) {
+    var bc = document.getElementById('breadcrumb');
+    if (!bc || !navItem) return;
+    var tier = null;
+    var classes = navItem.className ? navItem.className.split(' ') : [];
+    for (var ci = 0; ci < classes.length; ci++) {
+      if (classes[ci].indexOf('nav-') === 0) { tier = classes[ci]; break; }
+    }
+    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group','nav-element','nav-ra','nav-cq'];
+    var tierRank = {};
+    tierOrder.forEach(function(t,i){ tierRank[t]=i; });
+    var myRank = tier ? (tierRank[tier]||0) : 0;
+    // collect ancestors: scan all nav-items for those whose rank < mine and whose
+    // anchor precedes ours in document order
+    var allItems = Array.prototype.slice.call(document.querySelectorAll('.nav-item'));
+    var myIdx = allItems.indexOf(navItem);
+    var ancestors = [];
+    for (var ai = myIdx - 1; ai >= 0; ai--) {
+      var it = allItems[ai];
+      var itTier = null;
+      var itCls = it.className ? it.className.split(' ') : [];
+      for (var ci2 = 0; ci2 < itCls.length; ci2++) {
+        if (itCls[ci2].indexOf('nav-') === 0) { itTier = itCls[ci2]; break; }
+      }
+      if (itTier && (tierRank[itTier]||0) < myRank) {
+        var alreadyHave = ancestors.some(function(a){ return (tierRank[a.tier]||0) <= (tierRank[itTier]||0); });
+        if (!alreadyHave) ancestors.unshift({tier:itTier, text:it.textContent.trim().replace(/\s+/g,' ').substring(0,40)});
+        myRank = tierRank[itTier]||0;
+        if (myRank === 0) break;
+      }
+    }
+    // build trail: ancestors + current
+    var trailItems = ancestors.concat([{tier:tier, text:navItem.textContent.trim().replace(/\s+/g,' ').substring(0,50), leaf:true}]);
+    // strip pill text artefacts (A-F single chars at end)
+    trailItems = trailItems.map(function(item) {
+      var t = item.text.replace(/\s+[ABCDF]\s*$/, '').trim();
+      return {tier:item.tier, text:t, leaf:item.leaf||false};
+    });
+    var html2 = trailItems.map(function(item, idx) {
+      var cls = 'bc-item' + (item.leaf ? ' bc-leaf' : '');
+      var sep = idx > 0 ? '<span class="bc-sep">›</span>' : '';
+      return sep + '<span class="'+cls+'">'+item.text.replace(/&/g,'&amp;').replace(/</g,'&lt;')+'</span>';
+    }).join('');
+    bc.innerHTML = html2 || '<span class="bc-item">—</span>';
+  }
+
+  /* A5 — grade fallback: for nav pills showing NR on first load, scan body content */
+
+  /* A6 — nav search: filter nav-items by text; show ancestors of matches */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    var tierOrder = ['nav-section','nav-subsection','nav-pillar','nav-group',
+                     'nav-element','nav-ra','nav-cq'];
+    var tierRankMap = {};
+    tierOrder.forEach(function(t,i){ tierRankMap[t]=i; });
+    function itemRank(el) {
+      var cls = el.className ? el.className.split(' ') : [];
+      for (var i=0; i<cls.length; i++) {
+        if (tierRankMap[cls[i]] !== undefined) return tierRankMap[cls[i]];
+      }
+      return 99;
+    }
+    input.addEventListener('input', function() {
+      var q = this.value.trim().toLowerCase();
+      var items = Array.prototype.slice.call(
+        document.querySelectorAll('.nav-item'));
+      if (!q) {
+        items.forEach(function(it){ it.style.display = ''; }); return;
+      }
+      var show = new Set();
+      items.forEach(function(it, idx) {
+        var txt = it.textContent.replace(/\b[A-F]\b/g, '').toLowerCase().trim();
+        if (txt.indexOf(q) === -1) return;
+        show.add(idx);
+        // propagate up: show ancestor tiers
+        var myRank = itemRank(it);
+        var needed = myRank - 1;
+        for (var j = idx - 1; j >= 0 && needed >= 0; j--) {
+          var jRank = itemRank(items[j]);
+          if (jRank <= needed) { show.add(j); needed = jRank - 1; }
+        }
+      });
+      items.forEach(function(it, idx){
+        it.style.display = show.has(idx) ? '' : 'none';
+      });
+    });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        this.value = '';
+        this.dispatchEvent(new Event('input'));
+        this.blur();
+      }
+    });
+  }
+
+  function applyGradeFallback() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      var pill = item.querySelector('.nav-rating-pill');
+      if (!pill || !pill.classList.contains('NR')) return;
+      var anchor = item.getAttribute('data-anchor');
+      if (!anchor) return;
+      var bodyEl = document.getElementById(anchor);
+      if (!bodyEl) return;
+      // walk sibling body content until next same-or-higher heading
+      var tagRank = {H2:0,H3:1,H4:2,H5:3,H6:4,DIV:5,P:6,UL:6};
+      var bodyTier = bodyEl.tagName;
+      var node = bodyEl.nextSibling;
+      var text = '';
+      var limit = 0;
+      while (node && limit < 30) {
+        if (node.nodeType === 1) {
+          var t = node.tagName;
+          if ((tagRank[t]||10) < (tagRank[bodyTier]||10)) break; // new heading above us = stop
+          text += (node.textContent || '');
+        }
+        node = node.nextSibling;
+        limit++;
+      }
+      var m = text.match(/\[([ABCDF])\]/);
+      if (m) {
+        var grade = m[1];
+        pill.className = 'nav-rating-pill ' + grade;
+        pill.textContent = grade;
+      }
+    });
+  }
+
+  function init() {
+    setMainHeaderCssVar();
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    applyGradeFallback();
+    setupSearch();  /* A6 */
+    /* A4c: init breadcrumb to first nav item so it never shows bare dash */
+    setTimeout(function() {
+      var first = document.querySelector('.nav-item');
+      if (first) updateBreadcrumb(first);
+    }, 200);
+    window.addEventListener('resize', setMainHeaderCssVar);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body></html>

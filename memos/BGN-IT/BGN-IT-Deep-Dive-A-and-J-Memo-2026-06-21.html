@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Banca Generali S.p.A. (BGN-IT) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">24</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings</span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-b">MR2 — Sell-side earnings momentum<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-b">MR3 — Thematic fit<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-b">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]</span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">202</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">36</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">36</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-b">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">166</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-b">Group 1 — Case momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">22</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr-carry-forward-only-at-triag">Element E4 — Technical momentum [NR — carry-forward only at Triaging]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-b">Element E5 — Thematic fit<span class="nav-rating-pill B">B</span><span class="nav-fc">20</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr-carry-forward-only">Element E6 — Sell-side earnings momentum [NR — carry-forward only at Triaging]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">100</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">48</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-b">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill B">B</span><span class="nav-fc">52</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">44</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">44</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]</span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">7</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices</span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Banca Generali S.p.A. (BGN-IT) | TRIAGING</div>
+      <div class="meta">Deep Dive A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">BGN-IT</span> A&amp;J MEMO — Banca Generali S.p.A. (BGN-IT) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 21-Jun-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">~€60.15 (web-fetch 15-Jun-26; BGN-IT absent from prices.json)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">14.7x (FactSet factset-valuation.json; 91st percentile vs universe)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">56% (FactSet ssem.json)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above (directional; exact MA value unavailable)</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Deep Dive</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">BGN-IT (Banca Generali S.p.A.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Italian Wealth Management / Private Banking (FA-network model)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">No active cohort confirmed; sector peers used (FinecoBank, Banca Mediolanum, Azimut)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">FinecoBank (FBK-IT); Banca Mediolanum (BMED-IT); Azimut (AZM-IT)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">~€60.15 (web-fetch 15-Jun-26; BGN-IT absent from prices.json)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">€41.70-€59.45 (stock appears to have recently broken above prior 52-week high)</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">Not available from prices.json; directional assessment: Above</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above (directional; exact MA value unavailable)</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">14.7x (FactSet factset-valuation.json; 91st percentile vs universe)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">Avg €61.61 consensus (FactSet); range €49.70 (Jefferies bear) to €66 (bull)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">24 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BLUF — Bottom Line Up Front: BGN-IT progresses to Early-Stage Assessment. Quality building blocks are best-in-class; FALSE FRIEND hypothesis is the ESA organising frame; Alleanza pilot is the pivotal unresolved variable.</div><div class="lead-prose">Banca Generali is Italy's highest-quality FA-network operator: 2,451 advisors managing EUR116bn AUM at best Assoreti FA productivity (avg EUR36m vs BMED EUR21m), <strong>95.6%</strong> client retention, and a <strong>24%</strong> recurring profit CAGR over the 2022-2024 plan cycle. The 1Q26 earnings beat (net profit EUR126m, +<strong>20%</strong> vs consensus) driven by record net inflows of EUR1.9bn (+<strong>28%</strong> YoY) and a EUR170m Alleanza pilot signals the next growth engine is entering a meaningful validation phase. The primary investment tension is the FALSE FRIEND hypothesis: a business that looks like a high-quality compounder but is structurally vulnerable to performance-fee volatility, rate-cycle deterioration, and governance constraints imposed by a <strong>50.1%</strong> controlling shareholder. At Triaging depth the weight of evidence supports progression: the change forces are tangible, the business fundamentals are best-in-class, and the case simplicity guardrails, while strained by multiple simultaneous strategic fronts, are not broken.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">8 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Business model.</strong> Banca Generali is an Italian private banking and FA-network operator: 2,451 financial advisors manage EUR116bn AUM (primarily HNW clients with avg portfolio EUR285k vs EUR204k for peers), distributing investment and insurance products with <strong>53%</strong> in-house manufactured solutions via a B2C FA channel</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Revenue scale.</strong> Revenue ~EUR980m LTM; 3-year CAGR ~<strong>4%</strong> (management fees, performance fees, NII, insurance); adj CIR ~<strong>38%</strong> (peers: BMED ~<strong>45%</strong>, FBK <strong>28%</strong> on a different model); management fee margin <strong>1.43%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Balance sheet.</strong> CET1 <strong>16.7%</strong> (well above <strong>8.7%</strong> SREP minimum); DPS target EUR2.90/share (<strong>5.3%</strong> yield); cumulative dividends 2022-2025 of EUR8.5/share (top end of guidance range)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Parent and governance.</strong> Assicurazioni Generali S.p.A. owns <strong>50.1%</strong>; high RPT volume (<strong>35%</strong> of pre-tax operating profit); controlled CMD calendar (delayed to H2 2026); succession backstop rests with AG</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Management.</strong> CEO Giancarlo Mossa (9-year tenure, CEO/GM dual-hat, 2026-2029 Assoreti president); 2025 STI EUR886,725 (<strong>114%</strong> of target); total return since 2006 IPO +<strong>934%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Vertical integration.</strong> BG FML (Luxembourg AM), Investlinx (Dublin ETF platform, <strong>75%</strong> stake), Intermonte (capital markets, completed 2025)</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Strategic optionality.</strong> Alleanza Assicurazioni partnership: 10,000 agents, EUR130bn third-party wealth, 1,700 accounts and EUR170m premiums in pilot; Swiss expansion underway; EUR300bn Italian generational wealth transfer by 2033</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Investment style.</strong> Quality compounder with event-driven optionality (Alleanza pilot); cyclical overlay via performance fees; not a pure deep-value or distressed setup</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Watson's page-level conclusion: BGN-IT progresses to ESA. The change forces are real, quantified, and in delivery phase; the quality building blocks are best-in-class; the FALSE FRIEND hypothesis is the central ESA investigation frame, not a Triaging knockout. The risk/reward is appropriate for continued research investment.</div><div class="lead-prose">Section C closing: the full analytical case is built below; the verdict holds.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>Progress to ESA is the correct call.</u> The combination of best-in-class FA productivity, a freshly validated Alleanza growth channel, and 1Q26 record inflows at +<strong>28%</strong> YoY creates a meaningfully differentiated change-force picture, not a consensus case</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>Primary risk: FALSE FRIEND hypothesis not dismissed.</u> AG ownership (<strong>50.1%</strong>) constrains strategic flexibility; high RPT volumes (<strong>35%</strong> of pre-tax operating profit) erode true economic ownership; EUR61.5m provisions for illiquid products represent a governance quality discount that requires forensic ESA attention</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>Performance fee volatility is manageable.</u> Recurring net profit (<strong>74%</strong> of total in 1Q26) provides a stable earnings floor; the Jefferies bear-case scenario (EUR49.70 PT, <strong>50bps</strong> rate stress) deserves stress-testing at ESA but does not derail Triaging progression</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>Key ESA question.</u> Alleanza execution: is the EUR170m pilot genuinely scalable to the EUR130bn wealth pool, or is the channel structurally misaligned with BGN's HNW positioning?</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>Valuation read.</u> At <strong>14.7x</strong> forward P/E (91st percentile), BGN is not cheap, but 91st-percentile earnings quality typically commands a 90th+ multiple; the setup is "premium operator at fair value" rather than "premium operator at a discount"</div></div>
+<div class="memo-closing">Watson's section-level closing: all five BLUF bullets above are sustained by the Section C analysis; no material revisions at this depth.</div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings</div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span></div>
+<p>Stock trading ~EUR60.15, above the prior 52-week high (EUR59.45), with positive trend following record 1Q26 print; peer momentum rank #2 per AlphaSense CF report; price-to-TP headroom only ~<strong>3%</strong> and post-Mediobanca bid recovery stall (-<strong>24%</strong> during bid period) is a recent reminder of downside fragility</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-b" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gB">B</span></div>
+<p>EPS revisions L3M +<strong>3%</strong>, L6M +<strong>7%</strong>, L12M +<strong>2%</strong>; TP revisions L3M +<strong>4%</strong>, L6M +<strong>16%</strong>; Momentum score 7; Buy% <strong>56%</strong>; positive but not exceptional; consensus crowding risk given <strong>56%</strong> Buy vs a stock near all-time highs</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-b" data-spy><span class="id">MR3</span> Thematic fit <span class="g gB">B</span></div>
+<p>Strong Italian-wealth-structural-tailwind alignment (EUR4.1tn addressable, channel shift from bank branches to FA networks); rate-cycle beneficiary via NII; generational transfer EUR300bn by 2033; AI is an enabler not a disruptor for HNW relationship banking; bear-market suitability question on performance fees prevents an A</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span></div>
+<p>Two tangible organic growth engines (Alleanza, Intermonte) on top of a compounding FA-productivity base; NII guidance upgrade; 1Q26 beat; recurring profit <strong>74%</strong> of total; FALSE FRIEND risk warrants ESA investigation</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-b" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gB">B</span></div>
+<p>Best-in-class FA productivity, <strong>95.6%</strong> retention, vertical integration in progress, ROTE ~<strong>30.3%</strong> vs BMED <strong>22%</strong>; multiple simultaneous strategic fronts strain case simplicity; AG governance discount; not an A</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR]</div>
+<p>Not applicable at this stage.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar I verdict at Triaging: the change forces are tangible and multi-layered with genuine new growth vectors (Alleanza) and vertical-integration capture (Intermonte) entering delivery phase. The base is robust: 2025 net profit record EUR455.6m, 2022-2024 cumulative inflows EUR18.2bn vs EUR18-22bn target, and NII guidance upgraded for 2026. The primary uncertainty is whether the Alleanza channel scales materially or merely adds governance complexity without proportionate economic return.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1: Required input change forces. <span class="g gB">B</span></strong> Two external (FA-channel structural shift, NII upgrade cycle) and two internal (Alleanza pilot EUR170m premiums, Intermonte EUR38-48m cumulative benefit by 2030) change forces identified and quantified; base is sound with CET1 <strong>16.7%</strong>, ROTE <strong>30.3%</strong>, recurring profit coverage <strong>74%</strong>; downgrade from A reflects early-stage Alleanza scale and lag vs BMED/FBK on absolute inflows</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2: Required case outputs. <span class="g gNR">NR</span></strong> Not in scope at Triaging; first written at Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3: Sufficient TSR / valuation upside. <span class="g gNR">NR</span></strong> Not in scope at Triaging; first written at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II verdict at Triaging: BGN's building blocks are strong on quality dimensions (ROTE, retention, FA productivity, management track record) and adequate on simplicity dimensions (core business is clear but multiple simultaneous strategic fronts add noise). Case riskiness is elevated by AG governance and performance-fee cyclicality but offset by structural short-seller deterrents and a clean balance sheet.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1: Case momentum. <span class="g gB">B</span></strong> Technical trend positive (stock above 52-week high), sell-side momentum positive (SSEM score 7, EPS revisions L6M +<strong>7%</strong>), thematic alignment solid; Buy% <strong>56%</strong> and thin price-to-TP headroom prevent an A</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2: Case simplicity. <span class="g gC">C</span></strong> Core business is understandable (FA network distributing investment/insurance products) but four simultaneous M&amp;A/strategic fronts reduce focus; E7 score C - passes guardrails with complexity caveats</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3: Core philosophy. <span class="g gB">B</span></strong> ROTE <strong>30.3%</strong>, FA productivity best-in-class, retention <strong>95.6%</strong>, CEO track record <strong>24%</strong> recurring profit CAGR; E11 value-chain dynamics broadly supportive; E9/E10/E12/E13 not yet in scope</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4: Case riskiness. <span class="g gC">C</span></strong> FALSE FRIEND ACH wins the Risks report analysis; AG governance is a structural constraint; no short-seller campaigns (deterred by <strong>50.1%</strong> lock); Jefferies bear-case PT EUR49.70 in <strong>50bps</strong> stress</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5: Case optionality. <span class="g gNR">NR</span></strong> Alleanza, Investlinx, Swiss are genuine upside options to be sized at ESA via E20; not scored at Triaging</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BGN-IT progresses to Early-Stage Assessment. The change forces are tangible, the quality building blocks are best-in-class, and the FALSE FRIEND hypothesis is a manageable ESA investigation rather than a Triaging knock-out.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> No further conditions; ESA must resolve the Alleanza scalability question and the AG governance economic drag</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to brief CoS on KQ research topics for ESA within 48 hours: Alleanza channel economics and scalability, RPT volume and economic impact of AG ownership, performance fee sustainability and high-water mark regulatory risk, Senior Partner concentration; (2) Watson to build full ESA memo incorporating E2, E3, E9, E10, E12 from scratch at ESA floors</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">202 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Banca Generali presents as a high-quality Italian wealth management compounder with two credible new growth engines entering delivery phase (Alleanza insurbanking partnership, Intermonte capital markets vertical integration). The FA-productivity moat is the best in Italian Assoreti, client retention is exceptional at <strong>95.6%</strong>, and the CEO has compounded recurring profit at <strong>24%</strong> CAGR over the 2022-2024 plan. The primary analytical tension at Triaging is the FALSE FRIEND hypothesis: that positive headline beats mask structural vulnerabilities introduced by AG's <strong>50.1%</strong> control, high RPT volumes, and performance-fee cyclicality. At Triaging depth, the weight of evidence favours progression; FALSE FRIEND must be the organising frame for ESA investigation.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">36 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The change forces are multi-layered and quantified: two external tailwinds (Italian wealth channel shift, rate-cycle NII benefit) and two internal growth engines (Alleanza pilot EUR170m premiums, Intermonte EUR38-48m cumulative benefit by 2030) sit on top of a compounding base (recurring profit <strong>74%</strong> of 1Q26 total, ROTE <strong>30.3%</strong>). The robust base passes all four sub-tests: no material headwinds threatening the core, NII guidance raised to EUR335-345m, FA recruitment rebounding, CET1 <strong>16.7%</strong> well above SREP minimum. Grade held at B not A because Alleanza is at EUR170m pilot scale relative to EUR130bn pool, CET1 missed consensus by <strong>15bps</strong>, and absolute inflow volumes trail BMED and FBK in 2025.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 — Required input change forces <span class="g gB">B</span> <span class="secn">36 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E1 earns a B: multiple tangible change forces in delivery phase, with a robust base and credible NII upgrade cycle, offset by early-stage Alleanza scale and a modest CET1 underrun. The case is not "buy the growth story" — it is "proven compounder with two optionality kickers entering validation."</div></div>
+<p><strong>E1 RA1 Summary — Change forces present and material (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>Italian wealth channel structural shift (external):</u> Italy's investable household wealth is ~EUR4.1tn with ~EUR2tn still in bank branches or deposits; the secular migration to FA-network models is an industry-level structural shift and BGN is best-positioned to capture it, with Assoreti's best-ranked FA productivity (avg EUR36m AUM/FA vs BMED EUR21m); the secular tailwind is not rate-cycle-dependent</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>NII upgrade cycle (external, rate-linked):</u> 1Q26 NII of EUR82.7m (+<strong>4.2%</strong> YoY) drove a full-year 2026 NII guidance upgrade to EUR335-345m from prior EUR320-330m range; Euribor curve stabilisation rather than sharp cuts creates a more durable NII contribution than the 2024 consensus feared; the rate sensitivity analysis (<strong>20bps</strong> Euribor cut + market stress = EPS -2-<strong>4%</strong>) is a modest not catastrophic read-through</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>Alleanza insurbanking pilot validation (internal, new growth engine):</u> The Alleanza channel (10,000 agents, EUR130bn third-party wealth) has entered pilot phase with 1,700 accounts opened and EUR170m in premiums written; if the pilot converts to a rollout at even <strong>5%</strong> of the EUR130bn pool, the AUM contribution is transformative (~EUR6.5bn additional AUM at current BGN productivity ratios); the CEO has personally championed this initiative</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>Intermonte vertical integration (internal, margin capture):</u> Intermonte acquisition (completed 2025) gives BGN in-house capital-markets, M&amp;A advisory, and structured-product capabilities, eliminating third-party structuring fees and targeting EUR38-48m in cumulative benefit by 2030 per management guidance; Intermonte opens a new distribution channel for BGN products to Intermonte's institutional client base; this is a clear "capture upstream margin" strategy that FBK and BMED have not pursued</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>FA recruitment rebound (internal, capacity driver):</u> Net FA additions turned positive in 2H25 after the Mediobanca bid disruption (which caused competitor poaching and temporary retention pressure); the 2026 FA pipeline is rebuilding; management guided to positive net additions for FY2026; each incremental senior FA generates ~EUR36m in AUM within 3-5 years at current ratios, making FA headcount the most important volume driver</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><u>Performance fees as earnings kicker (internal, cyclical overlay):</u> 1Q26 performance fees EUR46.6m (+<strong>35.5%</strong> YoY) confirm that in a positive market environment BGN's performance-fee engine is a meaningful accelerant (contributing ~<strong>37%</strong> of 1Q26 operating income); no high-water mark mechanism (regulatory vulnerability but also upside asymmetry); in a flat or bear market this line is near-zero but the recurring base covers operating costs and dividends</div></div>
+<p><strong>E1 RA1 CQ1 — Strong external change forces / tailwinds? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><u>Italian private banking structural penetration gap:</u> FA-network penetration of Italian household wealth is approximately 12-<strong>15%</strong> vs 30-<strong>35%</strong> in UK, Switzerland, and Nordic markets; the secular convergence toward European FA-model norms is a 10-15 year tailwind, not a cyclical dynamic; BGN's HNW positioning (avg client EUR285k vs peer EUR204k) captures the highest-value end of this migration</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><u>Demographics and generational transfer:</u> EUR300bn in Italian private wealth is projected to transfer intergenerationally by 2033; BGN's <strong>65%</strong> multi-product penetration rate (<strong>23.7%</strong> using 4+ products) means the client relationship is stickier than a single-product bank relationship, reducing attrition risk at the point of wealth transfer to heirs</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><u>Regulatory tailwind for managed solutions:</u> Italy's retail investors hold a disproportionate share of wealth in government bonds and bank deposits; post-MIFID II, the compliance-complexity of self-directed bond-ladder strategies is nudging affluent clients toward managed solutions; BGN's <strong>53%</strong> in-house manufactured solution penetration means this regulatory nudge flows directly into BGN revenue</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><u>Euribor stabilisation better than feared:</u> Consensus in 2024-early 2025 priced in aggressive Euribor cuts (<strong>150bps</strong> by end-2025); actual cuts have been shallower, preserving BGN's NII stream; the EUR335-345m 2026 NII guidance upgrade from EUR320-330m is the concrete result of this better-than-feared rate path</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><u>Generali network as distribution amplifier:</u> AG's 10,000-agent Alleanza network provides a zero-cost new-client-acquisition channel with no additional FA recruitment cost required; from an industry-structure perspective, no BGN peer has access to an equivalent organic distribution amplifier of this scale</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><u>European expansion (nascent but real):</u> Investlinx (Dublin ETF platform, <strong>75%</strong> stake) opens a passportable European distribution capability; Swiss expansion underway; these are early-stage optionality items but they demonstrate management is addressing the ceiling of the Italian market, a key forward change signal</div></div>
+<p><strong>E1 RA1 CQ2 — Strong internal change forces? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><u>FA productivity compounding as structural advantage:</u> BGN's EUR36m avg AUM per FA (best Assoreti) vs BMED EUR21m reflects years of disciplined FA selection (targeting Senior Partners at &gt;EUR150m AUM level), premium product platform, and higher HNW client concentration; this productivity gap is durable and is not easily replicable in 2-3 years because it requires the HNW client stock and the relationship tenure (avg 12yr 3mo per client)</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><u>Intermonte integration underway:</u> The Intermonte integration is the most concrete and near-term internal change force; elimination of third-party structuring costs and addition of in-house M&amp;A/advisory revenues represents a clear EPS accretion pathway not yet fully in consensus estimates; the EUR38-48m cumulative benefit range by 2030 is management guidance with early-stage integration indicators on-track per CF report</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><u>Alleanza pilot conversion logic:</u> The internal change force is management's ability to convert Alleanza's 10,000 agents from life-insurance distributors to full private-banking referral channels; the pilot (1,700 accounts, EUR170m premiums) demonstrates product-market fit with the Alleanza client profile; the internal question is whether BGN's onboarding and training infrastructure can absorb a step-change in new account volume without diluting HNW service quality</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><u>In-house manufactured solutions penetration deepening:</u> At <strong>53%</strong> of AUM in BGN-manufactured products (BG FML, Investlinx ETFs, insurance wrappers), the management fee margin (<strong>1.43%</strong>) is partially insulated from third-party fund pricing pressure; each percentage point gained in in-house penetration is a structural margin improvement</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><u>Recurring profit flywheel:</u> The 2022-2024 plan delivered <strong>24%</strong> recurring profit CAGR vs 10-<strong>15%</strong> target, and the 2025 net profit record of EUR455.6m continues the compounding trajectory; the mechanism driving this is the combination of AUM growth, fee margin stability, and a very low cost base (adj CIR <strong>38%</strong>); the flywheel is self-reinforcing: more AUM drives more management fees which funds better FA tools which drives higher FA productivity which drives more AUM</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><u>Dividend capacity as governance signal:</u> Cumulative dividends 2022-2025 of EUR8.5/share (top end of guidance) communicate management's confidence in cash generation; the 70-<strong>80%</strong> payout ratio and DPS target of EUR2.90 (<strong>5.3%</strong> yield) provide a return floor for shareholders even if AUM growth disappoints</div></div>
+<p><strong>E1 RA2 Summary — Robust base? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><u>Balance sheet strength:</u> CET1 <strong>16.7%</strong> is <strong>800bps</strong> above the <strong>8.7%</strong> SREP minimum; the balance sheet is not a constraint and provides optionality for further M&amp;A or capital return; the <strong>15bps</strong> miss vs consensus (<strong>17.1%</strong>) is attributable to 1Q26 growth-mode capital deployment (Alleanza pilot, Intermonte integration costs), a productive use of excess capital rather than deterioration</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><u>ROTE <strong>30.3%</strong> vs BMED <strong>22.0%</strong>:</u> BGN's return on tangible equity is the highest among Italian FA-network peers; it reflects the combination of a high-margin product mix, low cost base, and limited capital requirement per unit of AUM; ROTE has been stable-to-improving over the 2022-2025 period</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><u>NII covered by diversified sources:</u> NII EUR82.7m in 1Q26 (+<strong>4.2%</strong> YoY) is derived from a diversified balance-sheet portfolio (bonds, loans, deposits); the raised 2026 guidance (EUR335-345m) suggests management has high confidence in the NII trajectory even with some further rate normalisation</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><u>Client retention <strong>95.6%</strong>:</u> This is an extraordinary retention figure for an FA-network model; it means BGN is not churn-dependent for AUM growth as inflows are additive rather than replacement; the <strong>95.6%</strong> figure vs sector average broadly mid-80s% implies BGN's churn-adjusted AUM growth is structurally higher than peers at similar gross inflow levels</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><u>Revenue diversification:</u> BGN's four-stream revenue model (management fees, performance fees, NII, insurance premiums) provides more balance than a pure management-fee model (BMED) or a banking plus brokerage model (FBK); the recurring-fee base covers the dividend and most of the operating cost base even in zero-performance-fee years</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><u>CEO track record and tenure:</u> CEO Mossa's 9-year track record (2016-present) includes navigating the Mediobanca bid disruption, the 2022 rate-cycle pivot, and the Intermonte acquisition, all while delivering above-target plan performance (EUR18.2bn cumulative inflows vs EUR18-22bn target; <strong>24%</strong> recurring CAGR vs 10-<strong>15%</strong> target); this is not a new-hire risk profile</div></div>
+<p><strong>E1 RA2 CQ1 — Absence of external headwinds? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><u>Rate sensitivity is manageable, not catastrophic:</u> The Jefferies downside stress scenario (<strong>20bps</strong> Euribor cut + <strong>10%</strong> market correction) produces EPS -2-<strong>4%</strong> and ROTE dropping to <strong>24%</strong>; this is a step-down from <strong>30.3%</strong> but not a business-model impairment; the NII raised guidance already incorporates expected rate normalisation</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><u>No material FX exposure:</u> Revenue is <strong>98.5%</strong> Euro-denominated (Italian clients, Euro-priced assets, Generali group network); FX is effectively immaterial to the investment case unlike AZM which has meaningful non-Euro AUM; this simplifies the macro analysis considerably</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><u>No short-seller campaign:</u> The <strong>50.1%</strong> AG ownership creates a structural deterrent to short-sellers (difficult to borrow and hard to build a destabilising short); the 2022 Bloomberg trade-receivables attack was fully neutralised; zero published short-seller campaigns post-Mediobanca bid</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><u>Mediobanca bid disruption is past:</u> The Mediobanca hostile bid (lapsed August 2025) caused -<strong>24%</strong> underperformance vs peers during the bid period; post-lapse the discount has closed and the stock has re-rated; the post-bid period is a clean slate with no pending M&amp;A risk and management focus restored</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><u>Regulatory risk (EU inducement scrutiny) is low-probability at the 3-year horizon:</u> EU MiFID II inducement rules targeting trail commissions in advised investment products have been discussed for years without Italian implementation; Italy's regulatory posture has been to protect the FA-network model; the risk exists but is not imminent at the 3-year planning horizon</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><u>No significant credit or liquidity risk:</u> BGN is not a lending-heavy bank; the balance sheet is predominantly investment securities and deposits; the credit portfolio is small and high-quality; the 2014-2019 transfer-pricing tax settlement (EUR45.9m) is resolved; no visible litigation risk of business-model significance</div></div>
+<p><strong>E1 RA2 CQ2 — Well-invested base? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><u>Technology investment: adequate but not leading:</u> BGN has invested in digital onboarding, mobile portfolio views, and FA tools but the digital platform is not at FBK's level (FBK has a full banking plus brokerage digital offering with <strong>82%</strong> digital engagement); BGN's model is human-led so technology investment is FA-enablement, not client self-service; this is a deliberate positioning choice, not a lagging investment</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><u>Vertical integration investment: active:</u> BG FML (Luxembourg, established), Investlinx (Dublin ETF platform, <strong>75%</strong> stake 2024), Intermonte (capital markets, completed 2025) represent three material investment decisions in 3 years; each adds a layer of in-house capability and reduces third-party cost leakage; the pipeline of investments appears calibrated and not over-extended</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><u>FA recruitment infrastructure:</u> The disruption from the Mediobanca bid (competitor poaching, FA pipeline pause) is now being rebuilt; investment in senior FA recruitment (targeting Senior Partners &gt;EUR150m) is the primary growth-capital allocation of the business; each senior FA represents ~EUR36m of AUM in the short-to-medium term</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><u>Alleanza pilot infrastructure: modest cost, high leverage:</u> The Alleanza pilot (1,700 accounts, EUR170m premiums) required BGN to build a scalable onboarding process for a different client segment (Alleanza clients are mass-affluent, not HNW); the investment is relatively modest and the pilot is testing whether the model works before scaling; this is disciplined capital deployment</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><u>Balance sheet as a strategic asset:</u> CET1 <strong>16.7%</strong> gives BGN the ability to absorb further investments (Alleanza scale-up, potential Swiss acquisition) without a capital raise; peers BMED and AZM have tighter capital positions, limiting their M&amp;A optionality</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><u>Employee base: engaged and productive:</u> <strong>87%</strong> employee engagement (<strong>96%</strong> survey response rate) and <strong>6%</strong> turnover (vs FBK <strong>3%</strong>, AZM <strong>15%</strong>) reflect a well-invested and stable workforce; the low-turnover middle ground between FBK (very stable) and AZM (high-energy, higher attrition) suggests BGN has the right workforce profile for its growth phase</div></div>
+<p><strong>Counter-view considered (E1):</strong> The FALSE FRIEND hypothesis holds that BGN's impressive headline metrics mask structural decay introduced by AG's growing commercial integration (RPT volume <strong>35%</strong> of pre-tax operating profit), Alleanza's potential to dilute HNW positioning, and the performance-fee model's vulnerability to a prolonged bear market; Watson's assessment: this counter-view is material and must organise the ESA investigation, but does NOT knock out Triaging progression; the base metrics (ROTE <strong>30.3%</strong>, retention <strong>95.6%</strong>, CET1 <strong>16.7%</strong>, recurring profit <strong>74%</strong> of total) are not consistent with an organisation in structural decay; a business in genuine structural decay would show client-level margin compression, FA attrition, or balance-sheet deterioration, none of which are visible at Triaging depth</p>
+<p><strong>Downstream actions (E1):</strong> (1) Watson at ESA to run KQ research on Alleanza channel economics specifically: average ticket size, margin profile vs BGN HNW average, and FA training investment required per Alleanza-originated account; (2) Watson at ESA to quantify the full economic drag of AG-related RPT volumes and compare to a "standalone BGN" valuation scenario</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-b" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">166 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II at Triaging: Group 1 (case momentum) is solid; Group 2 (case simplicity) is adequate but strained by multiple strategic fronts; Group 3 (core philosophy) shows best-in-class quality metrics at the E11 value-chain level; Group 4 (case riskiness) is elevated but not disqualifying. The overall B reflects a business with excellent fundamentals and a moderately complex strategic picture that is appropriate for ESA investigation.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-b" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gB">B</span> <span class="secn">22 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Technical trend positive and sell-side earnings momentum positive; thematic fit solid; held at B rather than A because Buy% (<strong>56%</strong>) and price-to-TP headroom (~<strong>3%</strong>) limit the short-term momentum read.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr-carry-forward-only-at-triag" data-spy>Element E4 — Technical momentum [NR — carry-forward only at Triaging] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E4 first substantive Investment Analyst write-up is at Early-Stage Assessment (second pass, floor 4). At Triaging, MR1 captures the directional technical read (stock ~EUR60.15, above prior 52-week high EUR59.45, peer momentum rank #2). No further E4 content is in scope at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Downstream actions (E4):</strong> (1) Watson at ESA to load live prices.json data for BGN-IT or confirm continued absence and escalate to pipeline team; (2) Watson at ESA to verify 200-day MA level and confirm Above/Below with precision</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-b" data-spy>Element E5 — Thematic fit <span class="g gB">B</span> <span class="secn">20 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BGN-IT has strong alignment with the Italian-wealth-structural-shift thematic (secular) and the rate-stabilisation thematic (cyclical). The bear-market suitability question on performance fees is the primary offset, alongside potential EU inducement scrutiny. E5 carries x2 double-weight at Triaging; floor 6 bullets per RA.</div></div>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>Performance fees collapse in a bear market:</u> BGN's performance fee line (EUR46.6m in 1Q26, <strong>37%</strong> of operating income in a strong quarter) is effectively binary: sustained bull-market periods generate meaningful fees and bear or flat markets generate near-zero; in the 2022 drawdown (Italian equities -<strong>15%</strong>) performance fees collapsed and operating income dropped materially; this is the most important bear-market vulnerability in the BGN model</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>Recurring revenue base provides a floor:</u> The recurring net profit in 1Q26 was EUR93.5m (<strong>74%</strong> of total net profit EUR126m); the recurring base (management fees, NII, insurance commissions) is not market-level-sensitive in the short term; client retention (<strong>95.6%</strong>) ensures AUM does not collapse in a downturn and management fees on AUM continue even if performance fees are zero</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>NII provides partial counter-cyclical offset:</u> In an economic slowdown, central banks typically cut rates compressing NII; but BGN's NII diversification (bonds, loans, deposits) and the Euribor sensitivity analysis (<strong>20bps</strong> cut = EPS -2-<strong>4%</strong>) suggest the NII hit is manageable; the raised 2026 NII guidance incorporates expected normalisation</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>HNW clients are stickier in downturns:</u> BGN's client base (avg portfolio EUR285k, <strong>95.6%</strong> retention) is predominantly HNW and this segment has lower propensity to panic-sell than mass-market clients; in 2022 BGN still generated positive net inflows (though below peak), confirming demand durability through moderate drawdowns</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>Dividend cover is robust:</u> The 70-<strong>80%</strong> payout ratio and EUR2.90 DPS target can be sustained from recurring net profit alone in a zero-performance-fee environment; this limits dividend risk in a bear market, a key concern for income-oriented shareholders</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><u>Stress scenario ROTE drops to <strong>24%</strong> (Jefferies bear):</u> In a <strong>50bps</strong> Euribor stress scenario with market correction, ROTE drops from <strong>30.3%</strong> to ~<strong>24%</strong>; this is still above BMED's normalised ROTE of <strong>22%</strong>; the business does not become unprofitable or balance-sheet-impaired in the stress scenario, it simply earns a lower return while remaining comfortably above peers</div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><u>AI disruption risk is low for HNW relationship banking:</u> BGN's value proposition is the FA relationship: the advisor understands the client's full wealth picture, tax situation, estate planning needs, and behavioural biases; this relationship-led model is structurally more resistant to AI disruption than a pure execution-only or digital-robo-advisory model; affluent clients above EUR500k have documented lower digital-first substitution rates in European market research</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><u>FBK is the AI-enabled peer pressure:</u> FinecoBank has announced a target of 25-<strong>35%</strong> productivity improvement from AI by 2029 and is building a pan-European platform; if FBK achieves its AI productivity targets it may be able to service mass-affluent clients at a lower cost-per-client, potentially competing with BGN's lower-tier FA relationships (avg EUR36m AUM masks a wide distribution with some FAs managing EUR15-20m)</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><u>BGN is using AI as an FA-enablement tool:</u> BGN is investing in AI tools to increase FA productivity (more clients per FA, better client profiling, automated compliance checks); this is the right strategic posture: using AI to defend and enhance the FA relationship rather than trying to replace it</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><u>In-house product manufacturing partially insulates revenue:</u> BGN's <strong>53%</strong> in-house manufactured solutions means that even if AI disrupts the third-party fund distribution industry (reducing trail fees), BGN's revenue is partially protected as it earns management fees on its own products regardless of the distribution channel</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><u>No existential AI risk at the 3-5 year horizon:</u> At the 3-5 year horizon relevant to the investment case, AI is an enabler (productivity gains, better client profiling, faster compliance) not an existential disruptor for HNW relationship banking; the scenario in which AI replaces a Senior Partner managing EUR150m+ of HNW client relationships is not a credible near-term risk</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><u>Digital vulnerability vs FBK is the medium-term risk:</u> Expert validation (AlphaSense LF report) flags digital platform adequacy as BGN's primary medium-term competitive vulnerability, not for current HNW clients who value the FA relationship but for the next generation of clients who may prefer a more integrated digital experience; this is an ESA-level investigation item</div></div>
+<p><strong>E5 RA3 — Suitability for Iran oil-price induced inflation or demand deterioration (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><u>Oil-price induced inflation channel is indirect:</u> Italy is an oil-importing economy; energy-price inflation would compress Italian consumer purchasing power and potentially depress the savings rate that feeds new AUM inflows; however BGN's client base (HNW, avg EUR285k portfolio) is less sensitive to energy-price inflation on discretionary savings than mass-market clients and the transmission mechanism is indirect and slow</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><u>Demand deterioration channel is limited:</u> BGN manages existing wealth (stock), not primarily capturing new savings (flow); even in an economic downturn, the existing EUR116bn AUM continues generating management fees; the sensitivity is to AUM-level (market performance) not primarily to new savings flows, though inflow disruption would affect medium-term growth</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><u>NII in an inflationary environment could be a tailwind:</u> If Iran oil-price inflation triggers a rate re-hike cycle rather than rate cuts, BGN's NII would benefit as the 2026 guidance already assumes stable-to-mildly declining rates; a rate re-hike would be an upside scenario for NII relative to current guidance</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><u>Performance fees in a volatile environment:</u> Oil-price induced market volatility would likely suppress performance fees as assets fluctuate without a sustained upward trend; this is the same vulnerability as the bear-market analysis (performance fees require sustained positive absolute returns, not just relative outperformance) and is the primary exposure in this scenario</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><u>Geopolitical risk and Italian sovereign spread:</u> An Iran-driven geopolitical shock would likely widen Italian sovereign spreads (BTP-Bund), which could compress the value of BGN's sovereign bond holdings on the balance sheet; however the impact is a mark-to-market move on the AFS book rather than an earnings event unless spreads widen to credit-event territory; BGN's CET1 buffer (<strong>800bps</strong> above SREP) provides significant shock absorption</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><u>Generali group buffer:</u> Being part of the Generali group provides some diversification as Generali has global operations and its balance sheet is not purely Italy-exposed; in a severe Italian sovereign stress, Generali's European diversification may backstop BGN's financial position, though this is speculative at Triaging depth</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><u>Inflation scenario assessment vs sector peers:</u> In an oil-price inflation scenario BGN's relative resilience vs BMED and AZM is notable; BMED has similar Italy-only exposure (similar vulnerability), while AZM's global AUM base (including USD and EM-denominated assets) gives it more natural FX and geographic diversification; BGN outperforms BMED in an inflation scenario due to its higher NII share (NII at EUR335-345m 2026 guidance vs BMED's lower NII base), which benefits from any rate re-hike response to inflation; AZM outperforms BGN on geographic diversification but underperforms on governance quality and retention; on balance BGN is at or above sector median on inflation resilience</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><u>Demand elasticity in an inflationary environment:</u> Italian HNW wealth management demand has historically been inelastic to mild inflation cycles (1-<strong>3%</strong> CPI); the wealth management decision (how to allocate EUR285k+ of investable assets) is driven by portfolio return objectives and tax efficiency rather than current household budget pressure; the inflationary environment could actually increase demand for inflation-hedging products (real assets, commodities, inflation-linked bonds) where BGN's in-house product manufacturing capability allows it to respond quickly</div></div>
+<p><strong>Counter-view considered (E5):</strong> The most compelling counter-view is that BGN's thematic alignment is overstated: the Italian wealth channel shift is structural but slow (10-15 years), the NII benefit is cyclical and reversing, and performance fees are volatile; this counter-view would assign E5 a C or D on the grounds that BGN is a financial-services cyclical dressed as a structural-growth compounder; Watson's assessment: the E5 rating (B) correctly captures this nuance; BGN is thematically aligned but not a "pure play" on an accelerating thematic; the bear-market suitability question on performance fees prevents an A; the counter-view is a reason to stress-test the performance-fee line at ESA, not a reason to park; the <strong>74%</strong> recurring-profit coverage ratio is the primary rebuttal to the "cyclical dressed as structural" characterisation</p>
+<p><strong>Downstream actions (E5):</strong> (1) Watson at ESA to load active.md thematic file (THEMATICS PAUSE currently active — do not load at Triaging) and map BGN explicitly to each active thematic with a score; (2) Watson at ESA to build a stress-test model for a zero-performance-fee year impact on EPS and dividend cover</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr-carry-forward-only" data-spy>Element E6 — Sell-side earnings momentum [NR — carry-forward only at Triaging] <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E6 first substantive write-up is at Early-Stage Assessment. At Triaging, MR2 captures the sell-side momentum read: EPS revisions L3M +<strong>3%</strong>, L6M +<strong>7%</strong>, SSEM score 7, Buy% <strong>56%</strong>, TP revisions L3M +<strong>4%</strong>, L6M +<strong>16%</strong>. No further E6 content is in scope at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Downstream actions (E6):</strong> (1) Watson at ESA to refresh SSEM data and check for any rating changes post-CMD rescheduling; (2) Watson to note that CMD (delayed to H2 2026) is a potential positive catalyst that could improve Buy% and trigger TP upgrades</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">100 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Core business is clean and understandable; however, four simultaneous strategic initiatives (Intermonte, Alleanza, Investlinx, Swiss) add complexity. E7 passes all guardrails but with caveats and grades C not B.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">48 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">E7 earns a C: the core business is simple (FA network plus investment products) but four simultaneous M&amp;A/strategic initiatives, a contested Alleanza channel-fit thesis, and a governing-shareholder complexity layer prevent a clean pass. E7 carries x2 double-weight at Triaging; floor 6 bullets per RA/CQ.</div></div>
+<p><strong>E7 RA1 Summary — Focused bet? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>Core business is one thing:</u> At the atomic level BGN is a high-quality FA network monetising HNW client relationships through investment and insurance products; this is a one-sentence business description; complexity is introduced by the strategic layer on top, not by the core model</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>Fulcrum driver count: three (marginal pass):</u> The three drivers accounting for the majority of EPS growth are (1) AUM growth through net inflows and market returns (management fee revenue), (2) NII on the deposit/bond book, and (3) performance fees; three is at the upper end of the "2 or fewer fulcrum drivers" ideal but acceptable at Triaging</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>Key driver count: five to six (marginal, high end):</u> The three fulcrum drivers are augmented by: (4) FA recruitment, (5) management fee margin stability, (6) Alleanza channel maturation; six drivers is above the "4 or fewer" ideal in the SOP and represents a yellow flag, not a red flag</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>Alleanza adds a new fulcrum driver that is still unvalidated:</u> Alleanza is the most consequential strategic initiative but also the most uncertain; if it scales it becomes the primary AUM growth driver within 3-5 years, transforming the investment case; if it does not scale it is a distraction; this binary outcome uncertainty complicates the driver picture</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>Intermonte is a bolt-on, not a new business:</u> Intermonte's capital markets capability is an in-house service provider for BGN's existing product manufacturing needs; it does not add a new customer segment or revenue stream from a standing start but internalises an existing cost; the driver impact is on margin (cost saving) not revenue growth, which is simpler to underwrite than Alleanza</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><u>Swiss and Investlinx are optionality, not active drivers:</u> Swiss expansion and Investlinx are early-stage with de minimis revenue contribution in the next 2-3 years; they should be classified as optionality items to be sized at ESA via E20, not active fulcrum drivers; stripping them out reduces the driver count to four, which is acceptable</div></div>
+<p><strong>E7 RA1 CQ1 — 2 or less fulcrum drivers AND 4 or less key drivers? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><u>Verdict: marginal pass:</u> Two fulcrum drivers (AUM compounding via net inflows; NII) plus Alleanza as a conditional third fulcrum creates a picture that passes but is not clean; the SOP floor is "2 or fewer fulcrum drivers" and Watson judges two core plus one conditional as a pass at Triaging depth</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><u>AUM compounding is the primary fulcrum:</u> BGN's AUM (EUR116bn) at <strong>1.43%</strong> management fee margin generates ~EUR1.66bn annualised in management fee revenue; AUM growth via net inflows (EUR6.8bn in 2025, EUR1.9bn in 1Q26) compounds this base and is the single largest revenue driver</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><u>NII is the second fulcrum:</u> At EUR335-345m 2026 guidance (approximately one-third of revenue), NII is a material standalone contributor; its sensitivity to rates (bounded at -2-<strong>4%</strong> EPS per <strong>20bps</strong> cut) makes it a semi-predictable driver with visible downside limits</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><u>Performance fees are a third driver but NOT a fulcrum:</u> Performance fees are too volatile to underwrite as a core investment thesis driver; they are an accelerant in good years and a drag in flat/down years; the recurring/non-recurring split (<strong>74%</strong>/<strong>26%</strong> in 1Q26) signals that performance fees should be modelled as a probability-weighted bonus, not a base-case assumption</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><u>Key drivers (4 identified): FA recruitment, management fee margin, Alleanza conversion rate, cost/CIR discipline:</u> These four key drivers are the operational levers management controls; FA recruitment is the highest-leverage lever (each senior FA adds EUR150m+ AUM); management fee margin stability (<strong>1.43%</strong> currently) is a competitive moat indicator; Alleanza conversion rate is the highest-uncertainty lever; adj CIR (<strong>38%</strong>) management indicates cost discipline</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><u>Conclusion: four key drivers at the upper boundary of the ideal:</u> Watson passes E7 RA1 CQ1 at this boundary, acknowledging that a clean two-fulcrum, four-driver picture is the ideal and BGN is at the edge of acceptable; this is the primary reason for C not B on E7</div></div>
+<p><strong>E7 RA2 Summary — Narrow perimeter? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><u>Geography: Italy-dominant (pass):</u> <strong>98.5%</strong> Euro revenue means the geographic perimeter is effectively Italy plus a thin slice of Europe (Investlinx, Swiss); this is a narrow perimeter; the European optionality items are early-stage and do not yet complicate the geographic analysis</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><u>Business units: four active units (marginal pass):</u> BGN operates four distinct units: (1) core FA network / private banking, (2) BG FML (product manufacturing), (3) Intermonte (capital markets), (4) Investlinx (ETF distribution); four is at the upper end of the "10 or fewer business units" criterion but each unit is a functional component of the same value chain, not unrelated diversification</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><u>Client segments: effectively one (pass):</u> BGN serves HNW clients (EUR285k avg portfolio, &gt;EUR500k for ~<strong>80%</strong> of AUM); the Alleanza channel introduces a mass-affluent segment but it is currently at pilot scale; pass at Triaging with the segment expansion question needing ESA attention</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><u>Regulatory perimeter: Italian, EU-supervised (pass):</u> BGN is regulated by Banca d'Italia and CONSOB, two well-established regulators with clear frameworks; no cross-jurisdictional regulatory patchwork complicates the investment case</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><u>Counterparty perimeter: AG dominates (complexity flag):</u> The <strong>50.1%</strong> AG ownership and high RPT volume (<strong>35%</strong> of pre-tax operating profit) create a counterparty complexity layer; BGN's economics are partially entangled with AG's interests; this is a governance perimeter issue, not a business perimeter issue, but it complicates valuation</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><u>Verdict on RA2:</u> Narrow perimeter passes; BGN is structurally an Italian HNW FA network, not a complex conglomerate; the AG entanglement and Alleanza pilot are the two perimeter-complicating factors but do not disqualify at Triaging</div></div>
+<p><strong>E7 RA2 CQ1 — 10 or less geographies and/or business units? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><u>Geographies: 2 active (Italy dominant, Switzerland embryonic):</u> Italy is <strong>98.5%</strong> of revenue; Switzerland is a project-stage activity with no material revenue contribution; Investlinx (Ireland) and BG FML (Luxembourg) are legal domiciles, not customer geographies; the underlying clients are Italian; pass unambiguously</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><u>Business units: 4 identified (core banking, product manufacturing, capital markets, ETF distribution):</u> All four serve the same value chain (BGN FA driving distribution to BGN client); the integration logic is clear; not a conglomerate but a vertically integrated FA network; pass</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><u>Customer concentration: well-diversified at client level (pass):</u> No single client represents a material concentration risk; key-person risk exists at FA level (100 Senior Partners managing &gt;EUR150m each, aggregate ~EUR15bn of AUM) but this is FA-client relationship risk, not customer-concentration risk</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><u>Product concentration: <strong>53%</strong> in-house manufactured, <strong>47%</strong> third-party (pass):</u> The in-house share is above the midpoint and growing, providing revenue resilience; third-party products provide access to strategies BGN cannot manufacture in-house and offer client choice; the mix is appropriate</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><u>Distribution concentration: FA network only (highly concentrated but by design):</u> All revenue flows through the FA channel; this is a concentration risk but also the source of the moat (FA relationships are stickier than branch or digital relationships); the Alleanza channel, if it scales, would be a second distribution channel and a positive development for concentration risk</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><u>Overall verdict: comfortably within 10-geography / 10-business-unit ceiling:</u> The narrow perimeter is a genuine positive attribute of BGN vs more diversified and complex peers</div></div>
+<p><strong>E7 RA3 Summary — Zero headwinds? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><u>AG governance constraint is a structural headwind:</u> The <strong>50.1%</strong> AG ownership is the most persistent structural headwind; AG makes commercial decisions that may not optimise for BGN minority shareholders: high RPT volume (<strong>35%</strong> of pre-tax profit), CMD timing (delayed), Alleanza partnership structure (may favour AG interests over BGN minority economics); this is a governance headwind, not a competitive one</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><u>Performance fee regulatory vulnerability:</u> The absence of a high-water mark mechanism on performance fees is a regulatory vulnerability; EU and Italian regulators could mandate high-water marks, which would compress BGN's performance fee line in years following a drawdown; this is a known risk that has not yet crystallised but is a headwind to the performance fee thesis</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><u>CET1 pressure from growth mode:</u> CET1 at <strong>16.7%</strong> missed consensus <strong>17.1%</strong>; not a concern at current levels but a signal that BGN is deploying capital at pace (Alleanza pilot, Intermonte integration); if growth continues to accelerate, CET1 management becomes a more active constraint</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><u>FA recruitment recovery risk:</u> Post-Mediobanca-bid disruption the FA pipeline is rebuilding but not yet at pre-bid pace; a second disruption (another M&amp;A event, AG strategic pivot) could interrupt recruitment again</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><u>Alleanza channel-fit risk:</u> The Alleanza client (mass-affluent, insurance-led, Alleanza-agent-primary relationship) is fundamentally different from the BGN HNW client (self-directed, planning-led, FA-primary relationship); the channel-fit question (can BGN serve Alleanza clients without diluting the HNW brand?) is an active headwind to simple case underwriting</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><u>Verdict: headwinds exist but are not value-chain-level:</u> No headwinds threaten the core revenue streams (management fees, NII) in the near term; the headwinds identified are governance-structural, regulatory-potential, and strategic-execution; addressable at ESA depth; not a knockout</div></div>
+<p><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><u>Management fee revenue: minimal headwind:</u> Management fee margin (<strong>1.43%</strong>) is stable and supported by growing in-house product penetration; no near-term competitive threat to fee levels; the Italian FA market is not in a fee compression cycle comparable to US or UK markets; MiFID II implementation has been relatively benign in Italy vs Northern Europe</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><u>NII revenue: rate cycle is the headwind:</u> The primary value-chain headwind to NII is Euribor cuts; as quantified above (<strong>20bps</strong> cut = EPS -2-<strong>4%</strong>) the headwind is present but bounded; the raised 2026 NII guidance signals management has already adjusted for expected cuts</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><u>Performance fee revenue: market volatility is the headwind:</u> Zero high-water mark means performance fees are purely market-level dependent; a prolonged bear/flat market creates a multi-year performance fee drought; this is the highest-impact headwind to revenue in adverse scenarios and the most important monitoring item at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><u>Insurance/banking fee revenue: regulatory headwind potential:</u> EU inducement rules could compress trail commissions on insurance and banking products; low-probability near-term but non-zero medium-term headwind worth building into the ESA scenario analysis</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><u>Inflow momentum: competitive headwind from FBK:</u> FinecoBank's platform (AI productivity, pan-European expansion) creates a competitive headwind for BGN in the mass-affluent segment; BGN's HNW positioning largely insulates it from FBK competition, but the Alleanza channel (mass-affluent) enters FBK territory directly</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><u>Conclusion: the most material revenue headwind is performance fee volatility:</u> This is known, quantifiable, and partially offset by the recurring profit base; it does not represent a value-chain structural headwind of the type that would fail E7 but it is the primary volatility driver in the revenue model</div></div>
+<p><strong>E7 RA4 — Minimal change-from-current CQ1 — 2 or less change-from-current items? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext"><u>Change item 1: Alleanza channel rollout (primary):</u> This is the single most important change-from-current item; moving Alleanza from pilot (1,700 accounts, EUR170m premiums) to a scaled channel (aspirationally <strong>10%</strong> of the EUR130bn pool = EUR13bn+ of AUM) requires FA onboarding infrastructure, new compliance frameworks for mass-affluent, and channel economics that are not yet proven at scale</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext"><u>Change item 2: Intermonte integration (in progress):</u> Intermonte integration is already underway (completed acquisition 2025) with a 2026-2030 cumulative benefit delivery timetable; the risk of integration disruption is lower than Alleanza because Intermonte is a service-to-BGN unit, not a new client channel; risk profile is more bounded</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext"><u>Investlinx and Swiss are optionality, not active change-from-current:</u> They do not require BGN to change its operational model in the near term and have de minimis revenue contribution in the next 2-3 years; stripping them from the change-from-current count reduces the picture to two active items, which passes the floor</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext"><u>Verdict: two active change-from-current items (pass):</u> This passes the "2 or fewer" floor; the two items are well-defined (Alleanza and Intermonte), differentiated in nature (new channel vs integration), and the management team has demonstrated the capacity to manage simultaneous multi-front execution during the 2022-2024 plan</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext"><u>Risk: Alleanza execution bandwidth constraint:</u> If Alleanza requires more senior management bandwidth than anticipated (CEO personally leading this), the risk is that other initiatives (CMD preparation, digital upgrade) are delayed; this is an execution-risk observation, not a fundamental concern at Triaging</div></div>
+<div class="finding cq-level"><span class="fnum">42.</span><div class="ftext"><u>Conclusion: E7 RA4 CQ1 passes at two change items:</u> BGN is not asking investors to underwrite four simultaneous transformations; the primary operational change is Alleanza and Intermonte is already in integration phase; the other items are small and early-stage</div></div>
+<p><strong>E7 RA5 — Conservative guidance CQ1 — Company confirms guidance is conservative? (6 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext"><u>2022-2024 plan: delivered above target:</u> Net inflows EUR18.2bn vs EUR18-22bn target (mid-range achievement); recurring profit CAGR <strong>24%</strong> vs 10-<strong>15%</strong> target (significantly above); this track record suggests management has a history of conservative anchoring</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext"><u>2026 NII guidance: just raised to EUR335-345m:</u> The raise from EUR320-330m range within Q1 (with three quarters still to go) is a signal that management guided conservatively for the year and is now comfortable raising; this is a positive guidance management pattern consistent with the track record</div></div>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext"><u>Dividend guidance: consistently at top end:</u> Cumulative DPS 2022-2025 of EUR8.5/share was at the top of the guidance range; another conservative-anchoring signal that extends across multiple plan years</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext"><u>CMD delayed to H2 2026:</u> The 2026 CMD (which would normally set new plan targets) is delayed due to Mediobanca disruption fallout; BGN is operating without published medium-term targets and investors must rely on quarterly guidance; this creates uncertainty but is not a guidance conservatism failure</div></div>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext"><u>Performance fee guidance: not provided:</u> Management does not guide on performance fees (correctly, as they are market-dependent); the performance fee line is always a source of genuine uncertainty and conservative guidance cannot be verified on this line</div></div>
+<div class="finding ra-level"><span class="fnum">48.</span><div class="ftext"><u>Verdict: guidance conservatism confirmed by delivery track record, not by current guidance per se:</u> Given the CMD delay, investors are navigating without a new plan frame; the historical track record (above-target delivery on all key metrics) supports a conservative-guidance assessment and is the primary anchor</div></div>
+<p><strong>Counter-view considered (E7):</strong> The case for a D or F rating on E7 would rest on: (1) four simultaneous M&amp;A/strategic fronts is too complex; (2) Alleanza is an unproven growth channel that introduces mass-affluent client-mix risk; (3) AG governance overhang means BGN is not a focused bet but a controlled subsidiary; Watson rejects D/F at Triaging: the core business is simple, guidance is conservative by track record, and the strategic fronts are sequenced; C is the right grade, acknowledging complexity caveats while confirming all guardrails are passed</p>
+<p><strong>Downstream actions (E7):</strong> (1) Watson at ESA to model the specific fulcrum driver sensitivity: what happens to EPS in a zero-Alleanza scenario (core compounder only) to isolate the organic vs strategic-option components of the investment case; (2) Watson at ESA to quantify the AG governance drag in economic terms (RPT volumes, provision impact, strategic constraint cost) as a discount to the standalone BGN value</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-b" data-spy>Element E8 — Fit with acceptable case setups <span class="g gB">B</span> <span class="secn">52 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">All six setup types assessed at 3 bullets minimum (E8 carve-out). BGN best fits Setup Type 3 (self-help operator with underappreciated drivers: Alleanza and Intermonte) as primary and Setup Type 5b (CMD H2 2026 as re-rating catalyst post-M&amp;A premium removal) as secondary. The identified setups will deepen at ESA.</div></div>
+<p><strong>E8 RA1 — Mis-modelled, high-quality EPS upgrader (Setup Type 1) — WEAK FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>The core case is not primarily a mis-modelling story:</u> Consensus broadly understands BGN's management fee revenue, NII, and recurring profit dynamics; the 1Q26 beat (+<strong>20%</strong> vs consensus) suggests consensus was too conservative on performance fees, but this is a quarterly volatility dynamic rather than a structural mis-modelling error in the base case</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>Partial mis-modelling: Alleanza optionality:</u> If Alleanza converts at scale, the incremental AUM contribution is unlikely to be in consensus models at anything close to full value; a successful Alleanza rollout has characteristics of a mis-modelling setup as the market catches up to a materially improved earnings trajectory</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>Verdict: weak primary fit, but Alleanza adds a partial mis-modelling optionality layer:</u> Not the primary setup frame for BGN at Triaging; the core compounder is well-understood by the sell-side</div></div>
+<p><strong>E8 RA2 — Big demand change-driven EPSU or EPT (Setup Type 2) — WEAK-MODERATE FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>The Italian wealth shift is a structural demand change:</u> EUR4.1tn Italian household wealth, 12-<strong>15%</strong> FA-network penetration, and the secular shift from bank deposits to managed solutions is a genuine demand-change story at the industry level; BGN is the best-positioned beneficiary of this demand change</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>But the demand change is slow-moving:</u> The Italian wealth channel shift is a 10-15 year secular trend, not a 3-year EPS acceleration catalyst; for BGN specifically, the Alleanza channel is the fastest-cycle demand-change catalyst (EUR130bn pool, pilot now in first-validation phase) but it is not yet proven at any meaningful scale</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><u>Verdict: moderate fit, not primary:</u> BGN is a beneficiary of demand change but the demand change is structural and gradual, not the kind of explosive demand shift that creates a 2-3 year EPS step-function</div></div>
+<p><strong>E8 RA3 — Strong corporate change driven EPSU / EPT (Setup Type 3) — PRIMARY FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><u>Two corporate change vectors are simultaneously active:</u> Intermonte integration (margin improvement, cumulative benefit delivery) and Alleanza channel launch (new distribution plus AUM growth) are both self-help corporate change actions underway simultaneously; these are management-led changes, not market-driven, and they sit on top of an already-compounding base</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><u>The "underappreciated drivers" thesis fits:</u> Consensus likely underweights Alleanza's optionality (pilot at EUR170m premiums is not yet in consensus models at anything close to potential scale) and the Intermonte cumulative benefit timeline (EUR38-48m by 2030 is not typically in sell-side 2026-2027 forecasts); these are "underappreciated internal drivers" by definition</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><u>CEO Mossa as a change catalyst:</u> The "animal CEO" characterisation from the LF report (force, dynamism, outlier standards, owner-mindset) and his personal championship of the Alleanza partnership supports the "strong corporate change agent" thesis; 9-year tenure with a clear delivery track record reduces key-person execution uncertainty</div></div>
+<p><strong>E8 RA3 CQ1 — Magnitude of corporate change: material or marginal? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><u>Alleanza is a step-change in addressable market, not an incremental improvement:</u> BGN's current AUM base is EUR116bn; the Alleanza pool is EUR130bn; if even <strong>10%</strong> of the Alleanza pool converts over 5 years, that represents EUR13bn of additional AUM (an <strong>11%</strong> uplift to the total base) at an organic client-acquisition cost of near-zero (no additional FA recruitment required at the senior level); this is not a marginal corporate change, it is a potential step-change in scale</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><u>Intermonte is a clear and bounded improvement to existing operations:</u> The Intermonte cumulative benefit (EUR38-48m by 2030) is the more conservative and verifiable of the two corporate change vectors; it is not a step-change in business model but a measurable margin improvement that reduces third-party structuring costs and adds in-house M&amp;A advisory revenue; bounded and credible</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><u>The combination of the two corporate changes is unusual in BGN's peer group:</u> BMED, FBK, and AZM are each executing one meaningful strategic initiative at a time (FBK: pan-European expansion; BMED: digital upgrade; AZM: institutional distribution deepening); BGN is executing two substantive corporate changes simultaneously while maintaining best-in-class operational metrics; this "dual change at quality" combination is rare and is the source of the primary investment thesis differentiation</div></div>
+<p><strong>E8 RA3 CQ2 — Management credibility to execute the change: high or low? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><u>Track record on change execution is strong:</u> The 2022-2024 plan was delivered above target on all key metrics (recurring profit CAGR <strong>24%</strong> vs 10-<strong>15%</strong> target; inflows EUR18.2bn vs EUR18-22bn target; DPS at top end of guidance); management navigated the Mediobanca hostile bid (an external shock of the first order) without losing the FA network or client base; this is a high credibility rating for corporate change execution</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><u>Mossa's personal ownership of Alleanza:</u> The CEO has publicly championed the Alleanza initiative since before the Mediobanca disruption; it survived the bid period intact and the pilot launched in 1Q26; this level of CEO ownership (personal mandate, not delegated) is an important conviction signal for the self-help setup</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><u>Risk: execution dependency on a single individual:</u> The CEO/GM dual-hat structure means CEO succession is the single most important governance risk in the self-help setup; if Mossa departs before Alleanza reaches a self-sustaining scale (estimated 3-5 years of rollout), the initiative may stall without a champion; the LF report confirms that AG would backstop with an external candidate if no internal successor is identified; ESA must evaluate the succession depth explicitly</div></div>
+<p><strong>E8 RA3 CQ3 — Underappreciation: is the market genuinely not pricing the driver? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><u>Consensus TP distribution suggests partial pricing of core compounder, not Alleanza optionality:</u> The consensus TP range (EUR49.70 Jefferies bear to EUR66 Intermonte bull) implies the market is pricing BGN as a quality compounder at a modest earnings growth trajectory; none of the sell-side TPs appear to incorporate a full Alleanza-at-scale scenario in the base case (EUR13bn+ of incremental AUM would add approximately EUR185m of management fee revenue at <strong>1.43%</strong> margin, which would translate to approximately EUR130m of incremental net profit at <strong>70%</strong> margin, or approximately EUR1.30 per share; at a <strong>15x</strong> P/E multiple this implies EUR19.50 of incremental intrinsic value vs a current TP of EUR61.61); this suggests Alleanza is largely not priced in the consensus base case</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><u>The EUR170m pilot data point is too small for consensus to model:</u> EUR170m in premiums represents approximately <strong>0.13%</strong> of the EUR130bn Alleanza pool; at this scale it is invisible in AUM or revenue models; consensus will not begin pricing Alleanza until the pilot reaches a scale (EUR1-2bn+ of AUM equivalent) where the contribution is material relative to BGN's existing base; this creates a clear catalyst sequencing: pilot data accumulates (1H26-2H26), CMD incorporates Alleanza in plan targets (H2 2026), consensus upgrades TPs incorporating Alleanza contribution (2027+)</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><u>Intermonte cumulative benefit is also not in near-term consensus forecasts:</u> The EUR38-48m cumulative benefit figure is a 2030 target; sell-side 2026-2027 forecasts will not incorporate this at full value; the near-term accretion (EUR5-10m per year 2026-2028 in cost savings and new advisory revenue) may already be partially in estimates but the full endpoint value is not</div></div>
+<p><strong>E8 RA3 CQ4 — Downside scenario if the corporate change fails: bounded or catastrophic? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><u>If Alleanza fails to scale: core compounder remains intact:</u> The most important downside scenario is "Alleanza does not scale beyond pilot"; in this scenario BGN reverts to its pre-Alleanza investment case (high-quality compounder, 7-<strong>9%</strong> EPS growth, 14-<strong>15x</strong> P/E, <strong>5.3%</strong> dividend yield); this is not a catastrophic downside; it is simply the "no optionality" version of the BGN investment case, which at EUR60.15 still offers acceptable but not exceptional risk-adjusted returns</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><u>If Intermonte integration goes wrong: bounded cost:</u> Intermonte integration risk (cultural clash, cost overruns, talent loss) has precedent in Italian boutique M&amp;A; the integration cost is bounded (Intermonte is a small institution relative to BGN's EUR116bn AUM base); a failed Intermonte integration would cost EUR15-25m in write-offs and a 1-2 year distraction but would not impair the core FA network</div></div>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><u>Stress scenario from both vectors failing simultaneously: still not catastrophic:</u> In the extreme scenario where both Alleanza and Intermonte fail (highly unlikely given their different risk profiles), BGN at EUR60.15 would de-rate to a "no change, quality compounder" multiple; at a 12-<strong>13x</strong> P/E (a de-rated premium compounder) the implied price is EUR45-50, representing a 17-<strong>25%</strong> downside from current levels; this downside is bounded by the recurring profit floor and the <strong>5.3%</strong> dividend yield</div></div>
+<p><strong>E8 RA4 — Regulatory change opportunity (Setup Type 4) — WEAK FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><u>No primary regulatory change catalyst identified:</u> BGN is not a regulatory-change-driven story in the near term; EU MiFID II inducement rules are a risk, not an opportunity; Banca d'Italia regulatory framework is stable and not in a change cycle</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><u>Indirect regulatory tailwind: managed solutions mandate:</u> As noted in E5, MiFID II complexity nudges Italian clients toward managed solutions, but this is an industry tailwind, not a BGN-specific regulatory catalyst and it is slow-moving</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><u>Verdict: weak fit; not a regulatory change setup:</u> Regulatory environment is stable to mildly supportive; no binary regulatory catalyst expected</div></div>
+<p><strong>E8 RA5 — Valuation re-rating from misunderstood or undervalued (Setup Type 5) — MODERATE FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><u>Not deeply undervalued on consensus metrics:</u> At <strong>14.7x</strong> forward P/E (91st percentile vs universe) and ~<strong>2.4%</strong> below consensus TP, BGN is not a classic "misunderstood and undervalued" name; the multiple is premium and the market broadly understands the business model</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><u>Potential re-rating catalyst: CMD new plan targets (Setup Type 5b):</u> CMD delayed to H2 2026; when CMD occurs and BGN publishes a new 3-year plan with Alleanza economics incorporated, a positive surprise could trigger a re-rating to a higher P/E multiple; this is the most credible valuation re-rating catalyst in the near term</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><u>Verdict: moderate-secondary fit; the re-rating story is CMD-dependent, not fundamental:</u> The post-Mediobanca bid re-entry opportunity (M&amp;A premium removed) plus CMD catalyst makes this a credible secondary setup</div></div>
+<p><strong>E8 RA6 — Cyclical recovery from depressed earnings (Setup Type 6) — WEAK FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><u>BGN is not in cyclical earnings depression:</u> 2025 net profit was a record (EUR455.6m); 1Q26 was a beat (+<strong>20%</strong> vs consensus); recurring net profit EUR93.5m in 1Q26 was <strong>74%</strong> of total net profit; the earnings base is not depressed in any meaningful sense and the business is not recovering from a trough; this is a clean disqualification from Setup Type 6</div></div>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><u>The only "cyclical recovery" element is performance fees:</u> If BGN has a year or two of near-zero performance fees and then markets recover, there is a fee recovery element in the operating income line; but performance fees are a structural feature of the model (cyclically volatile, not fundamentally depressed), and this fee-cycle dynamic does not constitute the kind of earnings depression that Setup Type 6 is designed to capture; the appropriate way to handle performance fees is as a scenario variable in the ESA earnings model, not as a "recovery" driver</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><u>Verdict: weak fit; not a cyclical recovery setup:</u> BGN earns through the cycle at high absolute levels; ROTE <strong>30.3%</strong> in a neutral market year is well above peers at any point in the cycle; the appropriate frame is "quality compounder with optionality kickers" rather than "depressed cyclical recovery"; at ESA, performance fees should be scenario-modelled (base: <strong>50%</strong> of 1Q26 annualised run-rate; bull: 1Q26 annualised; bear: zero) to size the cyclical swing component of earnings, but the swing is a modelling input, not an investment thesis</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><u>Comparison vs sector peers on cyclical recovery fitness:</u> AZM (higher performance-fee dependency, global market exposure) has stronger Setup Type 6 characteristics than BGN, because AZM's earnings are more depressed in bear markets relative to trend; FBK (brokerage volumes as natural hedge) has essentially no Setup Type 6 characteristics; BMED sits between BGN and AZM; within the peer group, if a cyclical recovery setup were to be pursued it would be in AZM not BGN; BGN is the wrong ticker for this setup at any point in the cycle given its recurring profit coverage and structural ROTE premium</div></div>
+<p><strong>Primary and secondary setup identification (E8 — mandatory at Triaging)</strong></p>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><u>Primary setup: Setup Type 3 (self-help operator with underappreciated internal drivers: Alleanza + Intermonte):</u> BGN is a high-quality compounder executing multiple self-help initiatives simultaneously, where the market has not yet assigned full value to the Alleanza optionality and Intermonte cumulative benefit; the CEO is the change agent; the setup rewards investors who correctly size the Alleanza opportunity ahead of consensus; the catalyst sequencing (pilot data, CMD plan targets, consensus upgrades) is visible and trackable; the management track record (2022-2024 plan above-target, Mediobanca bid navigated without operational impairment) provides the execution credibility that Setup Type 3 requires</div></div>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><u>Secondary setup: Setup Type 5b (M&amp;A premium removed; CMD new plan as re-rating catalyst):</u> Post-Mediobanca bid collapse, the M&amp;A uncertainty premium has been removed; the H2 2026 CMD is the next catalyst for a re-rating as BGN publishes new plan targets incorporating Alleanza economics; the re-rating window is CMD-timing dependent (H2 2026 = within the ESA research window), which makes it a trackable and near-term secondary thesis</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><u>Why no other setups are elevated to primary or secondary:</u> Setup Type 1 (mis-modelled EPS upgrader) is partial and Alleanza-dependent; Setup Type 2 (demand change) is too slow-moving to drive a 2-3 year catalyst; Setup Type 4 (regulatory change) has no near-term catalyst; Setup Type 6 (cyclical recovery) does not apply to a company at record earnings; the primary and secondary setups identified are the two with the most credible near-term catalyst evidence and the strongest management-execution backing</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><u>ESA carve-out instruction:</u> At ESA, the E8 analysis deepens only for Setup Types 3 and 5b (primary and secondary fits); the other four setup types carry forward at Triaging depth (3-bullet minimum) per the cumulative-delta discipline; Setup Type 3 CQ-level analysis at ESA should focus on: (a) Alleanza conversion economics from the KQ research brief, (b) Intermonte revenue ramp timeline and first-year contribution, (c) CEO succession planning depth</div></div>
+<p><strong>E8 RA4 — Regulatory change opportunity (Setup Type 4) — WEAK FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><u>No primary regulatory change catalyst identified:</u> BGN is not a regulatory-change-driven story in the near term; EU MiFID II inducement rules are a risk, not an opportunity; Banca d'Italia regulatory framework is stable and not in a change cycle</div></div>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext"><u>Indirect regulatory tailwind: managed solutions mandate:</u> As noted in E5, MiFID II complexity nudges Italian clients toward managed solutions, but this is an industry tailwind, not a BGN-specific regulatory catalyst and it is slow-moving</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext"><u>Verdict: weak fit; not a regulatory change setup:</u> Regulatory environment is stable to mildly supportive; no binary regulatory catalyst expected</div></div>
+<p><strong>E8 RA5 — Valuation re-rating from misunderstood or undervalued (Setup Type 5) — MODERATE FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext"><u>Not deeply undervalued on consensus metrics:</u> At <strong>14.7x</strong> forward P/E (91st percentile vs universe) and ~<strong>2.4%</strong> below consensus TP, BGN is not a classic "misunderstood and undervalued" name; the multiple is premium and the market broadly understands the business model</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext"><u>Potential re-rating catalyst: CMD new plan targets (Setup Type 5b):</u> CMD delayed to H2 2026; when CMD occurs and BGN publishes a new 3-year plan with Alleanza economics incorporated, a positive surprise could trigger a re-rating to a higher P/E multiple; this is the most credible valuation re-rating catalyst in the near term</div></div>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext"><u>Verdict: moderate-secondary fit; the re-rating story is CMD-dependent, not fundamental:</u> The post-Mediobanca bid re-entry opportunity (M&amp;A premium removed) plus CMD catalyst makes this a credible secondary setup</div></div>
+<p><strong>E8 RA6 — Cyclical recovery from depressed earnings (Setup Type 6) — WEAK FIT (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext"><u>BGN is not in cyclical earnings depression:</u> 2025 net profit was a record (EUR455.6m); 1Q26 was a beat; this is not a recovery-from-trough setup and the earnings base is not depressed in any meaningful sense</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext"><u>The only "cyclical recovery" element is performance fees:</u> If BGN has a year or two of near-zero performance fees and then markets recover, there is a fee recovery element; but this is a weather-pattern observation, not the primary investment thesis frame</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext"><u>Verdict: weak fit; not a cyclical recovery setup:</u> BGN earns through the cycle at high absolute levels; the appropriate frame is "quality compounder with optionality kickers," not "depressed cyclical recovery"</div></div>
+<p><strong>Primary and secondary setup identification (E8 — mandatory at Triaging)</strong></p>
+<div class="finding ra-level"><span class="fnum">45.</span><div class="ftext"><u>Primary setup: Setup Type 3 (self-help operator with underappreciated internal drivers: Alleanza + Intermonte):</u> BGN is a high-quality compounder executing multiple self-help initiatives simultaneously, where the market has not yet assigned full value to the Alleanza optionality and Intermonte cumulative benefit; the CEO is the change agent; the setup rewards investors who correctly size the Alleanza opportunity ahead of consensus</div></div>
+<div class="finding ra-level"><span class="fnum">46.</span><div class="ftext"><u>Secondary setup: Setup Type 5b (M&amp;A premium removed; CMD new plan = re-rating catalyst):</u> Post-Mediobanca bid collapse, the M&amp;A uncertainty premium has been removed; the H2 2026 CMD is the next catalyst for a re-rating as BGN publishes new plan targets incorporating Alleanza economics</div></div>
+<p><strong>E8 RA3 CQ5 — Track record of prior self-help execution: strong or absent? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">47.</span><div class="ftext"><u>The 2022-2024 plan is the benchmark for self-help execution:</u> Management delivered <strong>24%</strong> recurring profit CAGR vs 10-<strong>15%</strong> target and EUR18.2bn net inflows vs EUR18-22bn target; this is a clean, above-target delivery against a self-set plan; the "self-help operator" characterisation is not speculative, it is grounded in three years of demonstrated delivery; the Intermonte acquisition (completed 2025) and the Alleanza pilot launch are continuations of the same self-help discipline, not a departure from it</div></div>
+<div class="finding ra-level"><span class="fnum">48.</span><div class="ftext"><u>Mediobanca bid navigated without operational impairment:</u> The Mediobanca hostile bid (2024-2025) was a major external shock; CEO Mossa maintained FA network stability (<strong>6%</strong> turnover even during the bid period), client retention (<strong>95.6%</strong>), and the Alleanza pilot launch, all while managing board-level uncertainty and competitor poaching attempts; the ability to execute internal change programmes during a hostile bid is an exceptional signal of management and organisational resilience</div></div>
+<div class="finding ra-level"><span class="fnum">49.</span><div class="ftext"><u>Prior self-help track record reduces Alleanza execution risk:</u> Investors in the self-help setup typically carry an execution-risk discount for management teams without a proven delivery track record; BGN's management has a clear and recent track record of above-target self-help delivery; the execution-risk discount should be lower for BGN than for a management team executing a first major strategic initiative; this partially mitigates the "Alleanza is unproven" counter-argument</div></div>
+<p><strong>E8 RA3 CQ6 — Timeline to value realisation: near-term or distant? (3 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">50.</span><div class="ftext"><u>Intermonte: near-term, 2026-2030 cumulative benefit delivery:</u> The EUR38-48m cumulative benefit from Intermonte is a 5-year delivery timeline with near-term contributions (EUR5-10m per year 2026-2028 in cost savings and advisory revenue); this is visible in the next 2-3 years of earnings, creating a near-term evidence trail for the self-help thesis</div></div>
+<div class="finding ra-level"><span class="fnum">51.</span><div class="ftext"><u>Alleanza: medium-term, CMD new plan targets H2 2026 as first catalyst:</u> The Alleanza pilot (1,700 accounts, EUR170m premiums) is currently too small to be material in earnings; the first meaningful catalyst is CMD (H2 2026) where management will publish Alleanza contribution in the new plan targets; the second catalyst is pilot scaling to EUR1-2bn+ of AUM equivalent (estimated 12-24 months post-CMD); the third catalyst is consensus model updates incorporating Alleanza contribution (estimated 24-36 months from now); the timeline to value realisation is medium-term, not distant</div></div>
+<div class="finding ra-level"><span class="fnum">52.</span><div class="ftext"><u>Price-to-TP headroom is thin, making catalyst timing critical:</u> At EUR60.15 vs consensus TP EUR61.61 (avg), the current price is already close to the consensus fair value; the self-help setup creates value only if Alleanza and Intermonte drive earnings above consensus; investors entering now are making a bet on the catalysts (CMD, pilot scaling, consensus upgrade) materialising before any adverse macro event compresses the multiple; this catalyst-dependency is a timing risk that ESA must assess</div></div>
+<p><strong>Counter-view considered (E8):</strong> A sceptic would argue BGN is Setup Type 0 ("premium business at premium price with no clear catalyst") and that the Alleanza optionality is too early-stage to drive ESA-level conviction; Watson acknowledges this view (Alleanza at EUR170m premiums is not a proven growth engine) but rejects it as a Triaging knockout: the self-help thesis does not require Alleanza to be proven at scale; it requires the pilot to continue showing traction and the CMD to incorporate Alleanza into plan targets; the self-help execution track record (2022-2024 plan above target on all metrics, Mediobanca bid navigated without operational impairment) provides the management credibility foundation that Setup Type 3 requires; the counter-view is a reason for careful ESA investigation of the catalyst timeline, not a reason to park</p>
+<p><strong>Downstream actions (E8):</strong> (1) Watson at ESA to deepen Setup Type 3 analysis specifically: Alleanza economics (margin, ticket size, conversion rate), Intermonte cumulative benefit delivery timeline, and CEO succession plan (single key-person risk with no named internal successor); (2) Watson to note that the CMD H2 2026 is a near-term catalyst worth monitoring for timing the ESA recommendation</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">44 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">At Triaging, Group 3 is partially assessed (E11 in scope; E9, E10, E12, E13 not in scope). E11 value-chain dynamics show BGN in a structurally favourable position: downstream-dominant with growing upstream integration and high supplier leverage. E9, E10, E12, and E13 are not applicable at this stage; first written at Early-Stage Assessment.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">44 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BGN occupies the high-value downstream distribution stage (FA-to-HNW-client) and is aggressively integrating upstream (product manufacturing, capital markets). The value-chain position is strong; the key risk is that AG's upstream position creates a competing-interest dynamic. B vs FBK (B) and BMED (B): BGN has superior productivity and retention but a more complex ownership overlay.</div></div>
+<p><strong>E11 RA1 Summary — Demand side: strong or fragile? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><u>Demand side is structurally strong:</u> The end demand (Italian HNW client appetite for wealth management and private banking services) is a secular growth market (EUR4.1tn household wealth, FA penetration increasing); client stickiness (<strong>95.6%</strong> retention, avg 12yr relationship) means the demand base is captive at the individual client level and growing at the industry level</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><u>Demand is not economically cyclical at the primary level:</u> HNW clients do not stop managing their wealth in recessions; they may shift asset allocation (reducing equity exposure, increasing cash/bonds), which compresses AUM value and performance fees, but the demand for wealth management services is not cyclical in the same way as capital goods or consumer discretionary</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><u>Demand is concentrated at the HNW/UHNW end (positive for BGN):</u> BGN's positioning in the &gt;EUR500k client segment (<strong>80%</strong> of AUM) is the highest-margin, highest-retention, and most digitally resistant client segment in the market; disruption is most likely at the mass-affluent end, which is where Alleanza sits, not the BGN core</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><u>Demand growth in the Alleanza channel is unproven:</u> The Alleanza channel targets a different demand segment (mass-affluent, insurance-driven); the demand exists (EUR130bn in Alleanza's pool) but BGN's ability to unlock it via full private-banking conversion is unproven at scale beyond the EUR170m pilot</div></div>
+<p><strong>E11 RA1 CQ1 — Demand-side strength: fragile or durable? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><u>Client retention <strong>95.6%</strong> establishes demand durability:</u> The <strong>95.6%</strong> retention rate means <strong>4.4%</strong> of AUM is at risk of outflow per year, at the absolute low end of Italian FA-network churn rates; this is the single most important demand-durability metric in the BGN model</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><u>Multi-product penetration deepens retention:</u> <strong>65%</strong> of BGN clients use multiple products; <strong>23.7%</strong> use 4+ products; high multi-product penetration creates switching costs and leaving BGN means unwinding a complex multi-product relationship, not just moving a single fund to a competitor</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><u>Average relationship duration (12yr 3mo) confirms stickiness:</u> The average client has been with BGN for over a decade; the relationship is advisory and long-term; the transition risk at generational wealth transfer is real (heirs may prefer digital-first) but is a 10+ year concern, not a 3-year investment horizon risk</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><u>Demand fragility risk: bear-market outflows:</u> In a sustained bear market (&gt;18-24 months), even HNW clients may reduce exposure to managed products and increase cash/direct bonds; the 2022 market period (Italian equities -<strong>15%</strong>) saw net inflows decline but remain positive, confirming demand durability through moderate drawdowns; a severe recession (GDP -<strong>5%</strong>+) is the scenario where demand fragility becomes material</div></div>
+<p><strong>E11 RA1 CQ2 — Pricing power: held or eroding? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><u>Management fee margin (<strong>1.43%</strong>) has been stable:</u> The management fee margin on AUM has not compressed materially over the 2022-2025 period; this is an indicator of genuine pricing power and BGN is not in a fee war with competitors; vs FBK (different model, lower fee) and BMED (similar model, similar margin), BGN holds its fee level</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><u>In-house manufacturing supports margin:</u> At <strong>53%</strong> in-house manufactured solutions, BGN keeps the manufacturing margin as well as the distribution margin; third-party fund distributors (pure distribution models) are more vulnerable to fee compression because the fund manager controls the product economics</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><u>Pricing power vs FBK: FBK is lower cost but serves a different segment:</u> FBK's CIR (<strong>27.7%</strong> vs BGN <strong>38%</strong>) reflects a more efficient cost model but FBK serves mass-affluent/self-directed clients; in the HNW segment BGN targets, the premium fee is justified by the advisory relationship; no evidence of fee compression from FBK competition in the HNW segment</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><u>Regulatory fee pressure risk (ongoing):</u> EU MiFID II inducement scrutiny could compress trail commissions; the fee line most vulnerable to regulatory intervention is a medium-term (3-5 year) risk, not an immediate concern; worth building into ESA scenario analysis</div></div>
+<p><strong>E11 RA2 Summary — Competitive supportiveness or aggression? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><u>Italian FA-network competition is rational:</u> The Italian FA-network market (BGN, BMED, FBK, AZM) is a structured oligopoly; firms compete on FA quality, product range, and brand, not on fee levels; this is a competitively supportive structure for BGN and margins have been stable as a result</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><u>BMED is the closest peer on model:</u> Banca Mediolanum is the most direct competitor (similar FA-network model, similar product distribution, similar HNW client targeting); however BGN's FA productivity (EUR36m vs BMED EUR21m) and client profile are meaningfully superior; BMED is a capable compounder but a weaker version of BGN</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><u>FBK competes on efficiency and digital, not on BGN's HNW turf:</u> FBK's model (banking plus brokerage plus advice, digital-first, lower fee) competes with BGN in the EUR100-500k client segment but not in the &gt;EUR500k HNW segment that accounts for <strong>80%</strong> of BGN's AUM; the competitive overlap is modest at the high end</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><u>AZM is a different model:</u> AZM's model (boutique AM plus retail distribution, global footprint, higher turnover <strong>15%</strong>) is sufficiently different from BGN that competitive dynamics are indirect; AZM's primary competitive pressure is in the third-party product slot (competing for shelf space on BGN's platform), not in direct client competition</div></div>
+<p><strong>E11 RA2 CQ1 — Market share trend: gaining or losing? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><u>BGN is gaining FA-network market share in the HNW segment:</u> Per Assoreti data cited in the CF report, BGN has the best FA productivity in the network and is the preferred FA employer for Senior Partners (&gt;EUR150m AUM); the Mediobanca bid disruption caused temporary share loss (competitor poaching) but the trend is resumed post-bid</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><u>Net inflows rank: second in sector:</u> BGN's 1Q26 net inflows of EUR1.9bn (+<strong>28%</strong> YoY) rank second among Italian FA-network peers (BMED typically leads on absolute inflows given a larger FA network); BGN's inflow productivity per FA is best-in-class even at the absolute second-rank position</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><u>Italian FA-network sector share: stable-to-gaining:</u> The overall Italian FA-network sector (relative to bank branches) is gaining share from bank branches; BGN as the quality operator in the sector benefits from this structural shift via inflows from bank-branch switchers</div></div>
+<div class="finding ra-level"><span class="fnum">20.</span><div class="ftext"><u>Alleanza as share capture without competition:</u> Alleanza channel accounts (1,700 in pilot) are new BGN accounts that did not previously exist; they are being converted from Alleanza's third-party wealth pool, not poached from competitors; if successful, this is pure market share creation, not redistribution, which is the highest-quality form of share gain</div></div>
+<p><strong>E11 RA2 CQ2 — Competitor response risk? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">21.</span><div class="ftext"><u>BMED is the most likely competitive response:</u> If BGN's Alleanza model succeeds, BMED (which lacks an equivalent insurance-group parent with a comparable distribution network) may respond by accelerating its own FA recruitment, partnering with a competing insurance group, or acquiring a distribution platform; none of these responses is fast as network building takes years</div></div>
+<div class="finding ra-level"><span class="fnum">22.</span><div class="ftext"><u>FBK's pan-European AI strategy is a slow-burn competitor threat:</u> FBK's pan-European expansion (Germany, France, Spain by 2027) may capture Italian mass-affluent clients who prefer a digital-first model; this is not a near-term BGN HNW threat but is a medium-term concern for the Alleanza (mass-affluent) channel where the segments overlap</div></div>
+<div class="finding ra-level"><span class="fnum">23.</span><div class="ftext"><u>AZM has higher turnover (<strong>15%</strong>) and may attempt to poach FAs:</u> AZM's aggressive incentive culture may attempt to poach BGN Senior Partners; historical precedent shows some BGN-AZM movement, though BGN's retention is structurally better (<strong>6%</strong> vs AZM <strong>15%</strong>)</div></div>
+<div class="finding ra-level"><span class="fnum">24.</span><div class="ftext"><u>No competitor is currently executing an equivalent Alleanza-type move:</u> There is no evidence that BMED, FBK, or AZM is executing a comparable insurance-group distribution channel integration; BGN has a first-mover window on this strategic move that is worth preserving</div></div>
+<p><strong>E11 RA2 CQ3 — Supplier leverage: strong or weak? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">25.</span><div class="ftext"><u>BGN has strong leverage over third-party fund managers:</u> With EUR116bn AUM on the platform, BGN is a major distribution channel for any third-party fund manager seeking Italian HNW clients; BGN can negotiate preferential access fees, marketing support, and co-manufacturing terms; this is classic distribution leverage that reinforces the margin</div></div>
+<div class="finding ra-level"><span class="fnum">26.</span><div class="ftext"><u>In-house manufacturing reduces dependency on external suppliers:</u> At <strong>53%</strong> in-house products, BGN is not dependent on any single third-party fund manager; if a supplier becomes unreasonably priced, BGN can shift assets to in-house products or alternative third-party suppliers, giving it genuine switching flexibility</div></div>
+<div class="finding ra-level"><span class="fnum">27.</span><div class="ftext"><u>Investlinx ETF platform adds an additional supplier leverage tool:</u> An in-house ETF platform gives BGN the ability to manufacture low-cost passive wrappers, competing directly with third-party ETF providers currently on its platform and negotiating from a position of strength</div></div>
+<div class="finding ra-level"><span class="fnum">28.</span><div class="ftext"><u>AG as a supplier (insurance products): managed but complex:</u> Generali group provides insurance products distributed through BGN; this is both a supplier relationship (AG provides products) and an ownership relationship (AG controls BGN); the RPT volume (<strong>35%</strong> of pre-tax operating profit) suggests the Generali-BGN commercial relationship is material and AG may extract value from the supplier relationship in ways not visible in headline metrics</div></div>
+<p><strong>E11 RA2 CQ4 — Buyer power: high or low? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">29.</span><div class="ftext"><u>Individual client buyer power is low:</u> HNW clients (EUR285k avg portfolio) do not have meaningful individual negotiating power over BGN's fee structure; the <strong>95.6%</strong> retention rate confirms clients are not using switching threats to extract fee concessions</div></div>
+<div class="finding ra-level"><span class="fnum">30.</span><div class="ftext"><u>Aggregate client buyer power is moderate (ESA investigation needed):</u> While individual clients are not powerful, the risk of a coordinated shift (all Senior Partner clients moving to a competitor if the Senior Partner leaves) creates a form of concentrated aggregate buyer power at the FA-client-block level; this is the key-person risk embedded in the 100 Senior Partners managing &gt;EUR150m each</div></div>
+<div class="finding ra-level"><span class="fnum">31.</span><div class="ftext"><u>Corporate/institutional buyer power: not a BGN primary segment:</u> BGN's model is private banking (individual HNW clients), not institutional asset management; institutional buyer power (pension funds negotiating fee compression) is not a significant BGN risk</div></div>
+<div class="finding ra-level"><span class="fnum">32.</span><div class="ftext"><u>Conclusion: buyer power is low at individual level, with a key-person concentration risk at the Senior Partner level:</u> The Senior Partner concentration risk (100 FAs managing ~EUR15bn of AUM) is the primary buyer-power-equivalent risk; ESA should quantify the economic exposure per departure scenario</div></div>
+<p><strong>E11 RA2 CQ5 — Substitute threat: near-term or distant? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">33.</span><div class="ftext"><u>Digital robo-advisory is a substitute, but not for BGN's core HNW segment:</u> Robo-advisors (Moneyfarm, Scalable Capital, Fineco's digital offering) are credible substitutes for mass-affluent clients (EUR50-200k portfolios); for BGN's core HNW clients (&gt;EUR500k, complex tax and estate planning needs), robo-advisory is not a credible substitute</div></div>
+<div class="finding ra-level"><span class="fnum">34.</span><div class="ftext"><u>Direct-to-consumer managed account platforms: emerging, medium-term:</u> Platforms that allow HNW clients to build bespoke managed portfolios without a dedicated FA are a medium-term substitute risk; but adoption among Italian HNW clients is 5-10 years away from material penetration</div></div>
+<div class="finding ra-level"><span class="fnum">35.</span><div class="ftext"><u>Bank private banking: competitor not substitute:</u> Traditional bank private banking (Mediobanca, UniCredit Private Banking) is a competitor, not a technological substitute; BGN wins on FA relationship quality vs bank private banking and the differentiation is not price-based</div></div>
+<div class="finding ra-level"><span class="fnum">36.</span><div class="ftext"><u>Conclusion: substitute threat is present in the mass-affluent segment but absent for BGN's HNW core:</u> The Alleanza channel (mass-affluent) is exposed to substitute threat; the BGN core (HNW) is not; this segment distinction is important for ESA's Alleanza economics analysis</div></div>
+<p><strong>E11 RA3 Summary — Disruption forces? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">37.</span><div class="ftext"><u>AI as an FA-productivity tool, not an FA replacement:</u> As analysed in E5 RA2, AI is an FA-enablement tool for BGN, improving productivity, client profiling, and compliance automation; it does not threaten the FA relationship model at the HNW segment level within the 3-5 year investment horizon</div></div>
+<div class="finding ra-level"><span class="fnum">38.</span><div class="ftext"><u>Tokenisation and digital asset platforms: distant disruption:</u> Tokenised securities and digital asset platforms could eventually disintermediate traditional wealth management (clients holding assets directly without an intermediary); this is a 10+ year horizon disruption, not relevant to a 3-5 year investment case</div></div>
+<div class="finding ra-level"><span class="fnum">39.</span><div class="ftext"><u>RegTech disruption enabling direct investment: slow:</u> The Italian regulatory framework makes direct investment (without advisory oversight) complex for HNW investors; advisors provide legal cover, tax advice, and compliance infrastructure that HNW clients cannot easily replicate directly</div></div>
+<div class="finding ra-level"><span class="fnum">40.</span><div class="ftext"><u>Alleanza as internal strategic disruption:</u> The Alleanza channel is the most significant "disruptive" move BGN is making internally; it is moving from HNW pure-play to a broader wealth market model; this is a strategic disruption of BGN's own positioning that requires careful channel design to avoid brand dilution</div></div>
+<p><strong>E11 RA3 CQ1 — Disruption forces: near-term or distant? (4 bullets minimum)</strong></p>
+<div class="finding ra-level"><span class="fnum">41.</span><div class="ftext"><u>Near-term disruption forces: none material:</u> No technology, regulatory, or competitive disruption is expected to materially affect BGN's core HNW business within the 3-year investment horizon; the structural moat (FA relationships, multi-product penetration, in-house manufacturing) is durable over this period</div></div>
+<div class="finding ra-level"><span class="fnum">42.</span><div class="ftext"><u>Medium-term disruption: digital platform adequacy:</u> As noted in expert validation (LF report), BGN's digital platform lags FBK; over 5-7 years, if next-generation HNW clients (digital natives inheriting wealth) demand a fully integrated digital experience, BGN's platform inadequacy could erode retention; this is a medium-term risk requiring active investment</div></div>
+<div class="finding ra-level"><span class="fnum">43.</span><div class="ftext"><u>Alleanza execution as a self-disruption risk:</u> If Alleanza scales rapidly and brings large volumes of mass-affluent clients into the BGN platform, BGN faces a brand and service model disruption; the HNW brand could be diluted if mass-affluent clients receive a materially different service experience; this requires careful channel design and explicit service-tier separation</div></div>
+<div class="finding ra-level"><span class="fnum">44.</span><div class="ftext"><u>AI-driven competitor productivity uplift: 3-5 year window:</u> FBK's AI productivity target (25-<strong>35%</strong> by 2029) could create a productivity-per-FA gap that enables FBK to target the lower-tier BGN FA segment more effectively within 3-5 years; not a near-term threat but worth monitoring as an ESA item</div></div>
+<p><strong>Counter-view considered (E11):</strong> The strongest E11 counter-view is that BGN's value-chain position is more fragile than it appears because: (1) AG extracts value at the supplier level; (2) key-person concentration at Senior Partner level creates hidden buyer power; and (3) the digital platform gap is a structural weakness that will compound over time; Watson's assessment: these are ESA-level investigation items, not Triaging knockouts; the fundamental value-chain position (downstream HNW distribution plus growing upstream integration) is structurally strong, and the risks are addressable at ESA depth where the forensic work can be done</p>
+<p><strong>Downstream actions (E11):</strong> (1) Watson at ESA to quantify the Senior Partner concentration risk (model the economic impact of <strong>5%</strong> Senior Partner attrition on AUM and management fees); (2) Watson at ESA to examine the AG RPT relationship in detail specifically: what is the commercial structure of Alleanza partnership economics and does BGN or AG capture the majority of the economics from a successful Alleanza rollout?</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">At Triaging, Group 4 is a light first-pass. The ACH matrix from the Risks report assigns FALSE FRIEND as the winning hypothesis: this is the dominant risk frame. AG governance constraint is a structural headwind. Performance-fee volatility and rate sensitivity are quantified and bounded. No short-seller campaign exists. Jefferies bear-case PT EUR49.70 in <strong>50bps</strong> rate stress. Deep element work (E15-E19) is ESA and Deep-Dive scope; E15, E16, E17, E18, and E19 are not applicable at this stage.</div></div>
+<p>The primary risk clusters at Triaging are: (1) FALSE FRIEND (positive headline metrics masking structural decay via AG governance extraction); (2) performance-fee regulatory risk (no high-water mark, EU inducement scrutiny); (3) Alleanza execution risk (channel-fit dilution of HNW brand); and (4) rate cycle (bounded, -2-<strong>4%</strong> EPS per <strong>20bps</strong> Euribor cut). The combination of these risks supports a C: elevated but not disqualifying for progression.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR]</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not yet in scope at Triaging. Genuine optionality items identified (Alleanza scale-up, Investlinx European ETF distribution, Swiss expansion) to be sized at ESA via E20.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">7 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">BGN-IT progresses to Early-Stage Assessment. The weight of evidence from four AlphaSense family reports confirms: tangible multi-vector change forces with quantified delivery, best-in-class quality building blocks, and a risk profile (FALSE FRIEND ACH, AG governance) that is material but manageable at ESA depth. The Alleanza channel is the pivotal ESA question and must be the organising frame for all ESA analytical work.</div></div>
+<p><u>Watson's recommendation: Progress to Early-Stage Assessment.</u> Conviction level: B (solid, not certain). The FALSE FRIEND hypothesis is live and ESA must either rebut it conclusively or quantify the governance discount with sufficient precision to determine whether it is already priced in at the current <strong>14.7x</strong> forward P/E. BGN's quality building blocks (ROTE <strong>30.3%</strong>, retention <strong>95.6%</strong>, CEO track record, recurring profit <strong>74%</strong> of total) are inconsistent with a business in structural decay, which is why the FALSE FRIEND hypothesis fails as a Triaging knockout but succeeds as an ESA organising frame. The Alleanza pilot (EUR170m premiums, 1,700 accounts) is the most consequential unresolved variable in the investment case: if it scales even partially toward the EUR130bn pool, the investment thesis transforms from "proven compounder at fair value" to "proven compounder with a step-change growth kicker not yet in consensus."</p>
+<p><u>Four ESA-critical research questions for the KQ brief to CoS:</u> (1) Alleanza channel economics: average ticket size, margin profile vs BGN HNW average, FA training investment required per Alleanza-originated account, and what percentage of the EUR130bn pool is realistically convertible; (2) AG RPT economic drag: full economic impact of RPT volumes (<strong>35%</strong> of pre-tax operating profit) and what the standalone BGN valuation looks like with that drag removed; (3) Performance fee regulatory risk: probability and timeline of an EU high-water mark mandate on Italian FA-network performance fees, and what the EPS impact would be in the year following a drawdown; (4) Senior Partner concentration: economic exposure from top-100 FA (&gt;EUR150m each) attrition scenario at <strong>5%</strong>, and what safeguards BGN has in place (retention contracts, key-person insurance, book-transfer provisions).</p>
+<p><u>Monitoring items between now and ESA:</u> CMD scheduling and agenda announcement (H2 2026, precise timing unknown); quarterly inflow data for Alleanza pilot update; Euribor trajectory vs 2026 NII guidance; FBK AI rollout milestone (pan-European expansion timeline for 2027 start).</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment; conviction qualifier B. The Triaging evidence base is sufficient: four AlphaSense family reports (Change Forces, Business Foundations, Leadership Foundations, Risks) have been read in full or substantial part, the sector peer picture (FBK-IT) is understood, and the FALSE FRIEND hypothesis has been surfaced and assessed as a live-but-not-knockout risk. The ESA research investment is warranted at this quality threshold</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conviction basis for B (not A):</strong> An A-conviction Triaging would require the primary setup to be fully confirmed (Alleanza proven to be scalable and economically accretive at meaningful scale) and the FALSE FRIEND hypothesis to be fully rebutted (AG governance drag quantified and shown to be immaterial or already priced in); neither condition is met at Triaging depth; both are resolvable at ESA; B-conviction is the appropriate level: the risk-reward favours continued research investment but not yet capital deployment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key ESA thresholds that would raise conviction to A:</strong> (1) Alleanza pilot conversion rate data showing the mass-affluent client segment is economically compatible with BGN's product margin structure (i.e., management fee margin on Alleanza-originated accounts not materially below BGN average of <strong>1.43%</strong>); (2) AG RPT analysis confirming that the economic drag from related-party transactions is either bounded and stable or declining as a share of pre-tax operating profit; (3) CMD (H2 2026) publishing a new 3-year plan that explicitly incorporates Alleanza contribution</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Key ESA thresholds that would lower conviction to C or cause a park:</strong> (1) Alleanza pilot data showing Alleanza-originated clients generate margins materially below the BGN average or generate high onboarding costs that erode the zero-acquisition-cost advantage; (2) RPT analysis revealing that AG extracts value from BGN in ways not visible in headline metrics, creating a structural discount not priced at <strong>14.7x</strong> forward P/E; (3) Senior Partner attrition above <strong>5%</strong> in the next 12 months, signalling that the Mediobanca-bid disruption had a more persistent effect on FA network stability than currently visible</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>If progressing: next-stage actions:</strong> Watson to brief CoS on the four KQ research topics within 48 hours; Watson to build full ESA memo incorporating E2, E3, E9, E10, E12 from scratch at ESA floors; Watson to source and read BMED-IT and AZM-IT family reports ahead of ESA; Watson to load active.md thematic file at ESA stage (THEMATICS PAUSE active; do not load at Triaging)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>If parking: reassessment criteria:</strong> Not applicable; decision is to progress</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to write KQ research brief for CoS within 48 hours of this memo completion, scoped to the four ESA-critical topics identified in the Section E body above (Alleanza channel economics, AG RPT drag, performance fee regulatory risk, Senior Partner concentration); (2) Watson to add BGN-IT to the prices.json pipeline build queue so that live price, 52-week range, 200-day MA, and RS percentile data are available before ESA technical analysis begins; if the pipeline team cannot add BGN-IT within 5 business days, Watson to escalate and flag the data gap in the ESA memo Section A</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Source</th><th>Tag</th><th>Date</th><th>Coverage</th></tr></thead><tbody><tr><td>BGN-IT Change Forces report (AlphaSense)</td><td>[AS]</td><td>2026-06-01</td><td>E1, E5, E6, E7, B.1</td></tr><tr><td>BGN-IT Business Foundations report (AlphaSense)</td><td>[AS]</td><td>2026-06-01</td><td>E1, E11, B.1, Group 3</td></tr><tr><td>BGN-IT Leadership Foundations report (AlphaSense)</td><td>[AS]</td><td>2026-06-01</td><td>E7 RA5, E8 RA3, E11, B.1</td></tr><tr><td>BGN-IT Risks report (AlphaSense, first 600 lines)</td><td>[AS]</td><td>2026-06-01</td><td>E7 RA3, E8, Group 4, FALSE FRIEND ACH</td></tr><tr><td>FBK-IT Change Forces report (AlphaSense, first 400 lines)</td><td>[AS]</td><td>2026-06-01</td><td>E5, E11, peer benchmarking</td></tr><tr><td>FactSet factset-valuation.json</td><td>[C]</td><td>As-of dashboard build</td><td>Section A (forward P/E, PE percentile)</td></tr><tr><td>FactSet factset-ssem.json</td><td>[C]</td><td>As-of dashboard build</td><td>Section A (Buy%, TP, momentum score)</td></tr><tr><td>Web search (Investing.com / Yahoo Finance)</td><td>[Web]</td><td>2026-06-15</td><td>Section A live price, 52-week range</td></tr></tbody></table>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>1. <u>BGN-IT absent from prices.json.</u> Live price, 52-week range, 200-day MA, and RS percentile are not available from the master-dashboard data files. Live price sourced from web search (Investing.com, Yahoo Finance) on 15-Jun-26: approximately EUR60.15. 52-week range EUR41.70-EUR59.45 per web sources (stock appears to have recently broken above the prior 52-week high). 200-day MA not retrieved from web sources; directional assessment (Above) is based on trajectory. This data gap must be resolved before ESA: BGN-IT should be added to the prices.json pipeline. 2. <u>BGN-IT Risks report (44-risks): first 600 lines only.</u> The Risks report was partially read at Triaging (first 600 lines). The FALSE FRIEND ACH matrix and the five thesis-rebuttal pairs were captured within this range. Remaining content (lines 601+) may contain additional risk factors. Full read recommended at ESA. 3. <u>BMED-IT and AZM-IT peer reports: not read at Triaging.</u> Only FBK-IT Change Forces was read as the peer report (first 400 lines). BMED-IT and AZM-IT files were not confirmed on disk. Peer benchmarking at Triaging relies on quantitative comparisons cited in the BGN-IT family reports. Full peer read required at ESA. 4. <u>Cohort: no active BGN cohort confirmed.</u> cohorts-v3.json search confirmed BGN-IT is not assigned to any active cohort. Sector peers (FBK-IT, BMED-IT, AZM-IT) used as comparators throughout. 5. <u>CMD delayed to H2 2026.</u> BGN has not published a new 3-year plan since the 2022-2024 plan cycle concluded. CMD was delayed by the Mediobanca bid disruption. Investors are navigating without a published plan frame; medium-term guidance reliance is on quarterly management commentary only.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see section 7 of the self-review debrief at memory/skills/investment-analyst/self-review-debriefs/BGN-IT-triaging-self-review-debrief-2026-06-15.md</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"B","label":"Sell-side earnings momentum"},"MR3":{"grade":"B","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"B","label":"Pillar II: Case building blocks"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"C.2":{"grade":"B","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"B","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"}};</script>
+</body>
+</html>

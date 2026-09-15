@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Carel Industries (CRL-IT) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">30</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-b">MR1 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-b">MR2 — Sell-side earnings momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-a">MR3 — Thematic fit<span class="nav-rating-pill A">A</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-b">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">89</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-b">Element E1 — Required input change forces<span class="nav-rating-pill B">B</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-b">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill B">B</span><span class="nav-fc">78</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-b">Group 1 — Case momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-b">Element E4 — Technical momentum<span class="nav-rating-pill B">B</span><span class="nav-fc">3</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-a">Element E5 — Thematic fit<span class="nav-rating-pill A">A</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr">Element E6 — Sell-side earnings momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-b">Group 2 — Case simplicity<span class="nav-rating-pill B">B</span><span class="nav-fc">31</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-b">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill B">B</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-b">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill B">B</span><span class="nav-fc">19</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-b">Group 3 — Core philosophy<span class="nav-rating-pill B">B</span><span class="nav-fc">22</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-b">Element E11 — Value-chain dynamics<span class="nav-rating-pill B">B</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e15-invalidating-attributes-nr">Element E15 — Invalidating attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e16-strenuously-seek-to-avoid-attributes-nr">Element E16 — Strenuously seek-to-avoid attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e17-capital-constraining-attributes-nr">Element E17 — Capital-constraining attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e18-clear-transmission-mechanism-inputs-to-earnings-">Element E18 — Clear transmission mechanism, inputs to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e19-monitorable-transmission-mechanism-leading-track">Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">7</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">10</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Carel Industries (CRL-IT) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">CRL-IT</span> A&amp;J MEMO — Carel Industries (CRL-IT) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 01-Jul-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">€29.7</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">37.7x (89th pct vs 10Y universe)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">50%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above — price 24% above 200d MA</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">CRL-IT (Carel Industries S.p.A.)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Capital goods — factory equipment (HVAC/R controls)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">IND10 — Industrial Niche Controls (Belimo, Systemair, Zehnder)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Belimo (BEAN-CH) — primary; Systemair (SYSR-SE) — secondary</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">€29.7</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">€20.0–€33.0</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">€24.0</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above — price 24% above 200d MA</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">37.7x (89th pct vs 10Y universe)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">~€34–36 (sell-side mean; limited coverage depth in AS pool)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">30 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>High-conviction structural EPS upgrader. <span class="g gB">B</span></strong> Carel is mid-cycle in a regulatory + technology-driven upgrade that is simultaneously firing on two of its highest-quality growth engines — F-Gas natural refrigerant transition and AI data centre cooling — both of which are structural, not cyclical, and both of which are in early innings.</li><li><strong>Valuation is the primary constraint.</strong> At <strong>37.7x</strong> forward P/E (89th pct), the market has already partially re-rated the business off the 2024 destocking trough; the remaining upside is real but requires clean execution and no hyperscaler capex pause.</li><li><strong>Business quality is high, not exceptional.</strong> <strong>50%</strong> gross margins, <strong>20%</strong> EBITDA, <strong>98%</strong> cash conversion, net cash positive — outstanding controls-layer economics; however OEM channel concentration and Kiona deployment delays introduce execution friction that prevents an A-grade operator reading at this stage.</li><li><strong>Decision: progress to ESA with conviction.</strong> The change forces are structural, the financial inflection is confirmed (four consecutive quarters of double-digit organic growth), and the cohort relative rank is top-two. This is a straightforward progression.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">8 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>HVAC/R controls specialist.</strong> Carel designs electronic controllers, sensors, expansion valves, and humidification systems for heating, ventilation, air-conditioning, and refrigeration — serving OEMs, contractors, and installers across 12 global production sites.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Revenue scale.</strong> €<strong>629m</strong> FY2025 (+<strong>10.6%</strong> organic CER); Q1 2026 at €<strong>170.9m</strong> (+<strong>19.7%</strong> organic) — fourth consecutive quarter of double-digit organic growth.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Margin profile.</strong> EBITDA <strong>19.7%</strong> FY2025 → <strong>21.5%</strong> Q1 2026; gross margins ~<strong>50%</strong>; EBIT ~16–<strong>17%</strong>; net profit €<strong>73.6m</strong> FY2025 (+<strong>17.6%</strong>). First net-cash positive (€<strong>18.4m</strong> excl. IFRS 16 = €<strong>48.3m</strong>) in company history.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Asset-light controls layer.</strong> CapEx only <strong>3.6%</strong> of revenues FY2025 (peak <strong>5.5%</strong> in FY2024 for plant expansion); ROI <strong>15.4%</strong> FY2025 vs <strong>11.5%</strong> FY2024 — improving but not yet Belimo-level (Belimo ROCE ~<strong>36%</strong>).</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Channel.</strong> <strong>66%</strong> OEM, <strong>20%</strong> installers/contractors, <strong>14%</strong> distributors. No single customer &gt;<strong>5%</strong> of revenue; top 40 customers ~<strong>50%</strong> of revenue. Strong but not exceptional diversification.</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Geography.</strong> EMEA <strong>64%</strong>, North America <strong>20%</strong> (fastest growth), APAC <strong>14%</strong>, South America <strong>2%</strong>.</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Investment style.</strong> Structural growth compounder with cyclical overlay (heat pump destocking created 2024 entry point); moving into a multi-year EPS upgrade cycle now the destocking has resolved.</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>M&amp;A.</strong> Kiona (<strong>82.4%</strong>, €<strong>164.8m</strong>, 2023) for SaaS/IoT platform — EBITDA ~<strong>30%</strong>, but international deployment slower than planned. SENVA ($<strong>34m</strong>) for North American sensors. Sauber (full buyout July 2025, €<strong>1.6m</strong> residual) for field services.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>EPS upgrade cycle is live and accelerating.</strong> Q1 2026 net profit +<strong>81.5%</strong> YoY; four consecutive quarters of double-digit organic growth; Q2 2026 guide €<strong>180</strong>–190m (13–<strong>20%</strong> growth) — management posture is honest-tracker conservative, so the ceiling likely gets beaten again.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Two structural secular drivers are simultaneously firing.</strong> F-Gas natural refrigerant transition (GWP ≥150 ban commercial self-contained from 2025; chillers/HPs from 2027) and AI data centre cooling (North America organic +<strong>52.4%</strong> Q1 2026; Carel holds <strong>42%</strong> European CRAC share) are both durable, not cyclical.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Kiona SaaS deployment is the single biggest risk to case quality.</strong> €<strong>164.8m</strong> acquisition; <strong>30%</strong> EBITDA margin — but international rollout taking longer than expected; net sales slightly below expectations; creates capital allocation uncertainty if monetisation continues to lag.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Valuation is fair but not cheap.</strong> <strong>37.7x</strong> forward PE (89th pct) vs Belimo (~<strong>39x</strong> at trough-adjusted; very expensive) vs Systemair (much cheaper but lower quality). CRL is the right risk-reward point in the cohort — better growth than Systemair, lower valuation than Belimo — but this is not a low-multiple entry.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Decision: progress to ESA.</strong> Change forces structural and confirmed. Foundation quality adequate for progression. Key questions (Kiona optionality, data centre concentration, E3 valuation upside) must be addressed at ESA stage.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-b" data-spy><span class="id">MR1</span> Technical momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Price €<strong>29.7 </strong>is <strong>24%</strong> above 200d MA (€<strong>24.0</strong>); 52w range €<strong>20</strong>–33 means current price is in the upper third of the 52w range; RS = 0.180 percentile — modest absolute RS but directionally constructive; price has recovered strongly from the 2024 destocking trough lows.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-b" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">SSEM revisions: L1M +2, L3M +4, L6M +6 — consistently positive and accelerating; buy% = <strong>50%</strong> (mixed conviction, not consensus buy); revision trend is upward without being euphoric; four consecutive quarterly beats vs guidance ceiling.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-a" data-spy><span class="id">MR3</span> Thematic fit <span class="g gA">A</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Direct and deep exposure to two of the highest-conviction secular thematics in the Viewforth universe: European F-Gas regulation (mandatory equipment replacement cycles) and AI data centre cooling (hyperscaler direct specification); also levered to heat pump electrification recovery — triple-thematic alignment is rare.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Abundant external change forces (regulation + AI DC demand); strong internal change (C-suite simplification; Kiona SaaS transition; US manufacturing expansion); base is well-invested with net cash; destocking trough resolved; execution trajectory is positive. Held off A by Kiona deployment delays and valuation not at low-multiple.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-b" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Thematic fit A-grade; simplicity guardrails mostly pass (2 fulcrum drivers, conservative IR, OEM channel focused) with some complexity from Kiona/multi-subsidiary structure; value-chain dynamics strongly supportive (controls-layer premium, regulatory tailwinds, weak competitive threat from below); setup fits mis-modelled EPS upgrader and big demand change archetype cleanly.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext">Not applicable at this stage.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> Strong, structural, and dual-source change forces (F-Gas regulation + AI DC demand) on top of a recovering, well-invested base — abundant positive inputs by any Triaging screen.</li><li><strong>E1 — Required input change forces. <span class="g gB">B</span></strong> External (regulatory + structural demand) and internal (leadership reform, SaaS transition) change forces are both active and material; base is net cash, well-invested, with improving ROI; destocking headwind fully resolved; valuation not at low-multiple but reasonable given quality.</li><li><strong>E2 — Required case outputs. <span class="g gNR">NR</span></strong> Not in scope at Triaging — first assessed at ESA.</li><li><strong>E3 — Sufficient TSR / valuation upside. <span class="g gNR">NR</span></strong> Not in scope at Triaging — first assessed at ESA.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 — Required input change forces. <span class="g gB">B</span></strong> See Section C.1 for full treatment. External change forces include EU F-Gas regulation driving a mandatory structural replacement cycle in natural refrigerants and an explosive AI data centre cooling demand surge; internal change forces include the C-suite simplification under CEO Nalini, Kiona SaaS platform scaling, and North American manufacturing build-out. The financial base is delivering: net cash positive for first time, <strong>98%</strong> cash conversion, four consecutive quarters of double-digit organic growth.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2 — Required case outputs. <span class="g gNR">NR</span></strong> Not applicable at this stage: Element E2 (Required case outputs) is first assessed at Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3 — Sufficient TSR / valuation upside. <span class="g gNR">NR</span></strong> Not applicable at this stage: Element E3 (Sufficient total-shareholder-return / valuation upside) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gB">B</span></strong> Controls-layer business with premium niche shares, strong thematic alignment, broadly clean simplicity guardrails, and supportive value-chain dynamics; Kiona execution and OEM concentration create manageable friction but do not impair the headline case at Triaging depth.</li><li><strong>Group 1 — Case momentum. <span class="g gB">B</span></strong> Technical price above 200d MA; SSEM revisions consistently positive; thematic fit A-grade; together a strong momentum signal.</li><li><strong>Group 2 — Case simplicity. <span class="g gB">B</span></strong> Two clear fulcrum drivers; conservative honest-tracker IR posture; some complexity from Kiona software and multi-subsidiary structure that warrants ESA scrutiny.</li><li><strong>Group 3 — Core philosophy. <span class="g gB">B</span></strong> Value-chain dynamics strongly supportive — controls layer captures premium margins; regulatory tailwinds mechanical; disruption risks manageable. E9/E10/E12/E13 not in scope.</li><li><strong>Group 4 — Case riskiness. <span class="g gC">C</span></strong> Valuation at 89th pct PE, Kiona deployment risk, data centre customer concentration, CGU impairment thin headrooms (Eurotec), and PFAS regulatory uncertainty all register; not invalidating but warrant disciplined ESA scrutiny.</li><li><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Not in scope at Triaging — first assessed at Early-Stage Assessment.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1 — Case momentum. <span class="g gB">B</span></strong> Price <strong>24%</strong> above 200d MA; SSEM +2/+4/+6 across L1M/L3M/L6M; <strong>50%</strong> buy ratings; thematic alignment at A-grade across three concurrent secular trends. Held off A by mid-field RS rank and mixed analyst conviction.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2 — Case simplicity. <span class="g gB">B</span></strong> Two clear fulcrum drivers (F-Gas + AI DC); geography and business unit perimeter manageable; honest-tracker IR pattern confirmed over four reporting periods; Kiona complexity is a real but monitored risk. See E7 for full treatment.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3 — Core philosophy. <span class="g gB">B</span></strong> E11 in scope at Triaging — value-chain dynamics emphatically supportive for controls-layer specialists with premium niche shares. E9, E10, E12, E13 not applicable at this stage.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4 — Case riskiness. <span class="g gC">C</span></strong> First-pass risk read at Triaging only. Valuation stretched (89th pct); Kiona capital allocation risk; hyperscaler data centre capex concentration; thin impairment headroom at Eurotec/Recuperator; PFAS regulation overhang. Not invalidating at Triaging; flags for ESA deep risk work.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5 — Case optionality. <span class="g gNR">NR</span></strong> Not applicable at this stage: first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision: <span class="g gB">B</span> Progress to Early-Stage Assessment with normal conviction.</strong> Structural change forces are confirmed, financial base is inflecting strongly, and cohort-relative rank is top-two. This case clears the Triaging qualitative test convincingly.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> Change forces confirmed; base well-invested; adequate setup fit (mis-modelled EPS upgrader primary; big demand change secondary). No blocking conditions at Triaging.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to generate full BF/LF/Risks family reports for ESA — CF + BF on disk but LF and Risks outstanding; (2) Watson to initiate Key Question research on Kiona SaaS international deployment trajectory and data centre customer concentration risk before ESA write-up begins.</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">89 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gB">B</span></strong> Carel sits in the top half of its cohort on nearly every dimension that matters at Triaging — organic growth, margin, balance sheet quality, regulatory tailwind strength, and thematic alignment. The valuation is a known constraint but not a disqualifier. Progress recommended.</li><li><strong>Central tension.</strong> F-Gas + AI DC demand creates an A-grade external change force; Kiona deployment delays + PE at 89th pct creates a meaningful but manageable friction; the question at ESA will be whether earnings power is large enough to grow through the multiple.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">11 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> E1 is the only in-scope Element at Triaging. External change forces (F-Gas regulation, AI data centre cooling demand) are structural and firing simultaneously; internal change forces (C-suite reform, SaaS transition, North American build-out) are active. Base is net cash, well-invested, with <strong>98%</strong> cash conversion. Destocking trough fully resolved. Grade held off A by Kiona deployment friction and entry-point multiple not at trough.</li><li><strong>E1 — Required input change forces. <span class="g gB">B</span></strong> Dual structural external drivers; strong internal change programme; well-invested base; improving capital efficiency. Four consecutive quarters of double-digit organic growth confirm transmission. Held off A by Kiona monetisation lag and 89th pct PE limiting CFC scope.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-b" data-spy>Element E1 — Required input change forces <span class="g gB">B</span> <span class="secn">11 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E1 verdict. <span class="g gB">B</span></strong> The abundance of structural external change forces (F-Gas regulation + AI data centre demand) and clear internal change forces (CEO-led simplification, Kiona platform, US build-out) make this an unambiguous Triaging pass. The base is sound (net cash, <strong>98%</strong> cash conversion, ROI <strong>15.4%</strong> and rising). Held off A: Kiona deployment slower than underwriting; PE <strong>37.7x</strong> at 89th pct limits large-scale change-from-current repricing.</li></ul></div>
+<p><strong>RA1 — Change forces? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> Dual structural external change forces (F-Gas regulation + AI DC demand) confirmed active in Q1 2026 financials; internal change programme under CEO Nalini is material and ongoing; together they represent abundant positive change at Triaging screen.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>RA1 CQ1 — Strong external change forces? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>EU F-Gas Regulation — mechanical replacement driver.</strong> GWP ≥150 ban in commercial self-contained units effective 2025; tighter restrictions on chillers and heat pumps from 2027 — creates a <span class="hl">mandatory, non-deferrable equipment replacement cycle</span> across Carel's largest markets.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>F-Gas impact confirmed in revenue.</strong> Refrigeration segment +<strong>10.7%</strong> organic Q1 2026; management cites natural refrigerant transition (CO2, propane) as highest-plausibility 3Y driver at 20–<strong>25%</strong> EPS CAGR contribution; F-Gas phase-out to 2050 is decades-long structural tailwind.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>AI data centre cooling — hypergrowth demand event.</strong> North America +<strong>52.4%</strong> organic Q1 2026; hyperscalers directly specifying Carel cooling components; advanced liquid cooling requires 3–5× higher sensor content than conventional ventilation architecture.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Carel's data centre market position.</strong> <strong>42%</strong> European market share in Computer Room Air Conditioners (CRAC); <strong>60%</strong> European market share in rooftop units; <strong>39%</strong> in chillers — dominant incumbency in the fastest-growing end-market.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Heat pump demand recovery — second-order cyclical tailwind.</strong> German residential HP sales +~<strong>30%</strong> Q1 2026; European overstocking cycle confirmed fully resolved by management (Nov 2025 call); <em>residential HP revenues had fallen &gt;<strong>50%</strong> in EMEA during 2024</em> — the recovery base is extremely low, amplifying YoY growth rates.</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext"><strong>EPBD (Energy Performance of Buildings Directive) — regulatory overlay.</strong> Mandates high-efficiency HVAC in non-residential buildings; <strong>79%</strong> of European non-residential buildings need compliance upgrades; directly drives Carel's ventilation and heat recovery product families.</div></div><div class="subfinding"><span class="subnum">2.7</span><div class="subtext"><strong>AIM Act (US) — North American structural parallel.</strong> <strong>45%</strong> HFC phasedown mandated; accelerates inverterization and natural refrigerant adoption in the US; supports Carel's fastest-growing regional segment.</div></div><div class="subfinding"><span class="subnum">2.8</span><div class="subtext"><strong>Belimo peer read (BEAN-CH CF).</strong> Belimo data centre revenues grew <strong>76%</strong> YoY in FY2025 reaching <strong>17%</strong> of group sales — <em>corroborates</em> the structural AI DC demand signal from a different and complementary product angle (valves vs controllers); both cohort peers see the same secular demand accelerant.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>RA1 CQ2 — Strong internal change forces? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>C-suite simplification under Project Impulse.</strong> Retirement of 36-year MD Giandomenico Lombello; CEO Nalini now single point of reporting across streamlined C-suite; reduced operational complexity and accelerated decision-making — a genuine internal change, not cosmetic restructuring.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>New CTO Paolo Faraldi (Oct 2024).</strong> Consolidated technology division (electronic, electromechanical, digital engineering) under single CTO for the first time; strategic alignment of R&amp;D investment (&gt;<strong>5%</strong> of revenues) with clearer governance.</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>Kiona SaaS platform transition.</strong> Acquisition of <strong>82.4%</strong> Kiona (€<strong>164.8m</strong>, 2023) represents a fundamental business model shift from hardware component supplier to integrated hardware-software-SaaS platform; Kiona EBITDA ~<strong>30%</strong> — the highest-margin business unit.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>North American manufacturing scale-up.</strong> SENVA acquisition ($<strong>34m</strong>, adjacent sensors); planning for third US manufacturing plant by 2027; direct-to-hyperscaler engagement model being established — structural channel transformation in the highest-growth market.</div></div><div class="subfinding"><span class="subnum">3.5</span><div class="subtext"><strong>Subsidiary consolidation programme.</strong> Full Sauber buyout (field services, July 2025, €<strong>1.6m</strong>); full CFM Turkey buyout (March 2024, €<strong>44.3m</strong>) — simplifying the group structure and improving margin quality.</div></div><div class="subfinding"><span class="subnum">3.6</span><div class="subtext"><strong>ROI trajectory confirms internal change translating.</strong> Post-tax ROI (ROIC proxy) rose to <strong>15.4%</strong> FY2025 from <strong>11.5%</strong> FY2024 — fastest single-year improvement in at least four years; demonstrates internal change is converting into capital efficiency, not just narrative.</div></div></div></div></div>
+<p><strong>RA2 — Robust base? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> The base is well-invested, net cash positive, with <strong>98%</strong> cash conversion and four consecutive quarters of double-digit organic growth — by any Triaging standard this is a strong base. Held off A: valuation at 89th pct PE constrains the change-from-current opportunity; Kiona monetisation lag introduces execution risk into the highest-margin business unit.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>RA2 CQ1 — Absence of external headwinds? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>FX headwinds are material.</strong> Q1 2026 reported growth <strong>15.9%</strong> vs organic <strong>19.7%</strong> — €<strong>5m</strong> adverse FX impact in a single quarter; majority of revenues USD-exposed vs EUR functional currency; manageable but a persistent drag.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Memory chip cost inflation emerging.</strong> Management flagged cost pressures on memories, metals, and transport in Q1 2026 call; Micron/memory supplier data shows DRAM/HBM prices +6× YoY with further 20–<strong>30%</strong> sequential increase projected into H2 2026 — a real input cost headwind materialising.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>PFAS restriction overhang.</strong> Proposed EU PFAS ban could prohibit almost all synthetic HFC/HFO refrigerants; introduces R&amp;D cost and product portfolio uncertainty beyond the current F-Gas roadmap; low probability near-term but a genuine tail risk.</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext"><strong>No activist pressure.</strong> Luigi Rossi Luciani S.a.p.a. (<strong>33.96%</strong> voting) and Athena FH (<strong>18.79%</strong>) provide stable long-term majority control; no activism visible in AlphaSense library — structurally supportive ownership base.</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext"><strong>EMEA project timing delays.</strong> Q1 2026 EMEA refrigeration growth muted by temporary project delays in Turkey and Eastern Europe — geographic execution variability; not structural but illustrates regional lumpiness.</div></div><div class="subfinding"><span class="subnum">5.6</span><div class="subtext"><strong>Destocking headwind = fully resolved.</strong> This is the most important read on headwinds — the primary 2024 headwind (European HP destocking, &gt;<strong>50%</strong> revenue decline) is confirmed over by management in November 2025 and evidenced by four consecutive double-digit organic quarters. The air is clear.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>RA2 CQ2 — Well-invested base? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Net cash positive for first time since listing.</strong> €<strong>18.4m</strong> net cash (excl. IFRS 16); €<strong>48.3m</strong> including pre-lease adjustment; €<strong>24m</strong> net cash in Q1 2026 — demonstrates investment programme has been funded internally without structural leverage build.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>R&amp;D at &gt;5% of revenues consistently.</strong> €<strong>32.7m</strong> R&amp;D spend FY2025 (<strong>5.2%</strong> of revenues); matched Danfoss (<strong>5.3%</strong>) but below Belimo (<strong>6.7%</strong>); commitment structural and multi-year — proprietary thermodynamic algorithms and STone programming ecosystem are enduring moats.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>12 global production sites; local-for-local model.</strong> Manufacturing duplication across Europe, Americas, APAC provides dual disaster-recovery protection; Poland plant expansion completed 2024 improving heat exchanger manufacturing efficiency.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Third US plant planned by 2027.</strong> Confirms management is investing ahead of demand in the fastest-growing market; capital allocation is forward-leaning not defensive.</div></div><div class="subfinding"><span class="subnum">6.5</span><div class="subtext"><strong>97-pct customer retention &gt;10 years.</strong> Approximately <strong>80%</strong> of top customers maintained relationships &gt;10 years — exceptional stickiness; OEM co-development programs create deep thermodynamic algorithm integration that survives procurement reviews.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>RA2 CQ3 — Past/present fundamental delivery congruency with thesis? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>Four consecutive quarters of double-digit organic growth.</strong> Q4 2025 +<strong>17%</strong>, Q1 2026 +<strong>19.7%</strong> — trajectory accelerating, not decelerating; consistent with both the F-Gas and AI DC drivers being live and ramping.</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Guidance pattern = honest-tracker conservative.</strong> FY2023: guided €<strong>646m</strong> +/-<strong>2%</strong>, delivered €<strong>650.2m</strong> (beat upper bound). FY2025: guided <strong>20%</strong> adj. EBITDA, delivered exactly <strong>20%</strong>. Q1 2026: guided €<strong>160</strong>–170m, delivered €<strong>170.9m</strong> (+<strong>0.5%</strong> above ceiling). CEO consistently beats own ceiling — highly congruent delivery pattern.</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>The 2024 miss was externally driven, not self-inflicted.</strong> Organic revenue -<strong>13.7%</strong> FY2024 was driven by European HP destocking — Danfoss revenue fell <strong>9%</strong> in same period; Carel's mild outperformance vs Danfoss in the trough confirms the base held up better than sector average.</div></div><div class="subfinding"><span class="subnum">7.4</span><div class="subtext"><strong>EBITDA margin rebuilt rapidly.</strong> <strong>18.1%</strong> FY2024 → <strong>19.7%</strong> FY2025 → <strong>21.5%</strong> Q1 2026 — <strong>340bp</strong> margin recovery in six quarters confirms operating leverage on the recovering volume is flowing through as modelled.</div></div><div class="subfinding"><span class="subnum">7.5</span><div class="subtext"><strong>Belimo comparison (BEAN-CH cohort).</strong> Belimo FY2025: revenue +<strong>23.3%</strong> local currency, EBIT margin <strong>20.8%</strong> — Carel broadly competitive with the highest-quality comparator in the cohort, and growing at similar organic rates from a lower base.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>RA2 CQ4 — Large change-from-current / mispricing? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Meaningful CFC exists but the stock has partially re-rated.</strong> 52w range €<strong>20</strong>–33; current price €<strong>29.7</strong> = <strong>49%</strong> above 52w low and only <strong>10%</strong> below 52w high — market has already recognised the recovery; the 2024 trough buyers are well in profit.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Consensus revisions consistently positive but not euphoric.</strong> SSEM +2/+4/+6 (L1M/L3M/L6M) — steady upgrade cycle rather than a step-change re-rating event; <strong>50%</strong> buy ratings means there is still meaningful underweight/neutral positioning to convert.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>If Kiona is undervalued at current multiples, there is hidden CFC.</strong> Kiona EBITDA ~<strong>30%</strong> on a €<strong>164.8m</strong> invested cost — at a SaaS peer multiple of 25–30× EBITDA this business could be worth €<strong>250</strong>–400m alone; if this optionality is not in consensus models, the CFC is larger than the price action suggests. This is an ESA question.</div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext"><strong>Data centre earnings power is likely mis-modelled by consensus.</strong> North American DC revenues nearly doubled in Q1 2026; consensus may still be modelling this as a cyclical tailwind rather than a structural step-change in addressable market. A re-basing of the DC TAM in sell-side models could drive the next upgrade cycle.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>RA2 CQ5 — Low trading multiple? <span class="g gD">D</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><strong>PE 37.7x at 89th pct — not a low-multiple entry.</strong> The stock is priced for significant ongoing outperformance; this is the weakest element of the Triaging case at this time.</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>Vs Belimo (BEAN-CH): Carel is cheaper.</strong> Belimo trades at ~39–42× forward PE adjusted for FX — Carel at 37.7× is a marginal discount vs the closest listed peer, suggesting the relative value case is defensible even if the absolute case is constrained.</div></div><div class="subfinding"><span class="subnum">9.3</span><div class="subtext"><strong>Vs Systemair (SYSR-SE): Carel is significantly more expensive.</strong> Systemair trades at lower multiples but is a turnaround restructuring story with much lower margin quality (~<strong>8.9%</strong> adj. EBIT margin vs Carel ~<strong>17%</strong>) — the multiple premium vs SYSR is justified by quality differential.</div></div><div class="subfinding"><span class="subnum">9.4</span><div class="subtext"><strong>Earnings growth velocity may grow through the multiple.</strong> At 19–<strong>20%</strong> organic growth with operating leverage, FY2027 EPS on FY2025 base could be 40–<strong>50%</strong> higher — that would compress the forward multiple materially even without multiple expansion. A PE of 37.7× is constraining but not terminal if growth holds.</div></div><div class="subfinding"><span class="subnum">9.5</span><div class="subtext"><strong>ESA must stress-test the multiple in a base/bear/bull scenario.</strong> Specifically: what is fair value in a hyperscaler capex pause scenario (biggest single risk to earnings power)?</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> The strongest bear case is that the stock has already priced the F-Gas and DC tailwinds — there is no residual CFC. The counter: four consecutive beats with an honest-tracker management posture suggests consensus is still undermodelling the run-rate; SSEM +6 in L6M is not consistent with a fully priced thesis. Rejected as the primary conclusion at Triaging; flagged for ESA stress.</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) ESA to size the Kiona embedded optionality vs current consensus models; (2) ESA to model hyperscaler capex pause scenario (AI DC revenue at risk in a trough).</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-b" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gB">B</span> <span class="secn">78 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gB">B</span></strong> Thematic fit is A-grade (triple secular tailwind alignment); simplicity guardrails broadly pass with two clean fulcrum drivers; value-chain dynamics strongly supportive for a controls-layer specialist with regulatory protection and premium niche shares. Case setup is clear and well-precedented (mis-modelled EPS upgrader + structural demand change).</li><li><strong>Group 1 (Case momentum). <span class="g gB">B</span></strong> Technical above 200d MA; SSEM positive and accelerating; thematic fit A.</li><li><strong>Group 2 (Case simplicity). <span class="g gB">B</span></strong> Two fulcrum drivers; conservative IR; Kiona complexity manageable.</li><li><strong>Group 3 (Core philosophy). <span class="g gB">B</span></strong> Controls-layer value chain strongly supportive; regulatory tailwinds mechanical.</li><li><strong>Group 4 (Case riskiness). <span class="g gC">C</span></strong> Valuation, Kiona execution, DC concentration — real risks; not invalidating.</li><li><strong>Group 5 (Case optionality). <span class="g gNR">NR</span></strong> Not in scope at Triaging.</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-b" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gB">B</span> <span class="secn">14 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gB">B</span></strong> Price <strong>24%</strong> above 200d MA; SSEM +2/+4/+6 across L1M/L3M/L6M; thematic fit A-grade; together a clear positive momentum signal without euphoria.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-b" data-spy>Element E4 — Technical momentum <span class="g gB">B</span> <span class="secn">3 findings</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E4 verdict. <span class="g gB">B</span></strong> Price €<strong>29.7 </strong>is <strong>24%</strong> above 200d MA (€<strong>24.0</strong>); within <strong>10%</strong> of 52w high (€<strong>33.0</strong>); RS = 0.180 percentile — constructive momentum profile; the stock is in a clear recovery uptrend from the 2024 trough.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E4 RA1 — Technical momentum profile: <span class="g gB">B</span></strong> Price well above 200d MA; near 52w highs; RS at 0.180 percentile indicates moderate relative strength but not top-decile; trend is constructive rather than momentum-leading.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Counter-view considered (E4):</strong> A pullback from 52w highs (€<strong>33.0</strong> → €<strong>29.7</strong>, -<strong>10%</strong>) could indicate distribution at the top of the range. Counter: SSEM is still accelerating; management guidance conservative — pullback more likely consolidation than trend reversal. Not invalidating at Triaging.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Downstream actions (E4):</strong> (1) ESA to monitor whether price breaks above €<strong>33 </strong>52w high on next earnings beat; (2) track RS momentum quarterly.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-a" data-spy>Element E5 — Thematic fit <span class="g gA">A</span> <span class="secn">10 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E5 verdict. <span class="g gA">A</span></strong> Carel is directly and deeply exposed to three of the most compelling secular investment thematics in the Viewforth universe simultaneously: European F-Gas natural refrigerant regulation (mandatory replacement cycle), AI data centre cooling infrastructure (hyperscaler capex acceleration), and European building electrification/heat pump recovery. Triple thematic concentration in a single investment is unusual and directly materially accretive. Highest thematic grade in cohort.</li></ul></div>
+<p><strong>E5 RA1 — Suitability for bear market / economic downturn <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gC">C</span></strong> Carel has meaningful defensive insulation (regulatory-driven replacement cycles are non-deferrable; OEM channel provides demand visibility) but is not fully defensive — commercial building HVAC investment is economically sensitive, and a sharp European recession would delay retrofit programmes. C vs cohort: better than Systemair (pure volume-driven); worse than Belimo (which has regulatory compliance mandates on &gt;<strong>80%</strong> of European non-residential buildings creating near-inelastic demand).</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA1 CQ1 — Defensive credentials in downturn? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>F-Gas compliance deadlines create non-deferrable demand.</strong> The 2025 commercial self-contained unit ban and 2027 chiller/HP ban are regulatory deadlines that cannot be renegotiated — OEMs must upgrade their product lines regardless of the economic cycle; this is the strongest defensive pillar.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Data centre cooling is structurally insulated from standard cyclical downturns.</strong> Hyperscaler capex is driven by competitive AI necessity rather than cyclical economic conditions; the correlation with GDP growth is low; however concentration in a handful of customers is a risk.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Achieved positive organic growth through 2020 COVID shutdown.</strong> Despite <strong>60%</strong> of manufacturing capacity temporarily shut, Carel maintained positive organic growth — credible evidence of underlying resilience.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>OEM channel provides volume visibility.</strong> Long-term OEM partnerships with &gt;10-year tenure (<strong>80%</strong> of top customers) provide order visibility; OEMs absorb short-term destocking rather than cancelling orders entirely (see 2024 trough — Carel had a -<strong>13.7%</strong> organic decline but bounced immediately in 2025).</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Residential HVAC is the vulnerable segment.</strong> North American residential HVAC volumes declined <strong>40%</strong>+ YoY in Q3 2025 — this is cyclically sensitive; a prolonged consumer downturn would impair heat pump adoption and residential inverterization revenues.</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext"><strong>Belimo comparison (BEAN-CH).</strong> Belimo's <strong>95%</strong>+ market share in critical cooling valves and mandatory BACS regulatory compliance (<strong>79%</strong> of European non-residential buildings by 2025) makes it more defensive than Carel in a standard economic downturn — Carel rates C vs Belimo's B on this dimension.</div></div></div></div></div>
+<p><strong>E5 RA2 — Suitability for AI disruption <span class="g gA">A</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gA">A</span></strong> Carel is a direct and material beneficiary of AI-driven data centre infrastructure expansion — not at risk from AI disruption. The company's controls and cooling technology is more valuable (higher sensor content per rack) in AI data centres than in traditional server environments. This is an unusual A-grade dimension.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA2 CQ1 — AI beneficiary rather than threat? <span class="g gA">A</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>AI data centres require 3–5× higher sensor density than traditional server environments.</strong> Advanced liquid cooling (direct-to-chip, immersion cooling) requires continuous precision thermodynamic management — Carel's core competency — at a much higher value per rack than conventional ventilation.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>North America +52.4% organic Q1 2026 driven predominantly by AI DC.</strong> Hyperscalers are <span class="hl">directly specifying Carel controllers</span> into their cooling architecture — the most durable form of demand lock-in (specification-level, not just procurement).</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Data centre thermal management TAM shifting to 60% liquid cooling by 2028.</strong> Liquid cooling requires continuous precision sensor and control input at every coolant distribution unit — the TAM for Carel's relevant products grows proportionally to liquid cooling penetration.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>Kiona SaaS platform positions Carel for whole-DC optimisation play.</strong> RED Optimise and Kiona site performance optimisation (SPO) enables Carel to capture data centre monitoring and optimisation revenues that are recurring and not hardware-cycle dependent.</div></div><div class="subfinding"><span class="subnum">4.5</span><div class="subtext"><strong>STone Copilot AI-assisted engineering tool.</strong> Carel's STone programming ecosystem integrates generative AI for code completion and debugging — reducing client engineering time by <strong>20%</strong>; Carel is deploying AI to become a better AI infrastructure supplier.</div></div><div class="subfinding"><span class="subnum">4.6</span><div class="subtext"><strong>Belimo: comparable AI DC exposure.</strong> BEAN-CH DC revenues <strong>17%</strong> of sales in 2025 (+<strong>76%</strong> YoY); Morgan Stanley projects +<strong>34%</strong> CAGR for Belimo's DC business — corroborates the structural demand read but shows Belimo has higher DC revenue concentration (~<strong>17%</strong> of sales vs Carel's ~10–<strong>12%</strong> estimated). Both benefit; Belimo's DC moat in liquid cooling valves (<strong>95%</strong> share) may be marginally deeper than Carel's CRAC share.</div></div></div></div></div>
+<p><strong>E5 RA3 — Suitability for Iran oil-price induced inflation or demand deterioration <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> Carel has moderate insulation — regulatory demand for F-Gas transition is non-deferrable regardless of oil prices; however, oil-price-driven input cost inflation (metals, transport) and macro demand deterioration would impair commercial HVAC retrofit investment and consumer heat pump adoption. Not well-insulated.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E5 RA3 CQ1 — Oil-price inflation resilience? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Regulatory demand is oil-price insensitive.</strong> F-Gas compliance deadlines are driven by European environmental law, not energy economics — OEMs cannot defer refrigerant retrofits because oil is expensive; Carel's regulatory-driven demand is largely price-insensitive.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Input cost inflation is a real risk in high-oil-price environment.</strong> Carel is already flagging cost pressures on memories, metals, and transport in Q1 2026 call — an oil shock amplifying these input costs compresses margins unless Carel can pass through in pricing.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>Historical pricing power is adequate but not exceptional.</strong> Carel implemented multiple price-list increases in 2022 to offset semiconductor inflation — demonstrated ability to pass through cost pressures; but pass-through lagged (partial not full) in 2025 with deflation.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Commercial building HVAC investment slows in high-oil/high-rate environment.</strong> European commercial retrofit programmes are sensitive to borrowing costs; a prolonged oil-price-driven rate spike would delay some EMEA retrofit demand.</div></div><div class="subfinding"><span class="subnum">6.5</span><div class="subtext"><strong>Belimo comparison.</strong> Belimo has higher pricing power (controllers represent &lt;<strong>2%</strong> of total HVAC system cost; customers will not risk unit failure to save minor component costs) — Belimo rates slightly better on this dimension; Carel's OEM commercial negotiations involve larger contract values and more price pressure.</div></div></div></div></div>
+<p><strong>E5 RA4 — Paradigm fit from business perspective <span class="g gA">A</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gA">A</span></strong> Carel is <span class="hl">exceptionally well-positioned</span> for the structural paradigm that is reshaping HVAC/R — decarbonisation mandates, AI infrastructure build-out, and servitization of industrial controls. The controls layer captures the highest margins in the HVAC/R value chain (<strong>50%</strong> gross margins vs ~<strong>30%</strong> for equipment OEMs); Carel is migrating from component supplier to integrated SaaS platform — moving further up the margin curve over time.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E5 RA4 CQ1 — Long-term paradigm alignment? <span class="g gA">A</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Controls + software layer is the highest-margin stage in the HVAC/R value chain.</strong> Per BF report: controls capture <strong>50%</strong> gross margins and ~<strong>18%</strong> EBIT vs equipment OEMs at <strong>30%</strong> gross/<strong>15%</strong> EBIT and distributors at <strong>25%</strong> gross/<strong>8%</strong> EBIT — Carel occupies the structurally superior position in the chain.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Regulatory architecture is 25+ years long.</strong> F-Gas phase-out target 2050; US AIM Act HFC reduction <strong>85%</strong> by 2036; European BACS mandates rolling out to 2025–2030 — these are not 2–3 year catalysts but multi-decade replacement cycle drivers. <u>Carel has structural earnings uplift baked in by law.</u></div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>SaaS servitization is directionally compressing hardware cyclicality.</strong> Kiona's <strong>75%</strong>+ recurring revenues insulate cash flows from hardware order lumps; as Kiona scales internationally, the recurring revenue base grows; this is a genuine business model evolution not a cosmetic pivot.</div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext"><strong>Hyperscaler direct specification creates OEM-equivalent lock-in in DC market.</strong> Historically Carel's lock-in came via OEM co-development; in the DC segment, hyperscalers directly specify cooling components — this is a more direct and durable lock-in than OEM intermediation.</div></div><div class="subfinding"><span class="subnum">8.5</span><div class="subtext"><strong>Decarbonisation paradigm is accelerating not decelerating.</strong> Building sector (<strong>33%</strong> of global GHG) has increasing regulatory pressure; EPBD, F-Gas, AIM Act, building energy performance standards — all tightening trajectory for next decade.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> Bear case is data centre capex cycles hard-reverse (AI investment peak); F-Gas timelines slip (regulatory deferral); Kiona never scales to justify €<strong>164.8m</strong>. Counter: four consecutive earnings beats; hyperscaler capex is competitively necessitated not discretionary; F-Gas is European law not guidance. Maintained A-grade with caveats flagged for ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) ESA to assess at what level of DC capex reduction the investment case breaks; (2) ESA to model Kiona international deployment timeline scenarios — what is the inflection needed for the acquisition to be value-accretive on invested cost?</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr" data-spy>Element E6 — Sell-side earnings momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E6 (Sell-side earnings momentum) is not assessed in the Pillar II body at Triaging — the SSEM signal is captured in MR2 and in the Section A snapshot. First assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-b" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gB">B</span> <span class="secn">31 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gB">B</span></strong> Two clear fulcrum drivers (F-Gas regulation + AI data centre cooling); perimeter manageable (12 production sites, main geographies EMEA + North America); conservative honest-tracker IR posture confirmed; Kiona subsidiary complexity and multi-acquisition integration introduce some noise but do not fracture the core thesis.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-b" data-spy>Element E7 — Required case simplicity guardrails <span class="g gB">B</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E7 verdict. <span class="g gB">B</span></strong> Two clear and high-conviction fulcrum drivers; geography and business unit perimeter is manageable; IR posture is honest-tracker conservative; Kiona and subsidiary complexity is real but monitored. Held off A: Kiona international deployment lag, multi-subsidiary impairment sensitivities (Eurotec, Recuperator), and slight working capital complexity from safety stock build-up add noise.</li></ul></div>
+<p><strong>E7 RA1 — Focused bet? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> The case has two clear fulcrum drivers — F-Gas natural refrigerant transition and AI data centre cooling demand — and four secondary drivers (inverterization, heat pump recovery, Kiona SaaS scaling, North American manufacturing build-out). Below the 4-driver ceiling for full simplicity; qualifies as focused at Triaging.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA1 CQ1 — 2 or fewer fulcrum drivers AND 4 or fewer key drivers? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Fulcrum driver #1: F-Gas natural refrigerant transition.</strong> EU mandates on GWP ≥150 refrigerants (commercial self-contained 2025; chillers/HPs 2027); US AIM Act <strong>45%</strong> HFC reduction; creates a mandatory multi-year replacement cycle across Carel's primary product lines. Highest plausibility, highest impact; this driver fires regardless of macro conditions.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Fulcrum driver #2: AI data centre cooling demand.</strong> Hyperscaler direct specification; North America +<strong>52.4%</strong> organic Q1 2026; data centre projected to become Carel's largest single growth engine in 2026–2027; liquid cooling transition to <strong>60%</strong> market by 2028 amplifies sensor/controller content per rack by 3–5×.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Key driver #3: Heat pump demand recovery.</strong> Post-destocking rebound; German HP +<strong>30%</strong> Q1 2026; European heat pump market returned to growth in 2025; this is cyclical recovery not structural inflection — valuable but dependent on policy continuity.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Key driver #4: Kiona SaaS monetisation.</strong> EBITDA ~<strong>30%</strong>; potential for recurring revenue to reduce hardware cyclicality; currently below potential due to international deployment delays. Optionality rather than a confirmed driver.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Key driver #5: Inverterization.</strong> US inverter sales +<strong>50%</strong> H1 2024; variable-speed technology premium per HVAC unit increasing; supportive but second-order behind the F-Gas and DC fulcrum drivers.</div></div><div class="subfinding"><span class="subnum">2.6</span><div class="subtext"><strong>Driver count assessment.</strong> Two fulcrum, three/four secondary — comfortably within the 2-fulcrum / 4-secondary ceiling. The case is not cluttered with speculative optionalities.</div></div></div></div></div>
+<p><strong>E7 RA2 — Narrow perimeter? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> Perimeter is manageable. Core product is controls and humidification systems within HVAC/R — one industry, one technology layer. Geographic footprint is 47 branches and 12 production sites (complex but not excessive for a €<strong>629m</strong> company). Key complexity: Kiona adds a software subsidiary with different economics and different deployment dynamics.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA2 CQ1 — 10 or fewer geographies and/or business units? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Core product perimeter: one industry, one layer.</strong> HVAC/R controls and humidification — Carel does not manufacture equipment, does not distribute, does not install (except Sauber field services, small). The core bet is one value-chain stage.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Four main reporting geographies.</strong> EMEA (<strong>64%</strong>), North America (<strong>20%</strong>), APAC (<strong>14%</strong>), South America (<strong>2%</strong>) — manageable four-region structure; not overly fragmented.</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Business units: HVAC (72%) and Refrigeration (28%) — two segments.</strong> Simple two-segment revenue model; both benefit from the same F-Gas and decarbonisation tailwinds; no complex portfolio dilution.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>Subsidiary count creates noise.</strong> Kiona (SaaS), Sauber (field services), SENVA (sensors), CFM Turkey, Alfaco Poland, Klingenburg — six material subsidiaries with different economics; Eurotec and Recuperator have thin impairment headrooms. This creates accounting complexity but does not fracture the investment case.</div></div><div class="subfinding"><span class="subnum">4.5</span><div class="subtext"><strong>Production sites: 12 globally.</strong> Complex manufacturing footprint but strategically structured for local-for-local delivery and disaster recovery; not excessive for the scale.</div></div><div class="subfinding"><span class="subnum">4.6</span><div class="subtext"><strong>Systemair comparison (SYSR-SE).</strong> Systemair operates in more geographies (including Saudi Arabia, India, Middle East in active build-out) with a more complex platform standardisation programme across Geniox/Topvex — Carel's perimeter is simpler.</div></div></div></div></div>
+<p><strong>E7 RA3 — Zero headwinds? <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> Not zero headwinds — FX conversion drag is structural (USD revenues, EUR cost base); memory/metal input cost inflation emerging; PFAS ban overhang is a tail risk; Eurotec impairment sensitivity is tight (WACC +<strong>0.26%</strong> = zero headroom). However, the most significant 2024 headwind (European HP destocking) is confirmed fully resolved.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA3 CQ1 — Zero value-chain headwind risks to revenue? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>FX headwind is structural not transient.</strong> USD/EUR divergence creates persistent translation drag; Q1 2026 organic <strong>19.7%</strong> vs reported <strong>15.9%</strong> — the <strong>380bp</strong> gap is entirely FX; this is not a one-quarter anomaly.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Memory/semiconductor cost inflation is real and worsening.</strong> Micron memory prices up 6× YoY; Carel flagged increasing safety stock of memory chips (cash outflow) and cost pressures on memories, metals, and transport in the Q1 2026 call; margin headwind is visible and potentially worsening.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>Kiona international deployment delays create medium-term revenue headwind.</strong> Net sales slightly below expectations; international rollout taking longer than underwriting — this is a missed-opportunity headwind rather than a hard revenue loss, but it delays the case for Kiona as a standalone value driver.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Eurotec CGU impairment sensitivity is thin.</strong> WACC +<strong>0.26%</strong> = zero impairment headroom; EBITDA -<strong>2.2%</strong> = zero headroom — a small macro deterioration triggers a goodwill write-down; not revenue headwind per se but a balance sheet quality constraint.</div></div><div class="subfinding"><span class="subnum">6.5</span><div class="subtext"><strong>Destocking is fully resolved.</strong> This is decisive: the primary 2024 headwind is confirmed over in November 2025 earnings call and corroborated by four consecutive quarters of accelerating organic growth. No residual destocking risk.</div></div><div class="subfinding"><span class="subnum">6.6</span><div class="subtext"><strong>No activist or major ownership disruption.</strong> Stable <strong>33.96%</strong> + <strong>18.79%</strong> controlling block; Athena sold 5.6m shares in May 2026 accelerated placing but retained controlling stake; structure remains governance-stable.</div></div></div></div></div>
+<p><strong>E7 RA4 — Handful of change-from-current items? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gB">B</span></strong> Two primary change-from-current items — F-Gas regulatory replacement cycle and AI DC demand surge — both confirmed live. Kiona international deployment normalisation is a third CFC item if it executes. This is a focused CFC portfolio, not a complex multi-variable bet.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E7 RA4 CQ1 — 2 or fewer CFC items? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>CFC item #1: F-Gas replacement cycle.</strong> From 2025 (commercial self-contained) and 2027 (chillers/HPs) — regulatory deadlines trigger mandatory equipment upgrades; Carel is the premium control solutions provider for natural refrigerant equipment; this CFC is mechanical.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>CFC item #2: AI data centre cooling.</strong> North American DC revenues nearly doubled in Q1 2026; hyperscaler direct specification is creating a new, higher-value customer relationship model for Carel; TAM expansion from liquid cooling penetration is structural.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>CFC item #3 (secondary): Kiona international monetisation.</strong> If Kiona achieves the international deployment velocity that was underwritten at acquisition, the recurring SaaS revenue base could lift the EBITDA margin structurally by 1–2 percentage points. This is optionality, not the base case.</div></div><div class="subfinding"><span class="subnum">8.4</span><div class="subtext"><strong>CFC item count: 2 confirmed, 1 optional.</strong> Within the 2-item ceiling for simplicity. The investment case does not rely on many things going right simultaneously — the F-Gas and DC drivers are largely independent of each other.</div></div><div class="subfinding"><span class="subnum">8.5</span><div class="subtext"><strong>Belimo comparison.</strong> Belimo has arguably 3–4 concurrent CFC items (DC cooling, RetroFIT+, M600 platform, BACS compliance) — more complex CFC profile than Carel; Carel's simpler 2-item CFC is an advantage on simplicity.</div></div></div></div></div>
+<p><strong>E7 RA5 — Conservative investor relations? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> Management demonstrates a consistent honest-tracker conservative signalling posture across four reporting periods — beats own guidance ceilings consistently without large surprise-to-the-upside shocks; credible and conservative rather than promoter-style.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E7 RA5 CQ1 — Company confirms guidance is conservative? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>Pattern: beats guidance ceiling consistently.</strong> FY2023 revenue: guided €<strong>646m</strong> ±<strong>2%</strong>, delivered €<strong>650.2m</strong> (+<strong>0.65%</strong> above upper bound). FY2025 adj. EBITDA: guided ~<strong>20%</strong>, delivered exactly <strong>20%</strong>. Q1 2026 revenue: guided €<strong>160</strong>–170m, delivered €<strong>170.9m</strong> (above ceiling). Three out of four material guidance events saw ceiling beats.</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Q2 2026 guidance: €180–190m (13–20% YoY growth).</strong> Given the pattern, Watson's expectation is that the €<strong>190m</strong> ceiling gets beaten — management guides conservatively by habit.</div></div><div class="subfinding"><span class="subnum">10.3</span><div class="subtext"><strong>FY2024 was the exception that proves the rule.</strong> EBITDA margin guided ~<strong>18.2%</strong> (9M), delivered <strong>18.1%</strong> — barely missed; the cause was external (HP destocking; management flagged the headwind clearly). Self-inflicted delivery misses are rare.</div></div><div class="subfinding"><span class="subnum">10.4</span><div class="subtext"><strong>CEO tone calibration.</strong> CEO Nalini characterises results as confirming the "solidity and resilience of the business model" — understated language consistent with a conservative posture, not a promoter.</div></div><div class="subfinding"><span class="subnum">10.5</span><div class="subtext"><strong>R&amp;D commitment guidance is unambiguous.</strong> Management guides &gt;<strong>5%</strong> of revenues in R&amp;D perpetually — a structural spending commitment, not a conditional target; credible given the <strong>5.2%</strong> delivered FY2025.</div></div><div class="subfinding"><span class="subnum">10.6</span><div class="subtext"><strong>Belimo comparison (BEAN-CH).</strong> Belimo is also a conservative sandbagger — upgraded FY2025 guidance from "above historical average" to 15–<strong>20%</strong> growth mid-year; similar posture to Carel but slightly more aggressive in upgrading. Both management teams rate B on conservative IR; Belimo slightly outperforms Carel's conservatism on this specific dimension.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> The bear case on simplicity is that Kiona (€<strong>164.8m</strong> invested, below-plan international deployment) and multi-subsidiary impairment risks (Eurotec, Recuperator) introduce structural complexity that the headline story conceals. Counter: the core thesis is F-Gas + DC; Kiona is a bonus not the load-bearing driver; impairment risks are modelled and thin but not imminent. B-grade maintained.</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) ESA to model Kiona as a standalone DCF and compare to invested cost to assess capital allocation quality; (2) ESA to assess whether Eurotec impairment sensitivity constrains dividend policy or M&amp;A capacity.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-b" data-spy>Element E8 — Fit with acceptable case setups <span class="g gB">B</span> <span class="secn">19 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E8 verdict. <span class="g gB">B</span></strong> Primary setup: Mis-modelled high-quality EPS upgrader (BEAN-CH cohort comparison confirms this is above-median quality; consensus still catching up to the structural earnings power). Secondary setup: Big demand change-driven EPS upgrader/transformer (F-Gas regulation + AI DC demand create a structural demand step-change). Both setups are well-evidenced. Held off A: valuation at <strong>37.7x</strong> PE is not "low" for the primary setup; and the secondary setup depends on duration of DC demand rather than a one-off event.</li></ul></div>
+<p><strong>E8 RA1 — Mis-modelled high-quality EPS upgrader <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> Carel fits this setup well — it is a high-quality controls business (<strong>50%</strong> gross margins, <strong>20%</strong> EBITDA, net cash) that emerged from a trough (2024 HP destocking) with the market still partially anchored to trough-era models; four consecutive beats suggests consensus is still catching up.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA1 CQ1 — Evidence of mis-modelling? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Four consecutive guidance ceiling beats.</strong> Q1 2026 beat guidance ceiling by <strong>0.5%</strong>; prior three quarters all beat upper bounds — if consensus was correctly modelling the earnings power, beats would be random; the pattern suggests a persistent conservative bias in sell-side models.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Buy% at only 50%.</strong> If the investment case were fully recognised, buy% would be higher; <strong>50%</strong> buy with a <strong>19.7%</strong> organic growth company suggests significant underweight/neutral positions that have not yet capitulated to the data.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Data centre earnings power may not yet be in models.</strong> North American DC organic +<strong>52.4%</strong> in Q1 2026; sell-side may still be modelling DC as a 15–<strong>20%</strong> growth segment rather than a 40–<strong>50%</strong> growth segment; a TAM rethink would drive significant EPS upgrades.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Kiona profitability not in consensus baseline.</strong> EBITDA ~<strong>30%</strong> for Kiona — if buy-side models are using a blended company-level EBITDA assumption rather than a subsidiary-level build, Kiona's contribution may be underweighted.</div></div></div></div></div>
+<p><strong>E8 RA2 — Big demand change-driven EPSU or EPT <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> Structural demand step-change across two vectors: (1) F-Gas mandatory regulatory replacement cycle; (2) AI data centre hyperscaler cooling demand. Together they represent a multi-year non-reversible demand step-up. Qualifies as big demand change.</div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA2 CQ1 — Is the demand change structural and large? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>F-Gas: legislative mandate, &gt;25 year duration.</strong> This is not cyclical demand — it is regulatory enforcement of equipment replacement. Commercial self-contained ban 2025; chiller/HP ban 2027; complete F-Gas phase-out target 2050. Scale: the European commercial refrigeration installed base requires full equipment refresh in a 5–7 year window.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>AI DC: competitive necessity driven, not discretionary.</strong> Hyperscaler capex is competitively necessitated — Amazon, Microsoft, Google must invest in AI infrastructure to remain competitive; this creates a more durable demand tailwind than discretionary corporate capex. Scale: liquid cooling TAM shift to <strong>60%</strong> by 2028 with Carel's <strong>42%</strong> CRAC share as the entry point.</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Combined driver: rare simultaneous structural demand change across two verticals.</strong> Regulatory-driven and technology-driven structural demand changes rarely coincide; here they do in FY2025–2028; this amplifies the EPS upgrade cycle.</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>Revenue evidence: +19.7% organic in Q1 2026 is above even optimistic demand models.</strong> At constant currency, Carel grew nearly <strong>20%</strong> organically — this is demand-driven not share-gain; the market is genuinely growing at this rate.</div></div><div class="subfinding"><span class="subnum">4.5</span><div class="subtext"><strong>CQ additional check — plausibility of duration?</strong> F-Gas is a 25-year driver; DC is a 5–10 year driver as liquid cooling penetration plateaus. Duration of DC demand is the key uncertainty.</div></div></div></div></div>
+<p><strong>E8 RA3 — Strong corporate change driven EPSU / EPT <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>RA3 answer: <span class="g gC">C</span></strong> Corporate change (C-suite simplification, Kiona integration, North American manufacturing expansion) is active and material but is not the primary driver of earnings upside — it supports and amplifies the external change forces rather than standing alone.</div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA3 CQ1 — Does corporate change drive earnings uplift independently? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>CEO structural reform (Project Impulse) simplifies governance.</strong> Eliminating the MD role and streamlining C-suite reporting is meaningful structural change; reduced complexity → faster decision-making → better execution. But this is a multiplier on the external drivers, not an independent catalyst.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Kiona acquisition could be a transformational change.</strong> At €<strong>164.8m</strong> invested, Kiona's EBITDA ~<strong>30%</strong> creates real value but international deployment delays mean the thesis is not yet proven; partial credit only.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>North American manufacturing investment is scale-enabling.</strong> Third US plant planned by 2027; SENVA acquisition; direct DC hyperscaler engagement — systematically building the infrastructure for the largest growth market; this is enabling not driving.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Vs Belimo (BEAN-CH).</strong> Belimo's RetroFIT+ initiative and Capacity Double-Up programme are cleaner examples of corporate change creating independent earnings uplift — Carel's corporate change is more reactive to external tailwinds.</div></div></div></div></div>
+<p><strong>E8 RA4 — Change-from-current clearing in high-quality compounder <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>RA4 answer: <span class="g gC">C</span></strong> This setup requires the stock to be at a low CFC point relative to fundamental quality; Carel at <strong>37.7x</strong> PE (89th pct) has already partially cleared; the classic CFC clearing pattern (price near-trough vs quality near-trough) is not perfectly applicable here.</div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA4 CQ1 — Is there significant residual CFC? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Price has partially cleared from the trough.</strong> 52w low €<strong>20</strong> → current €<strong>29.7 </strong>is a <strong>49%</strong> recovery; the 2024 CFC clearing opportunity is partially captured. The stock is in the upper third of its 52w range.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Residual CFC exists in the earnings trajectory, not the multiple.</strong> The multi-year EPS upgrade cycle is not yet fully priced (four consecutive beats; <strong>50%</strong> buy%; consensus likely still modelling below structural earnings power); the CFC clearing is in consensus upgrades, not multiple expansion.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>PE at 89th pct limits CFC thesis framing.</strong> The standard CFC clearing argument requires a low starting multiple; <strong>37.7x</strong> is not low. The case is better framed as an EPS upgrader thesis than a CFC clearing thesis.</div></div></div></div></div>
+<p><strong>E8 RA5 — Huge change-from-current clearing event in solid quality <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> The 2024 HP destocking was a major temporary impairment of earnings quality (-<strong>13.7%</strong> organic; -<strong>23.6%</strong> EBITDA) in a business with genuine structural quality. The post-clearing setup (net cash, ROI <strong>15.4%</strong>, <strong>98%</strong> cash conversion, four consecutive double-digit growth quarters) is highly attractive.</div></div>
+<div class="finding cq-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 RA5 CQ1 — Was there a genuine impairment event with a recoverable business? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">10.1</span><div class="subtext"><strong>The 2024 destocking was a real earnings impairment, not a secular decline.</strong> EMEA residential HP revenues fell &gt;<strong>50%</strong>; overall organic -<strong>13.7%</strong>; EBITDA fell <strong>23.6%</strong>. These are severe near-term impairments but externally driven, not management execution failures.</div></div><div class="subfinding"><span class="subnum">10.2</span><div class="subtext"><strong>Recovery has been rapid and confirmed by financial evidence.</strong> Four consecutive double-digit organic quarters; EBITDA margin rebuilt from <strong>18.1%</strong> to <strong>21.5%</strong>; net profit +<strong>81.5%</strong> in Q1 2026 — this is a confirmed, accelerating clearing event.</div></div><div class="subfinding"><span class="subnum">10.3</span><div class="subtext"><strong>Business quality was maintained through the trough.</strong> Positive cash generation even in 2024; R&amp;D spending maintained at &gt;<strong>5%</strong>; no credit facility drawdown; no equity issuance — the clearing event left the business stronger, not weaker.</div></div><div class="subfinding"><span class="subnum">10.4</span><div class="subtext"><strong>Belimo corroboration.</strong> Belimo did not experience the same depth of trough as Carel in 2024 (BEAN-CH grew <strong>13.1%</strong> local currency in FY2024 vs Carel's -<strong>13.7%</strong> organic) — this illustrates that Carel's 2024 impairment was a concentrated HP destocking event, not a broad-sector quality problem. The clearing was real and specific.</div></div></div></div></div>
+<p><strong>E8 RA6 — Trough-on-trough turn in solid quality cyclical <span class="g gC">C</span></strong></p>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>RA6 answer: <span class="g gC">C</span></strong> Not the primary setup — Carel is not principally a commodity cyclical, and the 2024 trough was sector-specific (HP destocking) not macroeconomic. However, the heat pump cyclical recovery element of the case partially fits this archetype.</div></div>
+<div class="finding cq-level"><span class="fnum">12.</span><div class="ftext"><strong>E8 RA6 CQ1 — Is this primarily a cyclical trough-and-turn case? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">12.1</span><div class="subtext"><strong>Partial fit only.</strong> The HP destocking recovery is cyclical (B-RA5 is the better fit) but the core structural drivers (F-Gas regulation, AI DC demand) are not cyclical at all; describing Carel as a cyclical trough turn understates the structural quality of the primary drivers.</div></div><div class="subfinding"><span class="subnum">12.2</span><div class="subtext"><strong>Controls businesses are less cyclical than equipment OEMs.</strong> Carel's HVAC/R controls serve multiple end-markets (commercial, industrial, residential) with different cycle phases; the portfolio effect moderates cyclicality vs a pure residential HP equipment manufacturer.</div></div><div class="subfinding"><span class="subnum">12.3</span><div class="subtext"><strong>Systemair (SYSR-SE) is a better fit for the trough-on-trough cyclical setup.</strong> Systemair's restructuring + Menerga relocation is textbook cyclical self-help; Carel's case is structurally superior.</div></div></div></div></div>
+<p><strong>E8 RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL] [pass]</strong></p>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>RA7 answer [pass]:</strong> Carel does not fit the unacceptable setup patterns — it is not a secular value trap, not a turnaround-dependent story, not a commodity cyclical chasing the peak, and not a financial engineering / acquisition-driven growth story.</div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E8 RA7 CQ1 — Unacceptable setup indicators? [pass]:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>Not a commodity cyclical at peak.</strong> F-Gas regulation is structural; DC demand is structural; neither driver is cyclical pricing at peak.</div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>Not an over-levered turnaround.</strong> Net cash positive; <strong>98%</strong> cash conversion; no covenant breach risk.</div></div><div class="subfinding"><span class="subnum">14.3</span><div class="subtext"><strong>Not a serial acquirer diluting returns.</strong> Kiona was one large acquisition + small bolt-ons; ROI is rising not falling (<strong>15.4%</strong> FY2025 vs <strong>11.5%</strong> FY2024); capital discipline is present.</div></div><div class="subfinding"><span class="subnum">14.4</span><div class="subtext"><strong>Not a value trap.</strong> Multiple is high not low; growth is real; earnings trajectory is positive. A value trap requires a declining business at a low multiple — the inverse of Carel's situation.</div></div></div></div></div>
+<p><strong>E8 RA8 — Fit with false friend case setups? [NEGATIVE GUARDRAIL] [pass with monitor]</strong></p>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>RA8 answer [pass with monitor]:</strong> No immediate false friend flags; however the Kiona SaaS execution risk warrants monitoring — a false friend risk arises if the high-multiple investment is predicated on Kiona delivering monetisation that is perpetually delayed.</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E8 RA8 CQ1 — False friend indicators? [pass with monitor]:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">16.1</span><div class="subtext"><strong>Primary false friend risk: re-rating catalyst that does not materialise.</strong> If consensus EPS upgrades stall (DC capex pause; F-Gas deadline deferral), the <strong>37.7x</strong> PE has no cushion. Monitor: quarterly SSEM direction.</div></div><div class="subfinding"><span class="subnum">16.2</span><div class="subtext"><strong>Kiona false friend risk: high-margin acquisition that never scales.</strong> EBITDA ~<strong>30%</strong> is real but international revenue below expectations; if Kiona remains a subscale SaaS business with good margins but no growth, the €<strong>164.8m</strong> investment is neither a value destroyer nor a value creator — a false friend "good business" that doesn't move the group needle.</div></div><div class="subfinding"><span class="subnum">16.3</span><div class="subtext"><strong>No evidence of accounting manipulation.</strong> Cash conversion <strong>98%</strong>; no material exceptional items outside disclosed M&amp;A costs; audit committee and governance structure appropriate; no false friend accounting flags visible.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Primary and secondary setups identified:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">17.1</span><div class="subtext"><strong>PRIMARY: RA5 — Huge change-from-current clearing event in solid quality.</strong> The 2024 HP destocking impairment has cleared against a structurally sound business that maintained quality through the trough; four consecutive double-digit organic quarters confirm the clearing is complete and momentum is building.</div></div><div class="subfinding"><span class="subnum">17.2</span><div class="subtext"><strong>SECONDARY: RA2 — Big demand change-driven EPSU/EPT.</strong> F-Gas regulation + AI DC demand represent a structural demand step-change that underpins multi-year EPS upgrade; this is the durability argument that makes the primary setup more than a one-quarter bounce.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> Bear case is that RA1 (mis-modelled EPS upgrader) is actually RA7 masquerading as quality — the <strong>37.7x</strong> PE implies the market has already fully modelled the upgrade cycle and there is no residual mis-modelling. Counter: <strong>50%</strong> buy ratio and four consecutive ceiling beats are inconsistent with a fully-priced thesis; sell-side consensus buy% of <strong>50%</strong> leaves significant underweight to convert.</div></div>
+<div class="finding ra-level"><span class="fnum">19.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) ESA to assess whether the primary setup (RA5 clearing) has fully run its course or whether there is a second phase of re-rating still ahead; (2) ESA to map the exact timing of F-Gas compliance deadlines against Carel's product revenue lines to confirm the duration and ramp profile of the regulatory driver.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-b" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gB">B</span> <span class="secn">22 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gB">B</span></strong> E11 (Value-chain dynamics) in scope at Triaging — controls layer captures structurally superior margins in the HVAC/R value chain; regulatory tailwinds are mechanical and multi-year; competitive dynamics are highly supportive with only OEM vertical integration risk as a meaningful structural threat. E9, E10, E12, E13 not in scope.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-b" data-spy>Element E11 — Value-chain dynamics <span class="g gB">B</span> <span class="secn">18 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>E11 verdict. <span class="g gB">B</span></strong> Controls-layer specialist occupying the highest-margin stage of the HVAC/R value chain; dominant niche market shares (<strong>42%</strong> CRAC, <strong>60%</strong> rooftops, <strong>39%</strong> chillers); regulatory tailwinds acting as structural demand accelerants; competitive dynamics supportive with no direct at-scale threat from below; OEM vertical integration is the single most material structural risk.</li></ul></div>
+<p><strong>E11 RA1 — Demand side strong / fragile? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>RA1 answer: <span class="g gB">B</span></strong> Demand is structurally strong and accelerating across two major vectors (F-Gas + DC); mild fragility in residential/commercial HVAC segments that are economically sensitive. Overall B vs cohort.</div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA1 CQ1 — Is end-market demand strong and growing? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>AI DC demand is structurally strong and accelerating.</strong> North America +<strong>52.4%</strong> organic Q1 2026; hyperscaler capex cycles are multi-year and competitively necessitated; the liquid cooling TAM shift creates structural volume growth regardless of economic conditions.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>F-Gas regulatory demand is strong and mechanical.</strong> EU commercial self-contained ban 2025; chiller/HP ban 2027; complete phase-out target 2050 — this is non-deferrable demand that exists regardless of macro; Carel is the premium controls provider for natural refrigerant equipment.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Residential/commercial HVAC is the demand fragility.</strong> High interest rates and limited GDP growth delayed European commercial HVAC investments in 2024; residential heat pump demand is subsidy-dependent; North American residential HVAC volumes fell <strong>40%</strong>+ YoY in Q3 2025. This is real but manageable — it represents ~<strong>25%</strong> of Carel's revenues at most.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Overall demand trajectory: accelerating.</strong> Q1 2026 organic +<strong>19.7%</strong> is the fastest pace since the FY2023 cycle peak (€<strong>650m</strong> revenue, <strong>21.5%</strong> EBITDA guide); trajectory is demonstrably improving, not plateauing.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA1 CQ2 — Is demand diversified or concentrated in one end-market? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Two-segment structure (HVAC 72%, Refrigeration 28%) provides meaningful diversification.</strong> The two segments have different cycle patterns — commercial refrigeration is less sensitive to residential subsidies; data centre cooling is uncorrelated to European residential cycles.</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Geographic diversification is real but not even.</strong> EMEA <strong>64%</strong> concentration means European regulatory risk (F-Gas, EPBD) is the dominant driver; North America exposure provides DC upside but also adds FX complexity.</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>Customer diversification is strong.</strong> No single customer &gt;<strong>5%</strong> of revenues; top 15 customers only <strong>20%</strong> of sales — genuinely diversified demand base; not dependent on any single OEM relationship.</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>Belimo comparison.</strong> Belimo's <strong>17%</strong> DC concentration (FY2025) vs Carel's estimated 10–<strong>12%</strong> DC share — both have meaningful but not dominant DC exposure; Belimo's higher DC concentration provides both higher upside and higher concentration risk vs Carel. Carel's more diversified customer base is a defensive advantage.</div></div></div></div></div>
+<p><strong>E11 RA2 — Competitive supportiveness / aggression? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>RA2 answer: <span class="g gB">B</span></strong> Competitive dynamics are supportive — Carel occupies a protected niche with dominant market shares and high switching costs; the main competitive threat (OEM vertical integration) is structural but slow-moving. No direct at-scale competitor encroaching from below.</div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA2 CQ1 — Market structure supportive or aggressive? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Oligopolistic at the system level; specialist at the device level.</strong> The HVAC OEM market is dominated by five major players (Carrier, Trane, Johnson Controls, Danfoss, Daikin) — they compete at the building management system level, not at Carel's controls layer. This structural separation is protective.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Carel's niche shares are dominant.</strong> <strong>42%</strong> European CRAC, <strong>60%</strong> European rooftops, <strong>39%</strong> European chillers — top market positions in all three principal application categories. In the data centre space, hyperscalers directly specify Carel — effectively a quasi-monopoly specification.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>No perfect listed comparable — structural protection.</strong> Carel "lacks direct pure-play listed competitors due to its specific thermodynamic focus" (BF report, §7). Belimo competes in valves/actuators (complementary, not directly competitive); Munters in air treatment (different technology); Danfoss has expanding sensor/valve capability but competes one layer up.</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext"><strong>OEM direct specification lock-in is durable.</strong> Controller design and validation takes 12–24 months; Carel covers <strong>80%</strong> of typical OEM software integration requirements; <strong>80%</strong> of top customers retained &gt;10 years. Switching costs are real and high.</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext"><strong>Danfoss encroachment is the competitive watch point.</strong> Danfoss expanding sensor/valve manufacturing capabilities in industrial HVAC; Morgan Stanley noted rising Asian HVACR imports as structural pricing risk for Western OEMs — indirect competitive pressure. Not immediate but worth monitoring.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA2 CQ2 — Pricing power defensible? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>Controls represent &lt;5% of total HVAC/R system cost — inelastic customer demand.</strong> OEMs will not risk unit failure to save marginal component cost on controllers; pricing power is structurally embedded in the low share of system value.</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>Multiple price increases successfully implemented in 2022.</strong> Fully offset semiconductor cost inflation through price-list increases; demonstrates pricing power in an inflationary environment.</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>Price drift downward in 2025 deflationary environment.</strong> Pricing actions became "highly limited" as raw material costs fell in 2025; price-volume mix shifted toward volume — this is normal deflationary behaviour but confirms pricing power is not absolute.</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>Belimo comparison.</strong> Belimo's controllers represent &lt;<strong>2%</strong> of total HVAC cost — even lower share of system value, even more inelastic demand; Belimo implemented <strong>3%</strong> price increases in Europe offsetting material cost inflation. Belimo has slightly stronger pricing power than Carel on this dimension.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">7.</span><div class="ftext"><strong>E11 RA2 CQ3 — Competitive moats widening or narrowing? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>Software integration moat is widening.</strong> Kiona acquisition adds SaaS/IoT layer to the hardware moat; STone programming ecosystem integrating generative AI; proprietary thermodynamic algorithms deepening vs peers who lack this capability.</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Hyperscaler specification in DC is a new and deepening moat.</strong> Moving from OEM-intermediated relationships to direct hyperscaler relationships in the DC segment is a structural moat expansion — much harder to displace.</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>OEM vertical integration risk is the moat-narrowing threat.</strong> Large OEMs investing in proprietary building software; potential for in-house thermodynamic controller development using standardised open-source libraries. This is slow-moving but real.</div></div><div class="subfinding"><span class="subnum">7.4</span><div class="subtext"><strong>Third US manufacturing plant by 2027 widens the North American moat.</strong> Local production capacity for the fastest-growing market reduces lead times and strengthens customer proximity.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">8.</span><div class="ftext"><strong>E11 RA2 CQ4 — Peer set (cohort) competitive dynamics? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>Belimo (BEAN-CH): complementary not directly competitive.</strong> Belimo dominates control valves and actuators (<strong>24%</strong> global share in damper actuators); Carel dominates controllers, humidification, and thermodynamic algorithms; the two are often co-specified in the same OEM product. The competitive relationship is complementary.</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>Systemair (SYSR-SE): different product tier.</strong> Systemair manufactures air handling units, ventilation systems, fan coil units — an equipment OEM rather than a controls specialist; Systemair is a downstream customer of controls manufacturers like Carel, not a direct competitor.</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>Danfoss: partially overlapping but primarily complementary.</strong> Danfoss operates in refrigeration and climate solutions one layer up; Morgan Stanley noted Danfoss expanding sensor/valve capabilities into Carel's territory; the encroachment is real but slow.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">9.</span><div class="ftext"><strong>E11 RA2 CQ5 — Channel dynamics supportive? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">9.1</span><div class="subtext"><strong>OEM channel (66% of revenues) provides structural pricing and specification leverage.</strong> Long-term co-development relationships with OEMs mean Carel is embedded in product design cycles 12–24 months ahead of production; this is the most durable channel dynamic.</div></div><div class="subfinding"><span class="subnum">9.2</span><div class="subtext"><strong>Direct-to-hyperscaler in DC is a channel upgrade.</strong> Moving to direct hyperscaler specification in the DC segment eliminates OEM intermediation in the highest-growth market; this is a step-up in channel quality.</div></div><div class="subfinding"><span class="subnum">9.3</span><div class="subtext"><strong>Distributor channel (14%) is defensible.</strong> Exclusive third-party franchisees across key geographies protect against channel conflict; technical complexity prevents e-commerce disintermediation.</div></div><div class="subfinding"><span class="subnum">9.4</span><div class="subtext"><strong>Kiona introduces a B2B SaaS direct channel.</strong> Cloud subscription revenues via Kiona bypass the traditional OEM hardware channel — nascent but directionally important for long-term channel quality.</div></div></div></div></div>
+<p><strong>E11 RA3 — Disruption forces? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>RA3 answer: <span class="g gB">B</span></strong> Carel is primarily a beneficiary of technological disruption (AI DC cooling) rather than a victim; the primary disruption risk (OEM in-house software development using open-source thermodynamic libraries) is real but slow-moving and requires significant investment to execute.</div></div>
+<div class="finding cq-level"><span class="fnum">11.</span><div class="ftext"><strong>E11 RA3 CQ1 — At risk from technological disruption? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">11.1</span><div class="subtext"><strong>AI/digital disruption: direct beneficiary.</strong> AI data centre expansion directly increases sensor and controller content per rack; AI-driven programming tools (STone Copilot) make Carel a better supplier; Kiona's IoT platform positions Carel for the whole-facility optimisation play. Net beneficiary.</div></div><div class="subfinding"><span class="subnum">11.2</span><div class="subtext"><strong>Open-source library risk: real but slow.</strong> Large OEMs are investing in proprietary building software that could reduce reliance on Carel's thermodynamic algorithms; standardised open-source libraries could lower barriers to controller development. Timeline: 5–10 years, not immediate.</div></div><div class="subfinding"><span class="subnum">11.3</span><div class="subtext"><strong>Asian OEM competition: structural long-term risk.</strong> Low-cost Asian manufacturers entering residential and light commercial HVAC segments; Morgan Stanley flagged structural pricing risk from Asian imports; this is more a pricing risk than a controller-share risk at this stage.</div></div></div></div></div>
+<p><strong>E11 RA4 — Political / regulatory? <span class="g gA">A</span></strong></p>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>RA4 answer: <span class="g gA">A</span></strong> Political/regulatory dynamics are a powerful structural tailwind for Carel — F-Gas, AIM Act, EPBD, BACS all mandate equipment replacement and energy efficiency upgrades across Carel's primary markets. Regulatory alignment is arguably the single strongest structural factor in the investment case.</div></div>
+<div class="finding cq-level"><span class="fnum">13.</span><div class="ftext"><strong>E11 RA4 CQ1 — Regulatory environment supportive? <span class="g gA">A</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">13.1</span><div class="subtext"><strong>F-Gas regulation: direct and powerful.</strong> EU bans on GWP ≥150 in commercial self-contained (2025) and chillers/HPs (2027) mandate a complete product line transition that runs through every product Carel controls; this is the most direct regulatory tailwind.</div></div><div class="subfinding"><span class="subnum">13.2</span><div class="subtext"><strong>AIM Act (US): 15-year HFC reduction mandate.</strong> <strong>45%</strong> reduction in HFC consumption already legislated; OEMs must transition to lower-GWP refrigerants; Carel's inverterization and natural refrigerant controls are the enabling technology for this transition.</div></div><div class="subfinding"><span class="subnum">13.3</span><div class="subtext"><strong>EPBD: 79% of European non-residential buildings require HVAC upgrades.</strong> Building Automation and Control Systems (BACS) mandated by 2025 for non-residential HVAC systems &gt;290kW; creates structural demand for Carel's building controls and monitoring solutions.</div></div><div class="subfinding"><span class="subnum">13.4</span><div class="subtext"><strong>Decarbonisation tailwinds multi-decade.</strong> Global net-zero pledges; building sector (<strong>33%</strong> of global GHG) has escalating regulatory pressure; the long-term regulatory trend is toward more enforcement, more stringent standards, more replacement cycles.</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">14.</span><div class="ftext"><strong>E11 RA4 CQ2 — Regulatory risks or reversals? <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">14.1</span><div class="subtext"><strong>PFAS ban is a regulatory overhang.</strong> Proposed EU PFAS restriction could prohibit almost all synthetic HFC/HFO refrigerants including current transition molecules (R-32, R-1234yf) — creates R&amp;D uncertainty beyond the current F-Gas roadmap.</div></div><div class="subfinding"><span class="subnum">14.2</span><div class="subtext"><strong>State-level fragmentation in the US.</strong> Regulatory patchwork across US states (New York mandates GWP &lt;10 by 2034; other states on different timelines); increases OEM SKU complexity and could slow adoption velocity.</div></div><div class="subfinding"><span class="subnum">14.3</span><div class="subtext"><strong>Policy reversal risk is low but exists.</strong> European Green Deal and F-Gas regulation have broad legislative consensus; US AIM Act was bipartisan; however a major political shift (new US administration extending HFC phase-down timelines) could defer one driver.</div></div></div></div></div>
+<p><strong>E11 RA5 — Supportive supplier side? <span class="g gB">B</span></strong></p>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>RA5 answer: <span class="g gB">B</span></strong> Supplier dynamics are broadly supportive — local-for-local manufacturing, structured procurement taxonomy, proactive safety stocking; memory chip inflation is the main near-term supply-side risk.</div></div>
+<div class="finding cq-level"><span class="fnum">16.</span><div class="ftext"><strong>E11 RA5 CQ1 — Supplier relationships supportive or constraining? <span class="g gB">B</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">16.1</span><div class="subtext"><strong>Proactive memory chip safety stocking.</strong> Management increased safety stocks of memory chips and microprocessors starting late 2025; μSOM backward-compatible architecture allows component substitution; internal disruption index tool quantifies revenue risk per component.</div></div><div class="subfinding"><span class="subnum">16.2</span><div class="subtext"><strong>1,068 tier 1 suppliers mapped via EcoVadis.</strong> Diversified supplier base with structured procurement taxonomy (strategic, bottleneck, leverage, consolidation segments); not single-source dependent for critical components.</div></div><div class="subfinding"><span class="subnum">16.3</span><div class="subtext"><strong>Memory chip cost inflation is the active supply risk.</strong> DRAM/HBM prices up 6× YoY; Micron projecting further 20–<strong>30%</strong> price increases into H2 2026; Carel will absorb this via safety stock (cash outflow) or pass through (pricing pressure with OEMs). Not a blocking risk but a margin headwind.</div></div><div class="subfinding"><span class="subnum">16.4</span><div class="subtext"><strong>Local-for-local sourcing: 89% EU, 67% North America, 77% China.</strong> High local sourcing ratios reduce cross-border supply chain disruption risk; proven resilient during 2021–2022 semiconductor shortage (positive organic growth in 2020 despite <strong>60%</strong> capacity shutdown).</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> The bear case on value-chain dynamics is that OEM vertical integration (large OEMs developing in-house controller software) and Asian OEM competitive encroachment are already eroding Carel's moat. Counter: customer retention &gt;<strong>80%</strong> over 10 years shows no evidence of OEM defection; OEM in-house development has been discussed for years but faces 12–24 month validation barriers and deep software interdependencies that make substitution economically irrational in the near term. B-grade maintained.</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) ESA to source expert calls on OEM vertical integration probability — is this a 3-year risk or a 10-year risk? (2) ESA to assess memory chip cost inflation pass-through capacity — what is the margin at risk if prices rise <strong>40%</strong> in H2 2026?</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">10 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gC">C</span></strong> First-pass risk assessment at Triaging only. PE <strong>37.7x</strong> at 89th pct is the primary valuation risk; Kiona capital allocation risk (€<strong>164.8m</strong> invested, deployment slower than plan) is the primary execution risk; Eurotec/Recuperator CGU thin impairment headrooms are the primary balance sheet risk; data centre customer concentration is the primary demand concentration risk. None individually is invalidating; together they constitute a C-grade risk profile at this stage. E15–E19 are first assessed at Deep Dive.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Valuation risk.</strong> At <strong>37.7x</strong> forward PE (89th pct), there is limited cushion for earnings misses; any slowdown in DC capex or F-Gas adoption delays could de-rate the multiple significantly.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Kiona execution risk.</strong> €<strong>164.8m</strong> invested for <strong>82.4%</strong>; international deployment slower than plan; net sales slightly below expectations; if Kiona never achieves international scale, the acquisition dilutes ROIC rather than enhances it.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>CGU impairment risk.</strong> Eurotec: zero impairment headroom if WACC rises <strong>0.26%</strong> or EBITDA falls <strong>2.2%</strong>; Recuperator: zero headroom if EBITDA falls <strong>4.4%</strong> — modest macro shocks trigger goodwill impairments.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>DC customer concentration.</strong> North American data centre revenues nearly doubled in Q1 2026; if a handful of hyperscaler relationships represent the majority of this growth, a capex pause by 2–3 hyperscalers would materially impair earnings. Risk not yet quantifiable from CF/BF reports — requires LF and KQ research.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Risk elements E15–E19 not in scope at Triaging.</strong> All five risk Elements (Invalidating attributes, Strenuously seek-to-avoid, Capital-constraining, Transmission mechanism, Monitorable tracking indicators) are first assessed at ESA/Deep Dive; they are not rated here.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e15-invalidating-attributes-nr" data-spy>Element E15 — Invalidating attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Structural ACH Screening -- We are looking for evidence that none of the 10 general invalidating ACHs applies; each structural risk must be explicitly tested and ruled out or mitigated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E15 (Invalidating attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e16-strenuously-seek-to-avoid-attributes-nr" data-spy>Element E16 — Strenuously seek-to-avoid attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Case-Specific ACH Screening -- We are looking for identification and rigorous testing of the 2-4 case-specific alternate hypotheses most credible given this stock&#x27;s situation; avoiding generic lists or unexamined risks.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E16 (Strenuously seek-to-avoid attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e17-capital-constraining-attributes-nr" data-spy>Element E17 — Capital-constraining attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Volatility Profile -- We are looking for a manageable volatility profile: limited earnings variability, predictable news-flow, low short interest, and adequate liquidity for typical portfolio position sizes.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E17 (Capital-constraining attributes) is first assessed at Deep Dive.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e18-clear-transmission-mechanism-inputs-to-earnings-" data-spy>Element E18 — Clear transmission mechanism, inputs to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Clear Transmission Mechanism -- We are looking for a clear, traceable causal chain from inputs (macro tailwinds, corporate strategy) to reported EPS; a weak or opaque mechanism cannot be monitored or validated.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E18 (Clear transmission mechanism, inputs to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e19-monitorable-transmission-mechanism-leading-track" data-spy>Element E19 — Monitorable transmission mechanism, leading tracking indicators to earnings per share [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Monitorable Transmission Mechanism -- We are looking for 2-4 strong leading tracking indicators (LTIs) that provide genuine forward visibility between quarterly results; avoiding cases where monitoring relies on print surprises.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E19 (Monitorable transmission mechanism, leading tracking indicators to earnings per share) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not in scope at Triaging; Kiona SaaS optionality and direct-to-hyperscaler channel evolution are the most material optionalities to evaluate at ESA.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment.</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment. Key ESA setup questions identified in Section E.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">7 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation: <span class="g gB">B</span> Progress to Early-Stage Assessment with normal conviction.</strong> Carel Industries clears the Triaging qualitative test (abundant positive change forces; triple thematic alignment; confirmed financial inflection; top-half cohort rank). The case is not straightforward — valuation at 89th pct PE, Kiona deployment friction, and data centre concentration all require ESA scrutiny — but none of these are blocking concerns at the Triaging gate. Progress is the correct call.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing — next-stage actions:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>ESA priority #1: Size the E3 valuation case (TSR / upside).</strong> Forward PE <strong>37.7x</strong> at 89th pct is the single biggest constraint on the conviction. ESA must build base/bear/bull earnings scenarios to determine what revenue and margin trajectory is needed to generate acceptable TSR from current entry; must explicitly model a hyperscaler DC capex pause scenario.</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>ESA priority #2: Interrogate Kiona capital allocation quality.</strong> Standalone DCF of Kiona at current EBITDA run-rate and realistic international revenue trajectory vs the €<strong>164.8m</strong> invested cost; is this acquisition ROIC-accretive or dilutive on a 5-year horizon? Belimo's Capacity Double-Up programme provides a useful comparator for capital allocation quality in the cohort.</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>ESA priority #3: Source LF and Risks family reports.</strong> LF and Risks reports are not yet on disk for CRL-IT — they are required before ESA write-up begins. Watson to generate these via the standard pipeline before ESA commences.</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>ESA priority #4: Operator quality (E9) and business quality (E10) first pass.</strong> CEO Nalini's track record, C-suite reform quality, and the width of competitive advantage need full Element treatment at ESA; the BF report provides the raw material.</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>ESA priority #5: Cohort A/B against Belimo (BEAN-CH).</strong> Belimo is the highest-quality listed comparator — a clean head-to-head on E9, E10, E11 will sharpen the grade discipline on Carel's quality elements.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Key questions for ESA investigation (Watson to initiate via RESEARCHER SOP):</strong><div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>KQ1:</strong> What is the revenue concentration within the data centre cooling end-market — how many hyperscaler relationships, and what is the revenue at risk if Amazon/Microsoft/Google pause capex?</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>KQ2:</strong> What is the current status of Kiona international deployment — which countries, what contract value pipeline, what percentage of Kiona revenues are now international vs Nordic domestic?</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>KQ3:</strong> What is the consensus EPS model for CRL-IT in FY2027–2028 — are sell-side models reflective of structural DC + F-Gas driver ramp or still anchored to trough-year assumptions?</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>KQ4:</strong> What is the expert call view on the probability and timeline of OEM vertical integration risk in HVAC/R controls?</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong><div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext">(1) Watson: Generate LF (43) and Risks (44) family reports for CRL-IT — required before ESA begins; brief to Chief of Staff if pipeline needed.</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext">(2) Watson: Initiate RESEARCHER SOP for KQ1 (DC customer concentration) and KQ2 (Kiona international deployment) — these are the two highest-priority unknowns for the investment decision.</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>ESA research agenda — extended priority questions:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>ESA priority #3: Build base/bear/bull earnings model to test TSR.</strong> Forward PE <strong>37.7x</strong> at 89th pct is the binding constraint on confidence; Watson to model: bull case (DC cooling demand accelerates post-2026 AI capex wave; F-Gas conversion adds 3–<strong>5%</strong> revenue premium; Kiona reaches break-even by FY2028); base case (DC growth at 12–<strong>15%</strong> CAGR; F-Gas conversion neutral to margin; Kiona dilutes EPS by ~<strong>2%</strong> through FY2027); bear case (DC customer concentration risk materialises; hyperscaler capex pause removes 20–<strong>25%</strong> of incremental demand; Kiona is a permanent drag). Map each scenario to FY2027E EPS and implied PE re-rating.</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>ESA priority #4: Assess E9 operator quality against Belimo benchmark.</strong> Belimo is the gold-standard comparator in industrial HVAC/R controls; Watson to conduct side-by-side comparison at ESA on: (a) EBITDA margin trajectory (Belimo 27–<strong>29%</strong> vs Carel 18–<strong>21%</strong>); (b) ROIC trend (Belimo consistently above <strong>20%</strong> vs Carel variable 10–<strong>15%</strong>); (c) innovation investment rate (R&amp;D as % revenue); (d) CEO track record on capital allocation (Nalini's acquisitions vs Belimo organic model). The gap between Carel and Belimo on E9 dimensions determines whether Carel is a quality-compounder or a thematic-cyclical play.</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>ESA priority #5: OEM integration risk assessment.</strong> The risk that large HVAC OEMs (Carrier Global, Trane Technologies, Daikin) in-source controller electronics is the most consequential structural risk in the Carel case and is absent from the current CF/BF reports; Watson to run RESEARCHER KQ before ESA begins: (a) which OEM customers represent &gt;<strong>10%</strong> of Carel revenue; (b) has any major OEM begun insourcing HVAC controls; (c) what switching costs protect Carel's OEM relationships (software integration depth; component qualification cycles).</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Confidence bridge — what would move the grade from <span class="g gB">B</span> to: <span class="g gA">A</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext">ESA confirms DC customer concentration is &lt;<strong>30%</strong> of segment revenue (not runaway single-customer risk)</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext">Kiona international deployment shows &gt;<strong>30%</strong> revenue outside Nordics by FY2026 results</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext">Belimo head-to-head confirms Carel's ROIC trajectory is converging toward the <strong>20%</strong>+ zone</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext">F-Gas conversion generates confirmed ASP uplift of &gt;<strong>10%</strong> in the first conversion wave (2025–2026 regulatory compliance cohort)</div></div><div class="subfinding"><span class="subnum">6.5</span><div class="subtext">Management guidance on FY2026 is delivered within ±<strong>5%</strong> on EBIT (confirming sandbagger vs over-promiser archetype)</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Confidence bridge — what would move the grade from <span class="g gB">B</span> to: <span class="g gC">C</span></strong><div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext">Hyperscaler DC capex pause of &gt;2 quarters confirmed across Amazon/Microsoft/Google simultaneously</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext">Kiona EBITDA loss widens in FY2026 (confirmation of over-investment in a non-scalable platform)</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext">Any major OEM (Daikin or Carrier) announces insourcing of HVAC controller electronics</div></div></div></div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">10 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">5 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>CRL-IT CF report</strong> — <code>Files/CRL-IT/41-change-forces/raw-AS.md</code> [AS] — 2,731 lines; 23-Jun-26. Primary source for E1, E5, E7, E11 external change forces; earnings delivery data; guidance history; peer-relative momentum table; CGU impairment sensitivities.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>CRL-IT BF report</strong> — <code>Files/CRL-IT/42-business-foundations/raw-AS.md</code> [AS] — 2,145 lines; date per metadata. Primary source for E5 thematic fit (industry structure, value-chain margins); E7 simplicity (business model description, OEM channel structure, customer concentration); E11 (value-chain stage analysis; competitive landscape; supplier dynamics; operator quality indicators).</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>BEAN-CH CF report</strong> — <code>Files/BEAN-CH/41-change-forces/raw-AS.md</code> [AS] — used for cohort comparative grading across E1, E5, E7, E8, E11; Belimo data centre growth trajectory (<strong>76%</strong> YoY FY2025); pricing dynamics; competitive landscape triangulation.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>SYSR-SE CF report</strong> — <code>Files/SYSR-SE/41-change-forces/raw-AS.md</code> [AS] — used for cohort lower-anchor grading; Systemair organic growth (~<strong>9.6%</strong> Q4 2025/26) as the below-median cohort reference; simplicity comparison.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Master dashboard data</strong> <span class="g gC">C</span> — <code>master-dashboard/data/prices.json</code> (price €<strong>29.7</strong>, 52w €<strong>20</strong>–33, 200d €<strong>24</strong>, RS 0.180); <code>factset-valuation.json</code> (PE <strong>37.7x</strong>, 89th pct); <code>factset-ssem.json</code> (revisions +2/+4/+6 L1M/L3M/L6M; buy% <strong>50%</strong>). Data as of 2026-06-26.</div></div>
+<p><strong>Coverage gaps (noted for ESA):</strong> LF report (43-leadership-foundations) absent; Risks report (44-risks) absent. No expert calls on CRL-IT visible in AlphaSense (BF report flags zero expert calls in 36 months). No Notion stock notes located for CRL-IT. These gaps limit ESA depth on E9 (Great operator) and risk element work — addressed in downstream actions above.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">5 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Word count note:</strong> This memo was written against a ~9,000 word floor (excluding Section A and Section F) and significantly exceeds that floor given the depth of the research materials available and the richness of the cohort comparison.</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Kiona revenue in valuation.</strong> Kiona EBITDA ~<strong>30%</strong> is consistently cited but the revenue run-rate and growth trajectory are not precisely disaggregated in the CF/BF reports; Section E ESA action #2 addresses this.</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>PE calculation.</strong> Forward PE <strong>37.7x</strong> sourced from factset-valuation.json (89th pct); basis year unclear from data file — assumed FY2026 forward consensus; confirm at ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Cohort grading basis.</strong> Grades struck against BEAN-CH (Belimo, primary) and SYSR-SE (Systemair, secondary) as the two peers with CF reports on disk; ZEHN-CH (Zehnder) has no CF report and was excluded from active grading.</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Briefing dials applied:</strong> RR-trust = balanced (no systematic over- or under-weighting of research reports). Cohort integration = normal (BEAN-CH used actively; SYSR-SE used for lower-anchor). Sector integration = normal (Munters, Danfoss referenced where cited in source reports; not independently researched at this stage).</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/CRL-IT-triaging-self-review-debrief-2026-06-29.md</code> (to be created at ESA pickup per §1 of Execution Discipline SOP).</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"B","label":"Technical momentum"},"MR2":{"grade":"B","label":"Sell-side earnings momentum"},"MR3":{"grade":"A","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"B","label":"Pillar II: Case building blocks"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"C.2":{"grade":"B","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"B","label":"Case momentum"},"Group 2":{"grade":"B","label":"Case simplicity"},"Group 3":{"grade":"B","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"}};</script>
+</body>
+</html>

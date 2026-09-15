@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HEXATRONIC GROUP AB (HTRO-SE) — DD ANALYSIS &amp; JUDGEMENT MEMO — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE
+  Project: SA - Reports & Memos Repository  |  Phase 1 deliverable  |  14-May-26
+  ----------------------------------------------------------------------------
+  This is the inherited DISPLAY LAYER, lifted near-verbatim (behaviour) from
+  databases/memo-style-sheet3-htro.html (the old V20 WIP viewer), per D-MV-01.
+
+  WHAT IS INHERITED (near-verbatim):
+    - the two-pane shell (.app-shell > .nav-pane + .main-pane)
+    - the nav-pane: header, toggle bar (5 toggles), .nav-tree container
+    - the nav CSS: depth tiers, .nav-rating-pill, .nav-audit, focused state
+    - the nav JS: click-to-scroll, rAF scroll-spy, auto-expand-on-focus,
+      the 5 toggle handlers, the sticky-stack --main-header-h CSS var
+    - the sticky stack (.main-header)
+
+  WHAT IS EXTENDED (per D-MV-02 — old file had 4 depth tiers, new format has 7):
+    - nav depth tiers: nav-section, nav-subsection, nav-group ADDED above the
+      old nav-pillar / nav-element / nav-ra / nav-cq tiers
+    - scroll-spy gatherAnchors(): old file queried table-row selectors
+      (tr.pillar-banner[id] etc.). New body is DOCUMENT-FLOW (D-MV-01: body
+      renders to Presenting SOP v5, not the old table). So the spy now queries
+      heading elements carrying [data-spy] + [id] instead of table rows.
+
+  WHAT IS NOT INHERITED (per D-MV-01):
+    - the old table.memo body layout — the body is document-flow, SOP v5 render
+    - the old baked-in memo content — the generator pours each memo's content
+      into the nav-tree and memo-body slots below
+
+  SLOTS the generator fills (each token appears EXACTLY ONCE below, in its
+  real position — the generator uses str.replace which is global, so the
+  tokens must never appear anywhere else, including in this comment):
+    MEMO_TITLE token     -> document <title> + .page-title
+    MEMO_SUBTITLE token  -> .page-subtitle (stage, date, identity line)
+    NAV_TREE token       -> the 7-level nav-item tree
+    MEMO_BODY token      -> the document-flow memo body (SOP v5 render)
+  ============================================================================
+-->
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Aptos', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+       background:#fafaf8; color:#1a1a1a; }
+
+.app-shell { display:flex; flex-direction:row; align-items:stretch; height:100vh; }
+
+/* ============================== LEFT NAV PANE ============================== */
+/* Inherited near-verbatim from the old file's .nav-pane. */
+.nav-pane { flex:0 0 25%; max-width:25%; min-width:260px; background:#f5f4ee;
+            border-right:1px solid #d8d4c0; display:flex; flex-direction:column;
+            height:100vh; min-height:0; }
+.nav-header { padding:10px 12px; background:#3C3489; color:#fff; flex:0 0 auto; }
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+.nav-tree { flex:1 1 auto; overflow-y:auto; padding:8px 6px 24px 6px; font-size:9.5pt; scroll-behavior:smooth; }
+
+/* nav toggle bar — inherited; .nav-header-controls + 5 .nav-toggle-btn */
+.nav-header-controls { display:flex; flex-wrap:wrap; gap:4px; align-items:center; justify-content:flex-end; }
+.nav-header-controls .nav-toggle-btn { font-size:7.5pt; padding:1px 5px;
+            background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+            border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+            font-family:inherit; transition:background 0.15s, color 0.15s; }
+.nav-header-controls .nav-toggle-btn:hover { background:rgba(255,255,255,0.18); color:#fff; }
+.nav-header-controls .nav-toggle-btn.active { background:#fff; color:#3C3489; border-color:#fff;
+            font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,0.4); }
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* nav items — generic; depth set by tier class */
+.nav-item { padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+            border-radius:3px; transition:background 0.15s; display:block; }
+.nav-item:hover { background:#ece9d4; }
+.nav-item.focused { background:#e6e0ff; font-weight:700; }
+
+/* --- 7 DEPTH TIERS (D-MV-02) ------------------------------------------------
+   The old file had 4: nav-pillar / nav-element / nav-ra / nav-cq.
+   The new A-F spine adds 3 above: nav-section / nav-subsection / nav-group.
+   Indentation and colour ramp continue the old file's visual logic. */
+.nav-section    { font-size:10.5pt; font-weight:700; color:#3C3489; padding:7px 4px 4px 4px;
+                  margin-top:7px; text-transform:uppercase; letter-spacing:0.3px; }
+.nav-section:first-child { margin-top:0; }
+.nav-subsection { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:8px;
+                  padding-left:8px; }
+.nav-pillar     { font-size:9.5pt; font-weight:700; color:#3C3489; margin-left:16px;
+                  padding-left:8px; border-left:2px solid #b9b292; }
+.nav-group      { font-size:9pt;   font-weight:600; color:#085041; margin-left:24px;
+                  padding-left:8px; border-left:2px solid #b9b292; }
+.nav-element    { font-size:9pt;   font-weight:600; color:#633806; margin-left:32px;
+                  padding-left:8px; border-left:1px solid #b9b292; }
+.nav-ra         { font-size:8.5pt; color:#0C447C; margin-left:42px;
+                  padding-left:8px; border-left:1px dashed #b9b292; display:none; cursor:pointer; }
+.nav-cq         { font-size:8pt;   color:#5a5526; margin-left:52px;
+                  padding-left:6px; border-left:1px dotted #c9c1a3; display:none;
+                  line-height:1.4; padding:1px 6px; cursor:pointer; }
+
+/* progressive disclosure — inherited: RA/CQ lists hidden until parent open */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills — inherited near-verbatim ---------------------------- */
+.nav-rating-pill { display:inline-block; font-size:7.5pt; font-weight:700; padding:1px 5px;
+            border-radius:3px; margin-left:5px; vertical-align:baseline; min-width:14px;
+            text-align:center; }
+.nav-rating-pill.A { background:#9DD49B; color:#1a4d1a; }
+.nav-rating-pill.B { background:#BFD9F2; color:#0C447C; }
+.nav-rating-pill.C { background:#E7E3AB; color:#5a5526; }
+.nav-rating-pill.D { background:#FFCC66; color:#7a4f00; }
+.nav-rating-pill.F { background:#FF7C80; color:#660000; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip — inherited; hidden until body.show-audit -------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal { background:#eee; color:#555; }
+.nav-audit-weight-double { background:#3C3489; color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half { background:#aaa; color:#fff; }
+
+/* --- toggle behaviours — inherited near-verbatim --------------------------- */
+/* All RAs on */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+/* All CQs on */
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+/* Element details — JS adds .force-show; CSS unhides */
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ============================== RIGHT MEMO PANE ============================ */
+.main-pane { flex:1 1 auto; min-width:0; min-height:0; height:100vh; overflow-y:auto; padding:0 0 80px 0; scroll-behavior:smooth; }
+
+/* sticky memo header — inherited; --main-header-h CSS var drives sticky stack */
+.main-header { position:sticky; top:0; z-index:5; background:#fafaf8;
+            border-bottom:1px solid #e0ddca; padding:16px 40px 13px 40px; }
+.page-title { font-size:14pt; font-weight:700; margin-bottom:2px; }
+.page-subtitle { font-size:9.5pt; color:#888; }
+
+/* --- DOCUMENT-FLOW memo body (D-MV-01: SOP v5 render, NOT the old table) ---
+   Header hierarchy mirrors the 7-level spine. Every heading the spy tracks
+   carries id + data-spy. scroll-margin-top keeps anchors clear of the sticky
+   header on click-to-scroll. */
+.memo-body { padding:10px 40px 0 40px; max-width:900px; }
+h2.sec   { font-size:13.5pt; font-weight:700; color:#3C3489; margin:30px 0 4px;
+           padding-bottom:5px; border-bottom:2px solid #d8d4c0; scroll-margin-top:84px; }
+h3.subsec{ font-size:11.5pt; font-weight:700; color:#3C3489; margin:22px 0 4px; scroll-margin-top:84px; }
+h4.pillar{ font-size:11pt; font-weight:700; color:#3C3489; margin:20px 0 4px; scroll-margin-top:84px; }
+h5.group { font-size:10.5pt; font-weight:700; color:#085041; margin:18px 0 4px; scroll-margin-top:84px; }
+h6.elem  { font-size:10pt; font-weight:700; color:#633806; margin:16px 0 3px;
+           background:#FAEEDA; padding:5px 9px; border-radius:3px; scroll-margin-top:84px; }
+.ra-head { font-size:9.5pt; font-weight:700; color:#0C447C; margin:14px 0 3px;
+           padding-left:8px; border-left:3px solid #85B7EB; scroll-margin-top:84px; }
+.cq-head { font-size:9pt; font-weight:700; color:#5a5526; margin:11px 0 3px;
+           padding-left:8px; border-left:3px solid #c9c1a3; scroll-margin-top:84px; }
+.memo-note { font-style:italic; color:#666; font-size:9pt; margin:3px 0 8px; line-height:1.5; }
+.memo-body p { font-size:9.5pt; line-height:1.62; margin:6px 0; }
+.memo-body ul { margin:6px 0 10px 4px; list-style:none; }
+.memo-body ul li { font-size:9.5pt; line-height:1.6; margin:5px 0; padding-left:16px; position:relative; }
+.memo-body ul li::before { content:'\2013'; position:absolute; left:0; color:#999; }
+.memo-closing { font-style:italic; color:#444; font-size:9pt; border-left:3px solid #d8d4c0;
+           padding:5px 0 5px 11px; margin:9px 0; background:#f7f6ee; }
+.memo-body table { border-collapse:collapse; width:100%; font-size:8.5pt; margin:9px 0; }
+.memo-body table th { background:#FDFCF1; text-align:left; padding:5px 8px;
+           border-bottom:2px solid #d4d2bb; font-weight:700; }
+.memo-body table td { padding:5px 8px; border-bottom:1px solid #e8e5d4; vertical-align:top; }
+.memo-body table tr:nth-child(even) td { background:#faf8f0; }
+
+/* inline rating pill in the body — next to a heading or judgement */
+.rating { display:inline-flex; align-items:center; justify-content:center; min-width:20px;
+          height:18px; border-radius:2px; font-size:8.5pt; font-weight:700; padding:0 5px;
+          vertical-align:1px; margin-left:6px; }
+.rating.A { background:#9DD49B; color:#1a4d1a; }
+.rating.B { background:#BFD9F2; color:#0C447C; }
+.rating.C { background:#E7E3AB; color:#5a5526; }
+.rating.D { background:#FFCC66; color:#7a4f00; }
+.rating.F { background:#FF7C80; color:#660000; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#EEEDFE; color:#3C3489; }
+
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .main-header { position:static; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle" title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle" title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle" title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle" title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle" title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="bluf-net-verdict">BLUF — NET VERDICT</span>
+<span class="nav-item nav-section" data-anchor="1-company-recap">§1 — COMPANY RECAP</span>
+<span class="nav-item nav-section" data-anchor="2-the-case-for">§2 — THE CASE FOR</span>
+<span class="nav-item nav-section" data-anchor="3-the-case-against-key-risks">§3 — THE CASE AGAINST / KEY RISKS</span>
+<span class="nav-item nav-section" data-anchor="4-the-five-icds-assessed">§4 — THE FIVE ICDs ASSESSED</span>
+<span class="nav-item nav-section" data-anchor="5-fulcrum-driver-assessment">§5 — FULCRUM DRIVER ASSESSMENT</span>
+<span class="nav-item nav-section" data-anchor="6-six-pillars-dd-stage-ratings">§6 — SIX PILLARS — DD-STAGE RATINGS</span>
+<span class="nav-item nav-section" data-anchor="7-overall-a-j-verdict">§7 — OVERALL A&amp;J VERDICT</span>
+<span class="nav-item nav-section" data-anchor="8-key-questions-for-dd-p1-if-triggered">§8 — KEY QUESTIONS FOR DD P1 (IF TRIGGERED)</span>
+<span class="nav-item nav-section" data-anchor="9-monitoring-conditions-watchlist-status">§9 — MONITORING CONDITIONS (WATCHLIST STATUS)</span>
+<span class="nav-item nav-section" data-anchor="10-process-note">§10 — PROCESS NOTE<span class="nav-rating-pill C">C</span></span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="main-header">
+      <div class="page-title">HEXATRONIC GROUP AB (HTRO-SE) — DD ANALYSIS &amp; JUDGEMENT MEMO</div>
+      <div class="page-subtitle">Role: Investment Analyst (IA) Date: 14-May-26 Source base: ESA research completed April 2026 — BD [C] 09-Apr-26, CF [C] 09-Apr-26, AS queries Q8–Q13 (AlphaSense), KD Assessment [C]</div>
+    </div>
+    <div class="memo-body">
+<p>Hexatronic is a genuine transformation story at mid-cycle: the portfolio mix shift from commoditised fibre cable into Data Centre and Harsh Environment is real, the new CEO is executing at pace, and the margin recovery trajectory is directionally intact. But the investment case is <strong>not ready</strong>. The core problem is that the Fulcrum Driver — sustained &gt;40% organic growth in Data Centre — is unproven at scale, the Fibre Solutions margin floor is still live risk, and the stock is priced for execution success, not for a business still working through restructuring. The ESA verdict of C- (P4=D anchor) stands. <strong>No-go for DD P1 on current evidence.</strong> The gate condition is a credible Q1 2026 Data Centre result showing sustained organic growth momentum and Fibre Solutions EBITA margin stabilising above 6%.</p>
+<p>Hexatronic Group AB (OM:HTRO, Nasdaq Stockholm) is a Swedish fibre infrastructure and connectivity company operating across three segments: Fibre Solutions (~63% of 2025 revenue, ~40% of EBITA), Harsh Environment (~14% of revenue, ~20% of EBITA), and Data Centre (~20% of revenue, ~37% of EBITA). Market cap ~SEK 6.5bn (~$620m USD) as of April 2026. New CEO Rikard Fröberg in post since March 2025. The company is mid-way through a deliberate portfolio transformation — from a single-product FTTH cable business to a three-segment infrastructure group where DC and HE generate &gt;50% of profit by 2028.</p>
+<p>Revenue peaked at SEK 8.15bn (2023), contracted to SEK 7.52bn (2025, -7.7%), primarily due to weak European broadband operator demand and FTTH destocking. Adjusted EBITA margin fell from 15.1% (2023) to 13.4% (2025 adjusted), with reported Q4 2025 EBITA margin of 7.2% distorted by SEK 230m PIP restructuring charges. FCF generation remains robust (~SEK 1.0bn/year at normalised margins). Leverage improved from 2.3x (Q3 2024) to 1.9x net debt/EBITDA (Q4 2025), within the 1.5–2.0x target band.</p>
+<p><strong>What is genuinely working, and where the evidence is strongest.</strong></p>
+<p><strong>Data Centre organic growth is exceptional and real.</strong> Q4 2025 DC segment revenue up 62% organically. This is not M&amp;A flattery — the Endor acquisition (Oct 2024) is already part of the base. The hyperscaler AI capex cycle is a genuine multi-year tailwind: data centre bandwidth demand grew 330% from 2020–2024, and hyperscaler capex guidance from Microsoft, Google and Meta in 2025/2026 points to continued acceleration. HTRO's DC segment has structural advantages — intra-DC cabling is increasingly specialised (high-speed, power delivery hybrid, low-latency interconnect), service bundling creates stickiness, and the market is fragmented enough that an acquirer of scale can consolidate meaningfully. Segment EBITA margin at 15.3% (Q4 2025) and 20.8% peak (Q2 2025) confirms the economics are real.</p>
+<p><strong>Harsh Environment is a genuinely differentiated niche.</strong> The subsea, defence, and electro-optical connector market is oligopolistic. Qualification cycles run 2–3 years. Once embedded, switching costs are prohibitive (regulatory certification + reliability requirements). HTRO's Harsh Environment segment is showing consistent 11–14% EBITA margins and 15–20% organic growth. Defence spending is structurally elevated across Europe (post-Ukraine, NATO 2% GDP commitments). The JOWO acquisition (German specialty connectors, Q2 2026 close) deepens the defence/aerospace adjacency. This segment has durable SRCA in a way Fibre Solutions does not.</p>
+<p><strong>Fröberg's execution speed is a positive signal.</strong> New CEO installed March 2025, PIP restructuring announced within months, Fibre Solutions footprint consolidation (SEK 230m cost, SEK 110m annualised EBITA benefit) initiated immediately, JOWO deal in the pipeline. The pace of action under Fröberg contrasts sharply with the drift in the final Larsson Lyon period. The Ahlsell background (Country Manager Baltics, 20+ acquisition transactions) is directly relevant to the M&amp;A-intensive DC build-out strategy — he has done this before at scale.</p>
+<p><strong>FCF quality is structurally strong.</strong> Capital intensity is exceptionally low (&lt;1.2% of sales vs 2–2.5% for peers). FCF margins consistently 10–14%. Cash conversion ratio ~74–85%. The business generates meaningful cash even through a margin trough. This is not a FCF story that depends on recovery — it is robust through the cycle.</p>
+<p><strong>Fibre Solutions stabilisation signals are emerging.</strong> Management noted "signs of increased market activity" in Q4 2024. Inventory destocking among European telecom operators appears to have largely worked through by late 2024. The EU Gigabit Infrastructure Act (in force May 2024, full effect November 2025) and the German government's EUR 38bn FTTH commitment provide government-funded demand visibility for the next 3–5 years. These are not trivial tailwinds. BEAD funding ($65bn US broadband allocation) supports North American volume through 2026–2027.</p>
+<p><strong>Fibre Solutions margin floor is not confirmed.</strong> At 5.2% EBITA (Q4 2025, post-restructuring costs), reported margins look poor. Even normalising for the PIP, the structural floor is probably 6–7%. That is thin for a business representing ~40% of group EBITA. The risk is not just cyclical: it is structural. Chinese producers (ZTT, Hengtong, Sterlite) are present in European markets and growing. State subsidy advantages give them a 10–20% cost edge on commodity duct and cable products. If Chinese entrants accelerate European market penetration over 2026–2028, Fibre Solutions could compress to 2–3% EBITA margins — materially below the 6–7% floor management is targeting, and sufficient to drag the group well below its 12% EBITA target. This risk is <strong>not currently priced in and management is not discussing it directly</strong>.</p>
+<p><strong>DC organic growth rate is unproven at scale.</strong> The 62% figure is impressive but it is off a small base (SEK ~1.4bn). The question is whether HTRO can sustain &gt;30–40% DC growth as the segment scales toward the SEK 3.0bn (2028) target. Hyperscaler procurement is centralised and price-aggressive at volume — the "service bundling" moat that protects margin at smaller data centre operator level will be tested as HTRO enters larger hyperscaler contracts. Competitors at scale (Corning, CommScope) have deeper hyperscaler relationships. The 3–6 acquisitions per year DC M&amp;A target requires consistent deal flow, integration capacity, and pricing discipline — all of which are unproven under the current management team.</p>
+<p><strong>BEAD dependency (ICD-4) is a live risk.</strong> North America is 37% of revenues and growing. BEAD funding ($65bn) is the single largest demand driver for Fibre Solutions in the US. The programme has been subject to administrative delays, state-level execution risk, and political vulnerability (US funding programmes have historically been subject to revision in budget cycles). Any material BEAD slowdown or reallocation would hit HTRO's North American Fibre Solutions revenue directly at a moment when European demand is still recovering.</p>
+<p><strong>Corning incursion (ICD-5) is the tail risk.</strong> Corning is the world's dominant optical fibre preform manufacturer and commands the upstream glass supply chain. If Corning chose to vertically integrate downstream into cable assembly and duct manufacture — competing directly in HTRO's Fibre Solutions core — it would have a structural cost and technology advantage. Corning has hinted at downstream ambitions in Data Centre connectivity (already offering DAC and optical interconnect). If this extends to passive infrastructure, HTRO's Fibre Solutions moat collapses. This is not the base case but it is not a trivial tail — and HTRO has no glass integration whatsoever (pure downstream).</p>
+<p><strong>M&amp;A execution risk is real (ICD-3/KD#2).</strong> The strategy requires 3–6 DC acquisitions per year. At a typical EV of $10–100m per deal, that is $30–600m of annual acquisition spend at the upper end — well in excess of HTRO's normalised FCF capacity (~SEK 1.0bn = ~$95m). The implication is continued leverage or periodic equity issuance. The current leverage target (1.5–2.0x) constrains acquisition capacity. Fröberg's Ahlsell track record is in industrial distribution, not data centre services — the cultural and technical integration challenges of acquiring service-oriented DC businesses are different in character from bolt-on cable company acquisitions.</p>
+<p><strong>Valuation leaves no room for error.</strong> At ~4.3x EV/EBITDA (adjusted, April 2026) on depressed margins, HTRO looks optically cheap. But at normalised 12% EBITA margins (management's 2028 target), the implied EV/EBITA is ~6–7x — not particularly cheap for a business with significant execution risk, segment concentration, and Chinese competition exposure. The stock has already re-rated +42% over the prior 12 months, pricing in a significant portion of the recovery. The margin of safety is thin.</p>
+<p>These were defined at ESA. Assessment against current evidence base (April 2026).</p>
+<p><strong>ICD-1: Data Centre organic growth rate — must sustain &gt;40% to justify thesis</strong></p>
+<p>Current verdict: <strong>Amber/Yellow — provisional pass, not yet confirmed at scale.</strong></p>
+<p>The Q4 2025 DC organic growth of 62% is a strong data point. But it is one quarter off a relatively small base, partly inflated by the hyperscaler capex cycle acceleration (which may not be linear). The 2028 target of SEK 3.0bn from SEK 1.4bn (2025) implies a ~29% 3-year CAGR — achievable but requiring sustained execution without a capex pause from hyperscalers. The M&amp;A component of this growth is critical and unproven. Gate condition for DD P1: two consecutive quarters of &gt;30% organic DC growth, with margin holding &gt;12% EBITA, before this ICD moves to Green.</p>
+<p><strong>ICD-2: Fibre Solutions EBITA margin — must show recovery trajectory above 6%</strong></p>
+<p>Current verdict: <strong>Red/Amber — not yet confirmed, active risk.</strong></p>
+<p>Reported Q4 2025 Fibre EBITA at 5.2% (post-PIP costs). Normalised ex-PIP probably 6.5–7%. The PIP should deliver SEK 110m annualised EBITA benefit by end Q1 2026 — this is the next concrete checkpoint. If Q1 2026 Fibre Solutions EBITA margin comes in at 7%+ on a clean basis, the floor is confirmed. If it comes in below 6% even ex-PIP charges, the structural floor thesis breaks and the China competitive risk must be escalated. <strong>This is the most time-sensitive ICD and the Q1 2026 result (not yet available) is decisive.</strong></p>
+<p><strong>ICD-3: M&amp;A execution — Fröberg track record at HTRO scale</strong></p>
+<p>Current verdict: <strong>Orange — unproven, early signals mixed.</strong></p>
+<p>Fröberg has moved fast (PIP, JOWO, Communication Zone). The pace is positive. But the DC acquisition strategy (3–6 per year, service-oriented) requires integration of people-businesses (design engineers, installation teams, customer relationships) which is qualitatively harder than bolt-on product/manufacturing acquisitions. Endor (Oct 2024) is the most relevant test case — and it is too early to assess integration quality from external data. JOWO (Q2 2026 expected close) will be the next read-through. The Ahlsell M&amp;A background (industrial distribution) is a partial positive but not a direct analogue. Remaining Orange until at least two DC acquisitions show post-acquisition margin contribution.</p>
+<p><strong>ICD-4: BEAD dependency — US federal rollout risk</strong></p>
+<p>Current verdict: <strong>Yellow — real but manageable in medium term.</strong></p>
+<p>BEAD is proceeding. State-level implementation is slow (typical of US infrastructure programmes) but not reversing. The Trump administration's posture on broadband subsidies is a genuine variable — there have been signals of BEAD programme review. HTRO's North American Fibre Solutions revenue (~35% of total Fibre, ~20% of group) is meaningfully BEAD-exposed. The risk is timing rather than structural: a 12–24 month BEAD delay would hit HTRO's revenue bridge without threatening the long-term opportunity. Mitigant: North America Data Centre growth offsets some Fibre Solutions softness in the region.</p>
+<p><strong>ICD-5: Corning incursion — cable assembly competitive moat</strong></p>
+<p>Current verdict: <strong>Yellow — low probability, high severity; monitoring, not action.</strong></p>
+<p>No concrete evidence of Corning entering passive fibre cable assembly or duct manufacture in Europe. Corning's downstream ambitions are visible in Data Centre connectivity (DAC, optical interconnect) and in North American cable for BEAD deployments — neither of which is directly threatening HTRO's European duct/cable core in the near term. The risk is a 3–5 year tail. Monitoring condition: any Corning acquisition of a European fibre cable or duct manufacturer, or any public strategic announcement about passive infrastructure, triggers an immediate ICD-5 upgrade to Red.</p>
+<p><strong>FD#1: Data Centre moat durability (KD#1) — primary Fulcrum Driver</strong></p>
+<p>The DC moat thesis rests on three claims: (a) hyperscaler capex is structural and multi-year; (b) HTRO's service-bundling capability creates switching costs that protect margin; (c) the fragmented DC integrator market rewards an acquirer with scale and geographic coverage.</p>
+<p>Assessment of (a): Strong. Microsoft, Google, Amazon all guiding for continued AI infrastructure capex acceleration through 2026–2027. The capex has been committed and is converting into physical construction. Demand-side visibility is the best it has been in any sector for years.</p>
+<p>Assessment of (b): Weak-to-moderate at current scale. HTRO is still a small player in DC connectivity. Its "service bundling" moat is real at small data centre operators (where the total addressable services market is manageable) but will be tested at hyperscaler level, where procurement is professional and price-aggressive. The moat is currently an aspiration, not a demonstrated fact.</p>
+<p>Assessment of (c): Reasonable but requires proof. The fragmentation of the DC integrator market is real — and HTRO's M&amp;A strategy is structurally sensible. But "acquire and integrate 3–6 businesses per year" is an execution-intensive model that has broken many companies. The question is not whether the strategy is correct — it is whether Fröberg's team can execute it without diluting returns or losing cultural coherence across acquired businesses.</p>
+<p>Net verdict on FD#1: <strong>The thesis is real; the moat is early-stage; the proof point is Q1 2026 organic DC growth</strong>. If DC organic growth sustains &gt;30% in Q1 2026 (results due around May 2026), FD#1 moves from Yellow to Green and the case for DD P1 becomes compelling.</p>
+<p><strong>FD#2: M&amp;A execution — Fröberg's capacity to build via acquisition (KD#2) — secondary Fulcrum Driver</strong></p>
+<p>The thesis here is simpler: Fröberg has done this before (Ahlsell: 20+ acquisitions in industrial distribution), the Deputy CEO (Åberg) has been executing HTRO's M&amp;A for 10 years, and the acquisition pipeline is demonstrably active (Endor, Communication Zone, JOWO). The risk is that Ahlsell-style M&amp;A (buying distribution businesses with established customer relationships and repeatable unit economics) is structurally different from DC services M&amp;A (buying businesses where value is in engineer relationships, project workflows, and hyperscaler approvals — all of which can walk out of the door).</p>
+<p>Net verdict on FD#2: <strong>Orange. The track record is proximate but not identical. Endor integration quality is the test case. This can only be de-risked through time and observable post-acquisition margin data.</strong></p>
+<div class="memo-note">Note: These are IA ratings from the April 2026 evidence base, written fresh. Prior APM ratings referenced for context only.</div>
+<table><thead><tr><th>Pillar</th><th>IA Rating</th><th>Key driver of rating</th></tr></thead><tbody><tr><td>P1 — Technical Momentum</td><td>B+</td><td>Stock +42% L12M, approaching 52W high of 34.94 SEK. Strong price action. Downgraded slightly from ESA A — stock has re-rated; momentum is intact but margin of safety has compressed.</td></tr><tr><td>P2 — Market Paradigm Fit</td><td>C</td><td>Structural FTTH tailwind is real (EU Gigabit Act, German broadband commitment) but HTRO is a mid-tier participant with no glass integration. DC paradigm fit is strong but HTRO is early-stage. Blended C — neither a perfect paradigm fit nor a paradigm mismatch.</td></tr><tr><td>P3 — Fundamental Change</td><td>B-</td><td>The portfolio transformation is real and Fröberg is executing. DC organic growth 62%, HE 15%, PIP initiated. Change forces are Orange-to-Red in character — substantial, confirmed direction, execution ongoing. Held at B- pending proof of DC margin durability at scale.</td></tr><tr><td>P4 — Building Blocks</td><td>D</td><td>The D rating is affirmed. Invalidating risks remain live: Fibre Solutions margin floor unconfirmed, BEAD political risk, Corning tail risk, M&amp;A execution unproven. No single invalidating risk is imminent but the P4 aggregate is genuinely weak. The DC moat is early-stage, not proven. Operating leverage is thin at current margins.</td></tr><tr><td>P5 — SS Earnings Momentum</td><td>C</td><td>Sell-side sceptical (consensus 12M target 28.50–29.58 SEK vs current ~31.52 SEK — consensus is below market). Mixed EPS profile (net income 270 MSEK, down 61% from 2023 peak). Fibre Solutions miss history. Consensus will not get materially more positive until Q1 2026 shows clean recovery across all three segments.</td></tr><tr><td>P6 — Valuation</td><td>C</td><td>At ~4.3x EV/adjusted EBITDA, looks cheap on trough numbers. At normalised margins (12% EBITA = target 2028), implied EV/EBITA is ~6–7x. Not expensive for a quality industrial; not cheap enough to absorb P4 risk. Stock has already re-rated +42% L12M. Consensus is at/below market — limited institutional sponsorship.</td></tr></tbody></table>
+<p><strong>Rollup — weighted worst-of:</strong> P4=D anchors the overall to <strong>C-/D+</strong>. The B- P3 score and improving P1 provide partial offset, but the weighted worst-of methodology (60% weight to bottom quartile) pulls the overall down. <strong>IC overall: C-.</strong></p>
+<p><strong>The transformation thesis is credible. The evidence base is not yet sufficient for DD P1.</strong></p>
+<p>The investment case for HTRO has a structurally sound architecture: three-segment diversification away from commoditised FTTH into high-margin DC and HE niches, a new CEO executing at pace, FCF generation robust through the cycle, and genuine secular tailwinds in both growth segments. This is not a broken thesis. It is a thesis that is early-stage on the segment that matters most — Data Centre — and where the primary evidence point (sustained organic DC growth at scale, with margins holding) has not yet been demonstrated over more than one quarter.</p>
+<p>The P4=D rating reflects a genuine aggregate risk set, not a single disqualifying flaw:</p>
+<ul><li>Fibre Solutions margin floor — not yet confirmed (Q1 2026 is the checkpoint)</li><li>DC moat at hyperscaler scale — early-stage, aspiration rather than demonstrated fact</li><li>BEAD political risk — real but manageable; timing uncertainty not structural threat</li><li>Corning incursion — tail risk, not base case; monitoring appropriate</li><li>M&amp;A execution — Fröberg pace positive, cultural integration of DC service businesses is the unproven element</li></ul>
+<p>Against these, the case for is genuine: DC 62% organic growth, HE durability, Fröberg execution speed, FCF quality, and improving leverage trajectory. The stock is not obviously mispriced — it is priced at roughly fair value for a business where execution is still early. That is not the right risk/reward for a concentrated portfolio.</p>
+<p><strong>Conclusion: No-go for DD P1 at current evidence level.</strong></p>
+<p>The correct posture is watchlist monitoring, not active DD. The gate conditions that would trigger a reassessment:</p>
+<p>1. Q1 2026 Data Centre organic growth &gt;25% with EBITA margin &gt;12% 2. Q1 2026 Fibre Solutions EBITA margin &gt;6.5% on a clean (ex-PIP) basis 3. Endor acquisition: any observable post-acquisition integration data (revenue retention, margin post-close) from H1 2026 reporting 4. JOWO close: confirmation of deal terms and segment contribution guidance</p>
+<p>If all four conditions are met in the Q1 2026 report (due ~May 2026), the IC upgrades to B-/C+ and DD P1 becomes warranted.</p>
+<p>These are the questions that a DD P1 workplan must answer before a position is warranted.</p>
+<p>1. <strong>DC organic growth durability:</strong> Can HTRO sustain &gt;25% organic DC growth for three consecutive quarters? What is the pipeline composition (hyperscaler vs regional DC operators)? What is the average contract duration and margin profile by customer type?</p>
+<p>2. <strong>Fibre Solutions structural floor:</strong> Is the 6–7% EBITA margin floor structural or optimistic? What is management's explicit assumption about Chinese competitor market share gains in European duct/cable? Is there a scenario where the floor is 3–4%?</p>
+<p>3. <strong>Endor integration:</strong> What is the revenue retention rate post-Endor acquisition? Are the acquired management/engineering teams still in place? What is the post-acquisition EBITA margin vs pre-acquisition?</p>
+<p>4. <strong>BEAD programme status:</strong> What is HTRO's current order book for BEAD-funded deployments? What is the revenue and margin exposure if BEAD is delayed 12–24 months? Is there state-level diversification across the order book?</p>
+<p>5. <strong>Corning intelligence:</strong> Has sell-side or trade press published anything on Corning's downstream strategy in European passive fibre infrastructure? Is there an AlphaSense search that would surface any indication of Corning competitive moves?</p>
+<p>6. <strong>Fröberg incentive alignment:</strong> What are the CEO's equity holdings and long-term incentive structure? Is he personally aligned with the 2028 targets? What does the LTIP vesting structure look like?</p>
+<p>7. <strong>Acquisition pipeline and funding capacity:</strong> How is HTRO funding the 3–6 DC acquisitions per year target given leverage constraints? Is there an implicit equity issuance assumption embedded in the 2028 targets?</p>
+<p>8. <strong>Competitive positioning vs Corning in Data Centre:</strong> How is HTRO differentiated from Corning's Data Centre connectivity offering? Where does HTRO win and where does it lose in a competitive RFP against Corning?</p>
+<p>HTRO moves to watchlist monitoring (not active DD) pending the gate conditions in §7.</p>
+<p>Monitoring cadence: Quarterly (results-driven).</p>
+<table><thead><tr><th>Trigger</th><th>Action</th></tr></thead><tbody><tr><td>Q1 2026 DC organic growth &gt;25% + margin &gt;12%</td><td>Upgrade to DD P1 candidate; initiate §8 workplan</td></tr><tr><td>Q1 2026 Fibre EBITA margin &gt;6.5% clean</td><td>ICD-2 moved to Green; upgrades P4 partially</td></tr><tr><td>Corning announces European passive infra acquisition or downstream move</td><td>Escalate ICD-5 to Red; reassess full IC</td></tr><tr><td>BEAD material delay/cancellation announced</td><td>ICD-4 escalated; North America revenue bridge revised</td></tr><tr><td>Fröberg departure</td><td>Full case review triggered immediately</td></tr><tr><td>Stock re-rates below SEK 24 (P4 risk priced in)</td><td>Valuation entry point; may accelerate DD P1 trigger</td></tr></tbody></table>
+<div class="memo-note">Data currency: All financial data current to April 2026. Q1 2026 results (expected May 2026) are the single most important near-term data point and will update ICD-1 and ICD-2 decisively. This memo should be refreshed immediately post Q1 2026 publication.</div>
+<div class="memo-note">Prior A&amp;J work: All prior APM/IA A&amp;J drafts have been deliberately excluded. This memo is written fresh from the primary evidence base (BD [C], CF [C], AS Q8–Q13 raw extracts, KD Assessment [C] Q14). The Six Pillars ESA ratings from the prior APM interlude (stored in the ESA status file) are referenced for context only — the IA ratings in §6 above represent an independent re-assessment.</div>
+<p><strong>[W] — Watson (Claude Sonnet 4.6), Investment Analyst role, 14-May-26. Source base: HTRO ESA research April 2026. Fresh A&amp;J — no prior drafts incorporated.</strong></p>
+<h2 class="sec" id="bluf-net-verdict" data-spy>BLUF — NET VERDICT</h2>
+<p>Hexatronic is a genuine transformation story at mid-cycle: the portfolio mix shift from commoditised fibre cable into Data Centre and Harsh Environment is real, the new CEO is executing at pace, and the margin recovery trajectory is directionally intact. But the investment case is <strong>not ready</strong>. The core problem is that the Fulcrum Driver — sustained &gt;40% organic growth in Data Centre — is unproven at scale, the Fibre Solutions margin floor is still live risk, and the stock is priced for execution success, not for a business still working through restructuring. The ESA verdict of C- (P4=D anchor) stands. <strong>No-go for DD P1 on current evidence.</strong> The gate condition is a credible Q1 2026 Data Centre result showing sustained organic growth momentum and Fibre Solutions EBITA margin stabilising above 6%.</p>
+<h2 class="sec" id="1-company-recap" data-spy>§1 — COMPANY RECAP</h2>
+<p>Hexatronic Group AB (OM:HTRO, Nasdaq Stockholm) is a Swedish fibre infrastructure and connectivity company operating across three segments: Fibre Solutions (~63% of 2025 revenue, ~40% of EBITA), Harsh Environment (~14% of revenue, ~20% of EBITA), and Data Centre (~20% of revenue, ~37% of EBITA). Market cap ~SEK 6.5bn (~$620m USD) as of April 2026. New CEO Rikard Fröberg in post since March 2025. The company is mid-way through a deliberate portfolio transformation — from a single-product FTTH cable business to a three-segment infrastructure group where DC and HE generate &gt;50% of profit by 2028.</p>
+<p>Revenue peaked at SEK 8.15bn (2023), contracted to SEK 7.52bn (2025, -7.7%), primarily due to weak European broadband operator demand and FTTH destocking. Adjusted EBITA margin fell from 15.1% (2023) to 13.4% (2025 adjusted), with reported Q4 2025 EBITA margin of 7.2% distorted by SEK 230m PIP restructuring charges. FCF generation remains robust (~SEK 1.0bn/year at normalised margins). Leverage improved from 2.3x (Q3 2024) to 1.9x net debt/EBITDA (Q4 2025), within the 1.5–2.0x target band.</p>
+<h2 class="sec" id="2-the-case-for" data-spy>§2 — THE CASE FOR</h2>
+<p><strong>What is genuinely working, and where the evidence is strongest.</strong></p>
+<p><strong>Data Centre organic growth is exceptional and real.</strong> Q4 2025 DC segment revenue up 62% organically. This is not M&amp;A flattery — the Endor acquisition (Oct 2024) is already part of the base. The hyperscaler AI capex cycle is a genuine multi-year tailwind: data centre bandwidth demand grew 330% from 2020–2024, and hyperscaler capex guidance from Microsoft, Google and Meta in 2025/2026 points to continued acceleration. HTRO's DC segment has structural advantages — intra-DC cabling is increasingly specialised (high-speed, power delivery hybrid, low-latency interconnect), service bundling creates stickiness, and the market is fragmented enough that an acquirer of scale can consolidate meaningfully. Segment EBITA margin at 15.3% (Q4 2025) and 20.8% peak (Q2 2025) confirms the economics are real.</p>
+<p><strong>Harsh Environment is a genuinely differentiated niche.</strong> The subsea, defence, and electro-optical connector market is oligopolistic. Qualification cycles run 2–3 years. Once embedded, switching costs are prohibitive (regulatory certification + reliability requirements). HTRO's Harsh Environment segment is showing consistent 11–14% EBITA margins and 15–20% organic growth. Defence spending is structurally elevated across Europe (post-Ukraine, NATO 2% GDP commitments). The JOWO acquisition (German specialty connectors, Q2 2026 close) deepens the defence/aerospace adjacency. This segment has durable SRCA in a way Fibre Solutions does not.</p>
+<p><strong>Fröberg's execution speed is a positive signal.</strong> New CEO installed March 2025, PIP restructuring announced within months, Fibre Solutions footprint consolidation (SEK 230m cost, SEK 110m annualised EBITA benefit) initiated immediately, JOWO deal in the pipeline. The pace of action under Fröberg contrasts sharply with the drift in the final Larsson Lyon period. The Ahlsell background (Country Manager Baltics, 20+ acquisition transactions) is directly relevant to the M&amp;A-intensive DC build-out strategy — he has done this before at scale.</p>
+<p><strong>FCF quality is structurally strong.</strong> Capital intensity is exceptionally low (&lt;1.2% of sales vs 2–2.5% for peers). FCF margins consistently 10–14%. Cash conversion ratio ~74–85%. The business generates meaningful cash even through a margin trough. This is not a FCF story that depends on recovery — it is robust through the cycle.</p>
+<p><strong>Fibre Solutions stabilisation signals are emerging.</strong> Management noted "signs of increased market activity" in Q4 2024. Inventory destocking among European telecom operators appears to have largely worked through by late 2024. The EU Gigabit Infrastructure Act (in force May 2024, full effect November 2025) and the German government's EUR 38bn FTTH commitment provide government-funded demand visibility for the next 3–5 years. These are not trivial tailwinds. BEAD funding ($65bn US broadband allocation) supports North American volume through 2026–2027.</p>
+<h2 class="sec" id="3-the-case-against-key-risks" data-spy>§3 — THE CASE AGAINST / KEY RISKS</h2>
+<p><strong>Fibre Solutions margin floor is not confirmed.</strong> At 5.2% EBITA (Q4 2025, post-restructuring costs), reported margins look poor. Even normalising for the PIP, the structural floor is probably 6–7%. That is thin for a business representing ~40% of group EBITA. The risk is not just cyclical: it is structural. Chinese producers (ZTT, Hengtong, Sterlite) are present in European markets and growing. State subsidy advantages give them a 10–20% cost edge on commodity duct and cable products. If Chinese entrants accelerate European market penetration over 2026–2028, Fibre Solutions could compress to 2–3% EBITA margins — materially below the 6–7% floor management is targeting, and sufficient to drag the group well below its 12% EBITA target. This risk is <strong>not currently priced in and management is not discussing it directly</strong>.</p>
+<p><strong>DC organic growth rate is unproven at scale.</strong> The 62% figure is impressive but it is off a small base (SEK ~1.4bn). The question is whether HTRO can sustain &gt;30–40% DC growth as the segment scales toward the SEK 3.0bn (2028) target. Hyperscaler procurement is centralised and price-aggressive at volume — the "service bundling" moat that protects margin at smaller data centre operator level will be tested as HTRO enters larger hyperscaler contracts. Competitors at scale (Corning, CommScope) have deeper hyperscaler relationships. The 3–6 acquisitions per year DC M&amp;A target requires consistent deal flow, integration capacity, and pricing discipline — all of which are unproven under the current management team.</p>
+<p><strong>BEAD dependency (ICD-4) is a live risk.</strong> North America is 37% of revenues and growing. BEAD funding ($65bn) is the single largest demand driver for Fibre Solutions in the US. The programme has been subject to administrative delays, state-level execution risk, and political vulnerability (US funding programmes have historically been subject to revision in budget cycles). Any material BEAD slowdown or reallocation would hit HTRO's North American Fibre Solutions revenue directly at a moment when European demand is still recovering.</p>
+<p><strong>Corning incursion (ICD-5) is the tail risk.</strong> Corning is the world's dominant optical fibre preform manufacturer and commands the upstream glass supply chain. If Corning chose to vertically integrate downstream into cable assembly and duct manufacture — competing directly in HTRO's Fibre Solutions core — it would have a structural cost and technology advantage. Corning has hinted at downstream ambitions in Data Centre connectivity (already offering DAC and optical interconnect). If this extends to passive infrastructure, HTRO's Fibre Solutions moat collapses. This is not the base case but it is not a trivial tail — and HTRO has no glass integration whatsoever (pure downstream).</p>
+<p><strong>M&amp;A execution risk is real (ICD-3/KD#2).</strong> The strategy requires 3–6 DC acquisitions per year. At a typical EV of $10–100m per deal, that is $30–600m of annual acquisition spend at the upper end — well in excess of HTRO's normalised FCF capacity (~SEK 1.0bn = ~$95m). The implication is continued leverage or periodic equity issuance. The current leverage target (1.5–2.0x) constrains acquisition capacity. Fröberg's Ahlsell track record is in industrial distribution, not data centre services — the cultural and technical integration challenges of acquiring service-oriented DC businesses are different in character from bolt-on cable company acquisitions.</p>
+<p><strong>Valuation leaves no room for error.</strong> At ~4.3x EV/EBITDA (adjusted, April 2026) on depressed margins, HTRO looks optically cheap. But at normalised 12% EBITA margins (management's 2028 target), the implied EV/EBITA is ~6–7x — not particularly cheap for a business with significant execution risk, segment concentration, and Chinese competition exposure. The stock has already re-rated +42% over the prior 12 months, pricing in a significant portion of the recovery. The margin of safety is thin.</p>
+<h2 class="sec" id="4-the-five-icds-assessed" data-spy>§4 — THE FIVE ICDs ASSESSED</h2>
+<p>These were defined at ESA. Assessment against current evidence base (April 2026).</p>
+<p><strong>ICD-1: Data Centre organic growth rate — must sustain &gt;40% to justify thesis</strong></p>
+<p>Current verdict: <strong>Amber/Yellow — provisional pass, not yet confirmed at scale.</strong></p>
+<p>The Q4 2025 DC organic growth of 62% is a strong data point. But it is one quarter off a relatively small base, partly inflated by the hyperscaler capex cycle acceleration (which may not be linear). The 2028 target of SEK 3.0bn from SEK 1.4bn (2025) implies a ~29% 3-year CAGR — achievable but requiring sustained execution without a capex pause from hyperscalers. The M&amp;A component of this growth is critical and unproven. Gate condition for DD P1: two consecutive quarters of &gt;30% organic DC growth, with margin holding &gt;12% EBITA, before this ICD moves to Green.</p>
+<p><strong>ICD-2: Fibre Solutions EBITA margin — must show recovery trajectory above 6%</strong></p>
+<p>Current verdict: <strong>Red/Amber — not yet confirmed, active risk.</strong></p>
+<p>Reported Q4 2025 Fibre EBITA at 5.2% (post-PIP costs). Normalised ex-PIP probably 6.5–7%. The PIP should deliver SEK 110m annualised EBITA benefit by end Q1 2026 — this is the next concrete checkpoint. If Q1 2026 Fibre Solutions EBITA margin comes in at 7%+ on a clean basis, the floor is confirmed. If it comes in below 6% even ex-PIP charges, the structural floor thesis breaks and the China competitive risk must be escalated. <strong>This is the most time-sensitive ICD and the Q1 2026 result (not yet available) is decisive.</strong></p>
+<p><strong>ICD-3: M&amp;A execution — Fröberg track record at HTRO scale</strong></p>
+<p>Current verdict: <strong>Orange — unproven, early signals mixed.</strong></p>
+<p>Fröberg has moved fast (PIP, JOWO, Communication Zone). The pace is positive. But the DC acquisition strategy (3–6 per year, service-oriented) requires integration of people-businesses (design engineers, installation teams, customer relationships) which is qualitatively harder than bolt-on product/manufacturing acquisitions. Endor (Oct 2024) is the most relevant test case — and it is too early to assess integration quality from external data. JOWO (Q2 2026 expected close) will be the next read-through. The Ahlsell M&amp;A background (industrial distribution) is a partial positive but not a direct analogue. Remaining Orange until at least two DC acquisitions show post-acquisition margin contribution.</p>
+<p><strong>ICD-4: BEAD dependency — US federal rollout risk</strong></p>
+<p>Current verdict: <strong>Yellow — real but manageable in medium term.</strong></p>
+<p>BEAD is proceeding. State-level implementation is slow (typical of US infrastructure programmes) but not reversing. The Trump administration's posture on broadband subsidies is a genuine variable — there have been signals of BEAD programme review. HTRO's North American Fibre Solutions revenue (~35% of total Fibre, ~20% of group) is meaningfully BEAD-exposed. The risk is timing rather than structural: a 12–24 month BEAD delay would hit HTRO's revenue bridge without threatening the long-term opportunity. Mitigant: North America Data Centre growth offsets some Fibre Solutions softness in the region.</p>
+<p><strong>ICD-5: Corning incursion — cable assembly competitive moat</strong></p>
+<p>Current verdict: <strong>Yellow — low probability, high severity; monitoring, not action.</strong></p>
+<p>No concrete evidence of Corning entering passive fibre cable assembly or duct manufacture in Europe. Corning's downstream ambitions are visible in Data Centre connectivity (DAC, optical interconnect) and in North American cable for BEAD deployments — neither of which is directly threatening HTRO's European duct/cable core in the near term. The risk is a 3–5 year tail. Monitoring condition: any Corning acquisition of a European fibre cable or duct manufacturer, or any public strategic announcement about passive infrastructure, triggers an immediate ICD-5 upgrade to Red.</p>
+<h2 class="sec" id="5-fulcrum-driver-assessment" data-spy>§5 — FULCRUM DRIVER ASSESSMENT</h2>
+<p><strong>FD#1: Data Centre moat durability (KD#1) — primary Fulcrum Driver</strong></p>
+<p>The DC moat thesis rests on three claims: (a) hyperscaler capex is structural and multi-year; (b) HTRO's service-bundling capability creates switching costs that protect margin; (c) the fragmented DC integrator market rewards an acquirer with scale and geographic coverage.</p>
+<p>Assessment of (a): Strong. Microsoft, Google, Amazon all guiding for continued AI infrastructure capex acceleration through 2026–2027. The capex has been committed and is converting into physical construction. Demand-side visibility is the best it has been in any sector for years.</p>
+<p>Assessment of (b): Weak-to-moderate at current scale. HTRO is still a small player in DC connectivity. Its "service bundling" moat is real at small data centre operators (where the total addressable services market is manageable) but will be tested at hyperscaler level, where procurement is professional and price-aggressive. The moat is currently an aspiration, not a demonstrated fact.</p>
+<p>Assessment of (c): Reasonable but requires proof. The fragmentation of the DC integrator market is real — and HTRO's M&amp;A strategy is structurally sensible. But "acquire and integrate 3–6 businesses per year" is an execution-intensive model that has broken many companies. The question is not whether the strategy is correct — it is whether Fröberg's team can execute it without diluting returns or losing cultural coherence across acquired businesses.</p>
+<p>Net verdict on FD#1: <strong>The thesis is real; the moat is early-stage; the proof point is Q1 2026 organic DC growth</strong>. If DC organic growth sustains &gt;30% in Q1 2026 (results due around May 2026), FD#1 moves from Yellow to Green and the case for DD P1 becomes compelling.</p>
+<p><strong>FD#2: M&amp;A execution — Fröberg's capacity to build via acquisition (KD#2) — secondary Fulcrum Driver</strong></p>
+<p>The thesis here is simpler: Fröberg has done this before (Ahlsell: 20+ acquisitions in industrial distribution), the Deputy CEO (Åberg) has been executing HTRO's M&amp;A for 10 years, and the acquisition pipeline is demonstrably active (Endor, Communication Zone, JOWO). The risk is that Ahlsell-style M&amp;A (buying distribution businesses with established customer relationships and repeatable unit economics) is structurally different from DC services M&amp;A (buying businesses where value is in engineer relationships, project workflows, and hyperscaler approvals — all of which can walk out of the door).</p>
+<p>Net verdict on FD#2: <strong>Orange. The track record is proximate but not identical. Endor integration quality is the test case. This can only be de-risked through time and observable post-acquisition margin data.</strong></p>
+<h2 class="sec" id="6-six-pillars-dd-stage-ratings" data-spy>§6 — SIX PILLARS — DD-STAGE RATINGS</h2>
+<div class="memo-note">Note: These are IA ratings from the April 2026 evidence base, written fresh. Prior APM ratings referenced for context only.</div>
+<table><thead><tr><th>Pillar</th><th>IA Rating</th><th>Key driver of rating</th></tr></thead><tbody><tr><td>P1 — Technical Momentum</td><td>B+</td><td>Stock +42% L12M, approaching 52W high of 34.94 SEK. Strong price action. Downgraded slightly from ESA A — stock has re-rated; momentum is intact but margin of safety has compressed.</td></tr><tr><td>P2 — Market Paradigm Fit</td><td>C</td><td>Structural FTTH tailwind is real (EU Gigabit Act, German broadband commitment) but HTRO is a mid-tier participant with no glass integration. DC paradigm fit is strong but HTRO is early-stage. Blended C — neither a perfect paradigm fit nor a paradigm mismatch.</td></tr><tr><td>P3 — Fundamental Change</td><td>B-</td><td>The portfolio transformation is real and Fröberg is executing. DC organic growth 62%, HE 15%, PIP initiated. Change forces are Orange-to-Red in character — substantial, confirmed direction, execution ongoing. Held at B- pending proof of DC margin durability at scale.</td></tr><tr><td>P4 — Building Blocks</td><td>D</td><td>The D rating is affirmed. Invalidating risks remain live: Fibre Solutions margin floor unconfirmed, BEAD political risk, Corning tail risk, M&amp;A execution unproven. No single invalidating risk is imminent but the P4 aggregate is genuinely weak. The DC moat is early-stage, not proven. Operating leverage is thin at current margins.</td></tr><tr><td>P5 — SS Earnings Momentum</td><td>C</td><td>Sell-side sceptical (consensus 12M target 28.50–29.58 SEK vs current ~31.52 SEK — consensus is below market). Mixed EPS profile (net income 270 MSEK, down 61% from 2023 peak). Fibre Solutions miss history. Consensus will not get materially more positive until Q1 2026 shows clean recovery across all three segments.</td></tr><tr><td>P6 — Valuation</td><td>C</td><td>At ~4.3x EV/adjusted EBITDA, looks cheap on trough numbers. At normalised margins (12% EBITA = target 2028), implied EV/EBITA is ~6–7x. Not expensive for a quality industrial; not cheap enough to absorb P4 risk. Stock has already re-rated +42% L12M. Consensus is at/below market — limited institutional sponsorship.</td></tr></tbody></table>
+<p><strong>Rollup — weighted worst-of:</strong> P4=D anchors the overall to <strong>C-/D+</strong>. The B- P3 score and improving P1 provide partial offset, but the weighted worst-of methodology (60% weight to bottom quartile) pulls the overall down. <strong>IC overall: C-.</strong></p>
+<h2 class="sec" id="7-overall-a-j-verdict" data-spy>§7 — OVERALL A&amp;J VERDICT</h2>
+<p><strong>The transformation thesis is credible. The evidence base is not yet sufficient for DD P1.</strong></p>
+<p>The investment case for HTRO has a structurally sound architecture: three-segment diversification away from commoditised FTTH into high-margin DC and HE niches, a new CEO executing at pace, FCF generation robust through the cycle, and genuine secular tailwinds in both growth segments. This is not a broken thesis. It is a thesis that is early-stage on the segment that matters most — Data Centre — and where the primary evidence point (sustained organic DC growth at scale, with margins holding) has not yet been demonstrated over more than one quarter.</p>
+<p>The P4=D rating reflects a genuine aggregate risk set, not a single disqualifying flaw:</p>
+<ul><li>Fibre Solutions margin floor — not yet confirmed (Q1 2026 is the checkpoint)</li><li>DC moat at hyperscaler scale — early-stage, aspiration rather than demonstrated fact</li><li>BEAD political risk — real but manageable; timing uncertainty not structural threat</li><li>Corning incursion — tail risk, not base case; monitoring appropriate</li><li>M&amp;A execution — Fröberg pace positive, cultural integration of DC service businesses is the unproven element</li></ul>
+<p>Against these, the case for is genuine: DC 62% organic growth, HE durability, Fröberg execution speed, FCF quality, and improving leverage trajectory. The stock is not obviously mispriced — it is priced at roughly fair value for a business where execution is still early. That is not the right risk/reward for a concentrated portfolio.</p>
+<p><strong>Conclusion: No-go for DD P1 at current evidence level.</strong></p>
+<p>The correct posture is watchlist monitoring, not active DD. The gate conditions that would trigger a reassessment:</p>
+<p>1. Q1 2026 Data Centre organic growth &gt;25% with EBITA margin &gt;12% 2. Q1 2026 Fibre Solutions EBITA margin &gt;6.5% on a clean (ex-PIP) basis 3. Endor acquisition: any observable post-acquisition integration data (revenue retention, margin post-close) from H1 2026 reporting 4. JOWO close: confirmation of deal terms and segment contribution guidance</p>
+<p>If all four conditions are met in the Q1 2026 report (due ~May 2026), the IC upgrades to B-/C+ and DD P1 becomes warranted.</p>
+<h2 class="sec" id="8-key-questions-for-dd-p1-if-triggered" data-spy>§8 — KEY QUESTIONS FOR DD P1 (IF TRIGGERED)</h2>
+<p>These are the questions that a DD P1 workplan must answer before a position is warranted.</p>
+<p>1. <strong>DC organic growth durability:</strong> Can HTRO sustain &gt;25% organic DC growth for three consecutive quarters? What is the pipeline composition (hyperscaler vs regional DC operators)? What is the average contract duration and margin profile by customer type?</p>
+<p>2. <strong>Fibre Solutions structural floor:</strong> Is the 6–7% EBITA margin floor structural or optimistic? What is management's explicit assumption about Chinese competitor market share gains in European duct/cable? Is there a scenario where the floor is 3–4%?</p>
+<p>3. <strong>Endor integration:</strong> What is the revenue retention rate post-Endor acquisition? Are the acquired management/engineering teams still in place? What is the post-acquisition EBITA margin vs pre-acquisition?</p>
+<p>4. <strong>BEAD programme status:</strong> What is HTRO's current order book for BEAD-funded deployments? What is the revenue and margin exposure if BEAD is delayed 12–24 months? Is there state-level diversification across the order book?</p>
+<p>5. <strong>Corning intelligence:</strong> Has sell-side or trade press published anything on Corning's downstream strategy in European passive fibre infrastructure? Is there an AlphaSense search that would surface any indication of Corning competitive moves?</p>
+<p>6. <strong>Fröberg incentive alignment:</strong> What are the CEO's equity holdings and long-term incentive structure? Is he personally aligned with the 2028 targets? What does the LTIP vesting structure look like?</p>
+<p>7. <strong>Acquisition pipeline and funding capacity:</strong> How is HTRO funding the 3–6 DC acquisitions per year target given leverage constraints? Is there an implicit equity issuance assumption embedded in the 2028 targets?</p>
+<p>8. <strong>Competitive positioning vs Corning in Data Centre:</strong> How is HTRO differentiated from Corning's Data Centre connectivity offering? Where does HTRO win and where does it lose in a competitive RFP against Corning?</p>
+<h2 class="sec" id="9-monitoring-conditions-watchlist-status" data-spy>§9 — MONITORING CONDITIONS (WATCHLIST STATUS)</h2>
+<p>HTRO moves to watchlist monitoring (not active DD) pending the gate conditions in §7.</p>
+<p>Monitoring cadence: Quarterly (results-driven).</p>
+<table><thead><tr><th>Trigger</th><th>Action</th></tr></thead><tbody><tr><td>Q1 2026 DC organic growth &gt;25% + margin &gt;12%</td><td>Upgrade to DD P1 candidate; initiate §8 workplan</td></tr><tr><td>Q1 2026 Fibre EBITA margin &gt;6.5% clean</td><td>ICD-2 moved to Green; upgrades P4 partially</td></tr><tr><td>Corning announces European passive infra acquisition or downstream move</td><td>Escalate ICD-5 to Red; reassess full IC</td></tr><tr><td>BEAD material delay/cancellation announced</td><td>ICD-4 escalated; North America revenue bridge revised</td></tr><tr><td>Fröberg departure</td><td>Full case review triggered immediately</td></tr><tr><td>Stock re-rates below SEK 24 (P4 risk priced in)</td><td>Valuation entry point; may accelerate DD P1 trigger</td></tr></tbody></table>
+<h2 class="sec" id="10-process-note" data-spy>§10 — PROCESS NOTE<span class="rating C">C</span></h2>
+<div class="memo-note">Data currency: All financial data current to April 2026. Q1 2026 results (expected May 2026) are the single most important near-term data point and will update ICD-1 and ICD-2 decisively. This memo should be refreshed immediately post Q1 2026 publication.</div>
+<div class="memo-note">Prior A&amp;J work: All prior APM/IA A&amp;J drafts have been deliberately excluded. This memo is written fresh from the primary evidence base (BD [C], CF [C], AS Q8–Q13 raw extracts, KD Assessment [C] Q14). The Six Pillars ESA ratings from the prior APM interlude (stored in the ESA status file) are referenced for context only — the IA ratings in §6 above represent an independent re-assessment.</div>
+<p><strong>[W] — Watson (Claude Sonnet 4.6), Investment Analyst role, 14-May-26. Source base: HTRO ESA research April 2026. Fresh A&amp;J — no prior drafts incorporated.</strong></p>
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited near-verbatim from the old file, EXTENDED per D-MV-02:
+   - the scroll-spy gatherAnchors() now queries document-flow headings
+     ([data-spy][id]) instead of the old file's table-row selectors
+   - everything else (click-to-scroll, auto-expand, 5 toggle handlers,
+     sticky-stack CSS var) is the old logic, unchanged.
+   ============================================================================ */
+(function() {
+
+  /* sticky stack height = .main-header — subtract from scroll target so a
+     clicked heading lands JUST BELOW the sticky header, not behind it */
+  function getStickyStackHeight() {
+    var mh = document.querySelector('.main-header');
+    return mh ? mh.getBoundingClientRect().height : 0;
+  }
+
+  /* expose .main-header height to CSS so scroll-margin-top + sticky compose */
+  function setMainHeaderCssVar() {
+    var mh = document.querySelector('.main-header');
+    if (!mh) return;
+    document.documentElement.style.setProperty(
+      '--main-header-h', Math.ceil(mh.getBoundingClientRect().height) + 'px');
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle', 'show-pills');
+    bindToggle('element-details-toggle', 'element-details');
+    bindToggle('ras-on-toggle', 'ras-always-on');
+    bindToggle('cqs-on-toggle', 'cqs-always-on');
+    bindToggle('audit-toggle', 'show-audit');
+  }
+
+  /* Element-details mode — reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) { n.classList.remove('force-show'); });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element')) elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector('.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) { ra.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) { cl.classList.add('force-show'); });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) { cq.classList.add('force-show'); });
+    }
+  }
+
+  /* --- click-to-scroll — inherited; clicking an RA also toggles its CQ list */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra')) item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var rect = target.getBoundingClientRect();
+        var containerRect = mainPane.getBoundingClientRect();
+        var offset = rect.top - containerRect.top + mainPane.scrollTop
+                     - getStickyStackHeight() - 8;
+        // CSS scroll-behavior:smooth on .main-pane animates this; the JS
+        // scrollTo {behavior:'smooth'} option is unreliable on overflow containers
+        mainPane.scrollTop = offset;
+      });
+    });
+  }
+
+  /* --- scroll-spy — inherited logic, EXTENDED to query document-flow headings
+     The old file queried table rows (tr.pillar-banner[id] etc). The new body
+     is document-flow, so every spy-tracked heading carries [data-spy][id]. */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect = mainPane.getBoundingClientRect();
+      var triggerY = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY) picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused'); });
+      var navItem = document.querySelector('.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand the focused branch — inherited behaviour */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded'); });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded'); });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list')) raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list')) parent.classList.add('expanded');
+        navItem.classList.add('expanded');
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else if (navItem.classList.contains('nav-cq')) {
+        var cqList = navItem.parentElement;
+        if (cqList && cqList.classList.contains('nav-cq-list')) {
+          var prevRa = cqList.previousElementSibling;
+          if (prevRa && prevRa.classList.contains('nav-ra')) {
+            prevRa.classList.add('expanded');
+            var raListAnc = prevRa.parentElement;
+            if (raListAnc && raListAnc.classList.contains('nav-ra-list'))
+              raListAnc.classList.add('expanded');
+          }
+        }
+        navItem.scrollIntoView({ block: 'nearest' });
+      } else {
+        navItem.scrollIntoView({ block: 'nearest' });
+      }
+
+      if (document.body.classList.contains('element-details')) applyElementDetails();
+    }
+
+    var rafQueued = false;
+    mainPane.addEventListener('scroll', function() {
+      if (rafQueued) return;
+      rafQueued = true;
+      requestAnimationFrame(function() { rafQueued = false; updateFocus(); });
+    }, { passive: true });
+    setTimeout(updateFocus, 100);
+  }
+
+  function init() {
+    setMainHeaderCssVar();
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    window.addEventListener('resize', setMainHeaderCssVar);
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body></html>

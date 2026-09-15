@@ -1,0 +1,1248 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRDA-GB | Analysis &amp; Judgement Memo — Triaging — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:19px; font-weight:700; margin-top:2px; line-height:1.1; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-financials">Section A — Financials<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-investment-case-executive-summary">Section B — Investment Case: Executive Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-investment-case-attributes">Section C — Investment Case Attributes<span class="nav-fc">177</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements">C.1 — Pillar I: Case Change Elements<span class="nav-fc">51</span></span>
+<span class="nav-item nav-element" data-anchor="e1-required-input-change-forces-first-pass-light-2-double-we">E1 — Required Input Change Forces <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">51</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks">C.2 — Pillar II: Case Building Blocks<span class="nav-fc">126</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-first-pass-light">Group 1 — Case Momentum<span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="e5-thematic-fit-second-pass-at-triaging-2-double-weight-6-bu">E5 — Thematic Fit <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">24</span></span>
+<span class="nav-item nav-element" data-anchor="e4-technical-momentum-carry-forward-from-generation-stage">E4 — Technical Momentum (carry forward from Generation stage)</span>
+<span class="nav-item nav-element" data-anchor="e6-sell-side-earnings-momentum">E6 — Sell-side earnings momentum</span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-first-pass-light">Group 2 — Case Simplicity<span class="nav-fc">76</span></span>
+<span class="nav-item nav-element" data-anchor="e7-required-case-simplicity-guardrails-first-pass-2-double-w">E7 — Required Case Simplicity Guardrails <span class="nav-audit"><span class="nav-audit-weight nav-audit-weight-double">×2</span></span><span class="nav-fc">50</span></span>
+<span class="nav-item nav-element" data-anchor="e8-fit-with-acceptable-case-setups-first-pass-e8-carve-out-3">E8 — Fit with Acceptable Case Setups<span class="nav-fc">26</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-rating-b-first-pass-light">Group 2 rating: B</span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-first-pass-light">Group 3 — Core Philosophy<span class="nav-fc">26</span></span>
+<span class="nav-item nav-element" data-anchor="e11-value-chain-dynamics-second-pass-at-triaging-light-floor">E11 — Value-chain dynamics<span class="nav-fc">26</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-investment-case-components-pillar-iii">Section D — Investment Case Components (Pillar III)</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions">Section E — Actions<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="e-1-recommendation">E.1 — Recommendation</span>
+<span class="nav-item nav-subsection" data-anchor="e-2-key-questions-to-investigate-at-early-stage-assessment">E.2 — Key Questions to Investigate at Early-Stage Assessment</span>
+<span class="nav-item nav-subsection" data-anchor="e-3-esa-timeline-and-next-steps">E.3 — ESA Timeline and Next Steps<span class="nav-fc">5</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">9</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-research-sources">F.1 — Research sources</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-wisdom-library-models-consulted">F.2 — Wisdom Library models consulted<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-phase-0-notes">F.3 — Phase 0 notes<span class="nav-fc">4</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-4-quality-control-audit-pointer">F.4 — Quality Control Audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">CRDA-GB | Analysis &amp; Judgement Memo — Triaging</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-metadata-header" data-spy>
+<div class="snap-bar"><span class="id">CRDA-GB</span> CRDA-GB | Analysis &amp; Judgement Memo — Triaging — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 12-Jun-26 20:59</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">--</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">--</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">--</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">--</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Exchange</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Currency</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Country</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Industry</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">--</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">--</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">--</span></div>
+<div class="dr"><span class="k">50-day average</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Buy rating</span><span class="v">--</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Initiated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Last updated</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Change Forces</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Business Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Leadership Foundations</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Risks</span><span class="v">--</span></div>
+<div class="dr"><span class="k">Carried from</span><span class="v">--</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-investment-case-executive-summary" data-spy><span class="id">B</span> Investment Case: Executive Summary <span class="secn">5 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<p><strong>Master Ratings — First pass (light at Triaging)</strong></p>
+<table><thead><tr><th>#</th><th>Master Rating</th><th>Grade</th><th>Rationale</th></tr></thead><tbody><tr><td>1</td><td>Technical momentum</td><td>C+</td><td>Borderline Stage 2 — 5.5/7 Minervini criteria met; SMA200 barely rising (+0.14% over 20 days); RS line not yet at 52-week highs; peer sector (Evonik, Symrise) also bottoming simultaneously — sector-cycle signal.</td></tr><tr><td>2</td><td>Sell-side earnings momentum</td><td>B</td><td>Upgrading cycle beginning: Jefferies upgraded Hold → Buy (Apr 2026); Morgan Stanley upgraded to Overweight (Mar 2026); estimate revisions stabilising after serial 2022-2024 downgrade cycle; downgrade cycle "widely considered concluded" per Redburn.</td></tr><tr><td>3</td><td>Thematic fit</td><td>B</td><td>Resilient specialty model for current market environment: Consumer Care ingredients are relatively inelastic; Life Sciences/Pharma is structural; bio-based sustainability moat aligns with EU regulatory direction. Not a pure defensive play but significantly more resilient than commodities or consumer discretionary.</td></tr><tr><td>4</td><td>Pillar I — Case change elements</td><td>B-</td><td>Genuine and substantial change forces present (destocking recovery, portfolio transformation, £100m restructuring, L&amp;R customer shift, balance sheet improvement) but financial delivery has been slow — margin improved only 20bps despite +6.6% CC revenue growth in FY2025. The long-duration driver (mRNA therapeutics) remains 3–7 years from commercial scale.</td></tr><tr><td>5</td><td>Pillar II — Case building blocks</td><td>B</td><td>Quality business with intact competitive moat: 90%+ customer retention, 1,700+ patents, bio-based differentiation, co-creation model creating genuine switching costs. Flywheel-in-waiting classification — core model is a flywheel, currently running on treadmill-mode due to utilisation dislocation. Management track record is the primary concern at this stage (first pass).</td></tr><tr><td>6</td><td>Pillar III — Investment case components</td><td>N/A</td><td>Not in scope at Triaging. First written at Early-Stage Assessment.</td></tr></tbody></table>
+<p><strong>Bottom Line Up Front</strong></p>
+<p><strong>Croda is a quality specialty ingredients business having absorbed the worst of two simultaneous shocks — a post-COVID mRNA windfall unwind and a cross-segment destocking supercycle — and is now generating real volume recovery, material corporate self-help, and technical bottoming signals alongside its peer group.</strong> The fundamental inflection is genuine but early-stage and not yet self-sustaining; the case merits progression to Early-Stage Assessment (ESA), not capital deployment.</p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>The corporate transformation is the most important change force.</strong> The June 2022 PTIC divestment (£<strong>665m</strong>, reshaping the group from <strong>40%</strong> industrial to <strong>12%</strong> industrial), the £<strong>100m</strong> cost transformation programme, the end of the heavy CapEx cycle, the new CFO appointment, and the formal "end of transition period" declaration at FY2025 results constitute the strongest cluster of internal change forces Croda has shown in at least a decade. Two of Richard's four patterns are present: massive corporate change plan and very large share price decline (-<strong>76.5%</strong> peak-to-trough). Three-pattern confluences historically produce the best outcomes; this case currently qualifies as a solid two-pattern setup.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>Consumer Care is the cleaner, faster-recovering half; Life Sciences is the more uncertain, long-duration half.</strong> FY2025 Consumer Care CC growth +<strong>8%</strong>, Q1 2026 +<strong>4%</strong> with Beauty Actives +<strong>12%</strong> and F&amp;F +<strong>10%</strong>; L&amp;R customer mix now <strong>82%</strong> of Consumer Care sales (up from <strong>73%</strong> in 2019) — a structural shift that should sustain a growth premium versus peers over-indexed to MNC FMCG. Life Sciences is two-speed: Crop Protection restocking is a one-cycle tailwind already cycling in Q1 2026 (-<strong>8%</strong> CC); Pharma/mRNA is the genuine long-duration thesis but commercial scale is 3–7 years away.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The margin recovery path is the central execution risk.</strong> FY2025 margin improved only <strong>20bps</strong> to <strong>17.4%</strong> despite +<strong>6.6%</strong> CC revenue growth — weak operating leverage at current utilisation levels (~65–<strong>70%</strong>). The 2028 &gt;<strong>20%</strong> margin target requires ~<strong>270bps</strong> improvement over three years, dependent on BOTH volume growth AND the £<strong>75m</strong> remaining transformation savings landing simultaneously. Plant utilisation recovery from ~<strong>70%</strong> to 80–<strong>85%</strong> is the single most important operational catalyst (identified consistently across Redburn, Morgan Stanley, Deutsche Bank research). H1 2026 delta margin is the next critical read-through.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>Management credibility is rebuilding but fragile.</strong> FY2025 was the first "upper end of guidance" delivery since 2022, following 3–4 material profit warnings. Deutsche Bank commends "six consecutive quarters of delivering against market expectations"; the multi-year downgrade cycle is widely considered concluded. But one Q2 2026 earnings miss would reset the credibility clock entirely. Management has deliberately switched from near-term guidance anchors to a three-year 2028 framework — a sensible move post-warnings, but investors must judge whether the analytical problem has been fixed or merely the reporting horizon changed.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>At ~19.5x FY2026E, the stock is not deep-value but not fully priced.</strong> Trading at a <strong>16%</strong> EV/EBITDA discount to the specialty ingredients peer group (Jefferies), and at a ~<strong>22%</strong> discount to its own 10-year historical P/E average of <strong>25x</strong>. The discount reflects justified execution risk on the 2028 margin path. If the transformation delivers and Life Sciences Pharma re-accelerates, the re-rating potential from <strong>19x</strong> to 23–<strong>25x</strong> is substantial (implying 20–<strong>30%</strong> multiple expansion on top of EPS growth). The risk is that Q2 2026 disappoints and the cycle re-opens.</div></div>
+<p><strong>Section B summary:</strong> Croda presents a genuine but early-stage recovery case with two of four patterns confirmed, a quality core business with intact moat, and technical bottoming corroborated by peer sector signals. The fundamental thesis is not yet self-sustaining; ESA stage will determine whether the margin delivery in H1 2026 validates the recovery or reveals a structurally lower earnings power.</p>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-investment-case-attributes" data-spy><span class="id">C</span> Investment Case Attributes <span class="secn">177 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements" data-spy><span class="id">C.1</span> Pillar I: Case Change Elements <span class="secn">51 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e1-required-input-change-forces-first-pass-light-2-double-we" data-spy><span class="id">E1</span> Required Input Change Forces <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">51 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<p><strong>Opening synthesis:</strong> Croda's change forces are real, substantial, and operating on two distinct timeframes — a near-term volume and efficiency recovery (Consumer Care destocking resolved, £<strong>100m</strong> transformation programme) and a long-duration platform bet (Life Sciences Pharma/mRNA therapeutics, Asia expansion). The external tailwinds from post-destocking recovery are now proven rather than anticipated. The internal transformation forces (portfolio composition, cost structure, capital allocation discipline) have rarely been more concentrated in Croda's history. The combined case earns a B at first pass; the caveat is that margin delivery has lagged the volume recovery materially, and the long-duration thesis has yet to generate commercial evidence.</p>
+<p><strong>RA1 — Change forces? — Summary</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Consumer Care destocking is definitively resolved.</strong> FY2025 Consumer Care CC growth +<strong>8%</strong> was broad-based across Beauty Actives, F&amp;F, Beauty Care, and Home Care; Q1 2026 continued at +<strong>4%</strong> CC with Beauty Actives +<strong>12%</strong> and F&amp;F +<strong>10%</strong>. This is not a single-quarter bounce — it is consistent with the structural normalisation of customer inventory cycles after a 12–18 month overhang. The destocking that peaked in 2023 is provably over, and replenishment demand is now the dominant volume driver.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>Crop Protection destocking has also cleared, a tailwind that ran through FY2025.</strong> Crop Protection +<strong>14%</strong> CC in FY2025 driven by large crop science customers rebuilding inventories after the extended 2023–2024 destocking period. This sub-segment was the last major drag within Life Sciences, and its resolution removes the most significant known volume headwind from the recovery trajectory.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The structural shift to Local and Regional customers in Consumer Care is a genuine medium-term growth engine.</strong> L&amp;R customers now represent <strong>82%</strong> of Consumer Care sales (up from <strong>73%</strong> in 2019) and are growing faster than MNC customers. These brands rely heavily on Croda's formulation support and regulatory expertise, creating stickier demand and higher pricing power than the MNC accounts they are displacing. Sales to L&amp;R customers grew +<strong>9%</strong> CC in FY2025 — the organic growth engine within Consumer Care is structural, not cyclical bounce.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The specialty chemicals sector peer group is also bottoming simultaneously, providing macro-level corroboration.</strong> Evonik crossed back above its 200-day exponential moving average in May 2026; Symrise bottomed in December 2025 and has been recovering since; Goldman Sachs upgraded the European chemicals sector in May 2026 citing <strong>13%</strong> average upside to 12-month targets. Croda's individual recovery is not happening in isolation — it is tracking a genuine sector-cycle inflection.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>Asia is the forward growth market and Croda is actively repositioning to capture it.</strong> Top-five Asian beauty giant customers +<strong>19%</strong> CAGR at constant currency over the past two years; new manufacturing facility under construction in Guangzhou for fragrances and actives; new low-emissions production centre operational in Dahej, India. Asia will be the dominant driver of Consumer Care growth for the next decade; Croda is investing to capture this ahead of peers.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>The non-COVID mRNA therapeutics pipeline represents a genuinely large, long-duration demand source.</strong> Avanti Polar Lipids has 60+ non-COVID mRNA programs in clinical development (oncology, rare diseases, gene therapy, influenza) across the industry. If even a fraction of these programs progress to commercial production, the Lipid Systems revenue trajectory will be materially different from the post-COVID normalisation that drove FY2022–FY2025 headwinds. The timeline is long (3–7 years to commercial scale at meaningful volumes) but the pipeline depth is a genuine asset.</div></div>
+<p><strong>CQ1 — Strong external change forces / tailwinds?</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>Global beauty ingredient demand is structurally growing, with premium actives and local/regional brand growth as the primary secular engines.</strong> The shift of consumer spending towards premium, multifunctional beauty actives (ceramides, peptides, retinoids) favours Croda's differentiated portfolio; Solus Biotech ceramides (acquired 2023) grew +<strong>36%</strong> CC in FY2025 as distribution was globalised. The premiumisation trend is independent of any single market cycle.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>Pharma excipients demand is growing structurally with the biologics and small molecule drug development pipeline.</strong> Consumer health ingredients and advanced excipients for established small-molecule drugs represent &gt;<strong>70%</strong> of Croda's Pharma revenue and are growing as the global drug development pipeline expands. Q4 2025 was Pharma's strongest quarter of the year, driven by excipient sales for small-molecule and biologics applications — the core franchise is recovering organically.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>EU sustainability regulation is a long-term structural tailwind for bio-based ingredient manufacturers.</strong> Croda provides verified Product Carbon Footprint data for 1,500+ product codes in Beauty Care and 750 in Home Care; large MNC customers (Unilever, L'Oreal) require sustainable/biodegradable ingredient profiles to satisfy EU Scope 3 emissions requirements. The regulatory direction is clear and accelerating; Croda's bio-based platform positions it as a compliance enabler, not a compliance risk.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>Goldman Sachs' sector upgrade (May 2026) assigns 13% average upside to specialty chemicals 12-month targets.</strong> While consumer ingredients sit at the softer <strong>8%</strong> sub-sector upside estimate (vs <strong>18%</strong> for diversified chemicals), this sector-level re-rating confirms that the destocking supercycle is considered resolved across the broker community. Croda has additional company-specific recovery optionality relative to peers that did not undergo the same earnings destruction.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>Input cost deflation through 2024 provided a structural tailwind to Consumer Care gross margins.</strong> Raw material cost deflation in 2024 benefited Croda directly via reduced bio-based input costs. Morgan Stanley highlights Croda's superior pricing agility versus peers (fewer restrictive long-term contracts, enabling raw material pass-through within approximately one quarter) — this is an asymmetric benefit: Croda captures deflation tailwinds faster, and can protect against inflation rises more quickly than peers.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>German fiscal stimulus (€14bn to €31bn expansion announced 2025–2026) is a secondary tailwind for industrial and agricultural segments.</strong> Symrise's Goldman Sachs Buy thesis cited German fiscal infrastructure stimulus as a demand catalyst. While this is more direct for Symrise (German HQ) than Croda, any stimulus driving European industrial and agricultural activity is incrementally positive for Croda's Life Sciences and residual Industrial Specialties sales.</div></div>
+<p><strong>CQ2 — Strong internal change forces?</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>The PTIC divestment (June 2022, £665m to Cargill) is the most transformative portfolio decision in Croda's history.</strong> Removing a <strong>40%</strong>-of-revenue industrial segment that was capital-intensive, cyclical, and margin-dilutive fundamentally reset the group's earnings quality. By FY2025, <strong>89%</strong> of sales come from consumer, pharma, and agriculture — versus <strong>73%</strong> in 2019. The portfolio is materially better positioned for sustained specialty premiums than pre-transformation.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>The £100m transformation programme is a credible structural cost reset, not tactical trimming.</strong> Supply chain optimisation (£<strong>65m</strong> target, ~£<strong>10m</strong> delivered by FY2025) and organisational simplification (£<strong>35m</strong> target, ~£<strong>15m</strong> delivered) are the two workstreams. FY2025 delivered £<strong>28m</strong> in gross benefits — slightly ahead of plan and the first year of a three-year programme. The remaining £<strong>75m</strong> is backend-loaded but the trajectory is confirmed. At full delivery, the programme adds ~<strong>170bps</strong> to group operating margin independently of any volume recovery.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>CapEx has reset from the heavy investment cycle of 2020–2025 to a run-rate ~6% of sales.</strong> FY2025 CapEx fell from £<strong>138m</strong> (FY2024) to £<strong>108m</strong>, with management targeting ~<strong>6%</strong> of sales going forward vs the elevated ~8–<strong>9%</strong> during the mRNA/Avanti build-out years. The CapEx cycle peak is behind Croda; this structurally frees FCF for deleveraging, dividends, and potential buybacks — a capital allocation positive that was not available during 2020–2024.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>The appointment of Stephen Oxley as CFO is a meaningful internal change signal.</strong> Oxley came from Johnson Matthey with a track record of executing non-core asset sales and complex cost-saving programmes (Morgan Stanley, Jul 2024). In a business where capital allocation discipline was demonstrably insufficient during 2019–2023 (over-investing in mRNA capacity at peak pandemic demand), a CFO with a proven restructuring and divestment track record is an appropriate personnel change for the recovery phase.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>The Standard Industries (5% stake) activist involvement adds optionality for portfolio further rationalisation.</strong> Rothschild &amp; Co Redburn identifies Standard Industries — a chemicals sector activist with a track record of forcing portfolio action — as a major positive catalyst. The Seed Enhancement business (part of Life Sciences Agriculture) and further rationalisation of the 11 shared manufacturing sites are the most commonly cited targets for activist-driven restructuring. Activist presence creates a strategic floor on management inaction.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>The formal declaration of the "end of the transition period" at FY2025 results was a deliberate management signal.</strong> CEO Steve Foots explicitly stated "we have come to the end of a period of significant portfolio realignment and investment over the last five years." The 2028 financial framework (3–<strong>6%</strong> organic CAGR, &gt;<strong>20%</strong> margin, &gt;<strong>12%</strong> FCF/sales, &gt;<strong>10%</strong> ROIC) published simultaneously signals that management has internal visibility on the recovery trajectory sufficient to commit to medium-term targets — a level of forward confidence not shown since pre-2022.</div></div>
+<p><strong>RA2 — Robust base? — Summary</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>The core Consumer Care franchise has demonstrated genuine durability through the destocking stress-test.</strong> Customer retention in Consumer Care remains above <strong>90%</strong> over five years despite the pricing pressure of 2023–2024; L&amp;R customers, who rely on Croda's formulation expertise and claims testing data, showed no mass defection even as Croda reduced prices in its less-differentiated Beauty Care categories. The franchise quality held where it needed to hold — in the co-creation, high-innovation-density segments.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The Life Sciences base has been structurally repositioned, though not yet restored.</strong> The rebalancing of Pharma into "Pharma Ingredients" (&gt;<strong>70%</strong> of Pharma, core excipients) and "Pharma Solutions" (&lt;<strong>30%</strong>, lipid technologies) was a deliberate strategic derisking of the segment from the COVID-era windfall dependency. The Lamar facility standby (£<strong>60.5m</strong> exceptional) is painful, but it reflects rational capital right-sizing rather than permanent loss of the lipid asset — the facility is standby, not decommissioned.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>However, the base has not fully delivered congruency with its recovery narrative yet.</strong> The key caution: FY2025 margin improved only <strong>20bps</strong> despite +<strong>6.6%</strong> CC revenue growth. If volume recovery were generating the expected operating leverage, margin should be rising faster. The lag signals either that fixed cost absorption is slower than modelled, or that pricing concessions made to stimulate volume recovery are structurally deeper than the "temporary pricing flexibility" narrative suggests.</div></div>
+<p><strong>CQ1 — Absence of external headwinds?</strong></p>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>The Crop Protection tailwind that supported FY2025 is NOT repeating in FY2026.</strong> Q1 2026 Crop Protection declined -<strong>8%</strong> CC versus a strong 2025 comparator. Management explicitly flagged this at FY2025 results: "2026 Crop Protection demand will not benefit from the inventory rebuild tailwind that aided 2025." This is a live top-line headwind for Life Sciences in FY2026 that must be offset by Pharma and Consumer Care growth.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>China structural headwinds — domestic substitution in specialty ingredients and softer consumer demand — are a medium-term earnings risk.</strong> China accounts for 15–<strong>20%</strong> of group revenues. Domestic Chinese specialty chemical producers are increasingly capable of substituting imported ingredients in commodity-adjacent segments. Croda has responded by localising manufacturing (Guangzhou facility), but the structural substitution risk in less-differentiated product lines is genuine and not quickly reversible.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>Asian low-cost competition in Consumer Care, particularly in Beauty Care's less-differentiated segments, is a structural pricing headwind.</strong> FY2025 price/mix for Consumer Care was negative (-<strong>1.1%</strong>) as Croda selectively reduced prices in the least-differentiated <strong>20%</strong> of the Beauty Care portfolio to reclaim volume share. The expert call from a former Ashland VP explicitly identified cheap Chinese exports and widespread manufacturing overcapacity as a major sector pressure. This is not a cycle; it is a permanent competitive shift in the lower-margin segment of Consumer Care.</div></div>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>The mRNA large-batch commercial thesis has been explicitly downgraded in timeline.</strong> CEO Foots stated at FY2025 results that "projects requiring production at significant scale are expected to take longer to materialise." The £<strong>60.5m</strong> Lamar facility impairment validates what critics argued: Croda over-invested in mRNA capacity during the pandemic preparedness boom. The option value remains (60+ pipeline programs) but the near-term cash flow contribution is minimal.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>US regulatory environment uncertainty is creating near-term headwinds for Pharma Solutions.</strong> Vaccine adjuvant sales were held back in 2025 by FDA/BARDA uncertainty post-COVID. Morgan Stanley models a sluggish Pharma recovery due to shifting FDA approval timelines. This is a risk that is difficult to size and not within management's control.</div></div>
+<div class="finding"><span class="fnum">27.</span><div class="ftext"><strong>GBP strength is a structural headwind for a UK-listed exporter.</strong> As a London-listed specialty chemicals exporter, CRDA carries currency translation risk. GBP appreciation versus EUR and USD reduces reported revenues and profits for overseas operations. FY2026 guidance initially included an £<strong>8m</strong> FX headwind (revised to £<strong>4m</strong> at Q1 2026 update) — manageable but a reminder of the structural currency exposure.</div></div>
+<p><strong>CQ2 — Well-invested base?</strong></p>
+<div class="finding"><span class="fnum">28.</span><div class="ftext"><strong>The shared manufacturing site network (11 sites globally) is a genuine competitive moat and the key operating leverage mechanism.</strong> These sites process bio-based raw materials via proprietary downstream processes (derivatisation, refinement, purification) that require significant capital and expertise to replicate. The moat is the site network + the process IP embedded within it. Competitors cannot quickly build equivalent capabilities; this is the defensive foundation of the recovery thesis.</div></div>
+<div class="finding"><span class="fnum">29.</span><div class="ftext"><strong>The Avanti Polar Lipids acquisition (2020, $185m + $75m earnout) delivered the LNP/mRNA platform even if the commercial ramp has been delayed.</strong> Avanti's lipid nanoparticle (LNP) library and formulation expertise are genuine scientific assets. The 60+ non-COVID mRNA programs in active clinical development across the industry are using Avanti-derived lipid systems. The investment was not wasted — the commercial timing has disappointed, but the strategic positioning (Croda as the leading LNP supplier to the emerging mRNA therapeutics industry) is intact.</div></div>
+<div class="finding"><span class="fnum">30.</span><div class="ftext"><strong>CapEx per manufacturing unit during 2020–2025 was high by historical standards, reflecting genuine platform investment rather than maintenance.</strong> The elevated CapEx cycle of 2020–2025 (£<strong>135</strong>–140m pa at peak) included the Avanti buildout, the Lamar US lipid facility, the Atlas Point productivity programme, and the Guangzhou/Dahej Asia expansion. Some of this investment will not yield full returns in the 2028 framework period (mRNA capacity), but the Asia and core Consumer Care investments are beginning to generate returns.</div></div>
+<div class="finding"><span class="fnum">31.</span><div class="ftext"><strong>The India (Dahej) manufacturing facility is now operational and delivers a lower cost-per-unit than legacy European plants.</strong> This is a structural cost advantage that feeds into the transformation programme's supply chain optimisation workstream — lower-cost production in Asia-facing markets improves group margins independent of volume recovery.</div></div>
+<div class="finding"><span class="fnum">32.</span><div class="ftext"><strong>R&amp;D investment has been sustained throughout the destocking period.</strong> 1,700+ patents reflect ongoing investment in proprietary ingredient innovation. The co-creation model with L&amp;R customers — where Croda helps customers develop new formulations from scratch — requires continuous R&amp;D investment to maintain the innovation premium. This investment was not cut during the downturn, protecting the pipeline for the recovery period.</div></div>
+<div class="finding"><span class="fnum">33.</span><div class="ftext"><strong>However, the management team's track record on capital allocation discipline during 2019–2023 is a clear mark against the "well-invested base" thesis.</strong> The Avanti acquisition at peak mRNA demand valuation (2020), the Lamar capacity build-out, and the acquisition of Iberchem/Parfex at high multiples during the pandemic period collectively represent capital allocated at cycle peaks. This pattern — buying at peaks and then dealing with impairments — is the primary reason management credibility is rebuilding rather than established.</div></div>
+<p><strong>CQ3 — Past/present fundamental delivery congruency with thesis?</strong></p>
+<div class="finding"><span class="fnum">34.</span><div class="ftext"><strong>FY2025 delivery was the first evidence of congruency between the recovery narrative and the financial results since 2022.</strong> Adjusted operating profit £<strong>295m</strong> (+<strong>5.6%</strong> YoY, small beat vs £<strong>292m</strong> consensus); volume growth +<strong>9.6%</strong>; management formally declared the "transition period" ended. This is the first meaningful data point supporting the recovery thesis in three years of false starts.</div></div>
+<div class="finding"><span class="fnum">35.</span><div class="ftext"><strong>But the congruency is thin and one-sided: volume is recovering; margin is not.</strong> The central thesis of the recovery — that volume growth drives fixed-cost leverage and margin expansion — has not yet been demonstrated. FY2025 margin improved only <strong>20bps</strong> despite strong volume recovery. If the leverage mechanism were working, FY2025 margin should have been 18.5–<strong>19.0%</strong>, not <strong>17.4%</strong>. This is the most material disconnect between the thesis and the delivered numbers.</div></div>
+<div class="finding"><span class="fnum">36.</span><div class="ftext"><strong>The serial profit warning cycle (2022–2024) means congruency must be demonstrated over 4–6 consecutive results cycles before the market will price it in.</strong> Givaudan set the benchmark: five consecutive years of meeting its 2021–2025 targets before the market consistently re-rated to premium multiples. Croda has one quarter of clean delivery (FY2025) and one neutral quarter (Q1 2026 at +<strong>1%</strong> CC, in line with guidance). The sample size is insufficient to declare congruency established.</div></div>
+<div class="finding"><span class="fnum">37.</span><div class="ftext"><strong>The Q1 2026 Life Sciences miss vs. consensus (+3.3% expected, -3.0% CC delivered) is a mild negative congruency signal.</strong> Life Sciences in Q1 2026 disappointed consensus expectations — not dramatically, but directionally negative. This was anticipated at the aggregate level (Crop Protection cycling) but the magnitude of the shortfall (-<strong>8%</strong> CC in Crop) surprised some sell-side analysts. The Life Sciences recovery trajectory remains the least reliable part of the thesis.</div></div>
+<div class="finding"><span class="fnum">38.</span><div class="ftext"><strong>CEO Steve Foots' tenure (14 years since 2012) creates strategic continuity but also accountability for the 2019–2022 peak-investment decisions.</strong> The Avanti mRNA bet was his thesis; the Lamar facility was his investment. Continuity is a double-edged sword: the same CEO who made the over-investment decisions is now executing the recovery. The question for ESA is whether the self-correction capability (£<strong>100m</strong> programme, CapEx reduction, Lamar standby decision) demonstrates enough "animal" instinct to re-rate management quality.</div></div>
+<div class="finding"><span class="fnum">39.</span><div class="ftext"><strong>Redburn Chubarov's note that the multi-year downgrade cycle is "widely considered concluded" is the best available proxy for forward congruency.</strong> When the sell-side consensus shifts from "chasing estimates lower" to "stabilised with upside risk", that is the inflection signal for earnings revision momentum. We are now at that inflection — Morgan Stanley's April 2026 note showed only -<strong>0.20%</strong> adjustments to outer-year EPS estimates, a de-escalation from serial downgrades.</div></div>
+<p><strong>CQ4 — Large change-from-current / mispricing?</strong></p>
+<div class="finding"><span class="fnum">40.</span><div class="ftext"><strong>The share price represents a -71% drawdown from the December 2021 peak at current levels — a historically large dislocation that warrants analysis as potential mispricing.</strong> Even after a <strong>22.7%</strong> recovery from the September 2025 trough, CRDA-GB sits at 2,991p versus a peak of 10,397p. The peak was inflated by COVID-era mRNA windfall revenues (~£<strong>120m</strong> annualised, structurally removed); stripping this out, the intrinsic normalised earnings power is substantially lower than the 2022 peak implied — but the question is whether the current price is appropriately discounting the POST-transformation, POST-normalised earnings trajectory.</div></div>
+<div class="finding"><span class="fnum">41.</span><div class="ftext"><strong>At ~19.5x FY2026E, the stock is not screaming cheap — the change-from-current mispricing argument rests on whether the market is underpricing the transformation's full benefit.</strong> Jefferies frames the mispricing as: Croda trades at a <strong>16%</strong> EV/EBITDA discount to specialty ingredients peers despite having superior medium-term organic growth prospects. If the 2028 margin target (&gt;<strong>20%</strong>) is achievable, the implied normalised earnings power (EPS ~200p by FY2028) at the historical <strong>25x</strong> multiple equates to 5,000p — <strong>67%</strong> above current price. That is substantial upside if the thesis is right.</div></div>
+<div class="finding"><span class="fnum">42.</span><div class="ftext"><strong>Rothschild &amp; Co Redburn notes the stock trades at approximately 10x 2026E EV/EBITDA — multi-year trough levels — arguing that the market is entirely failing to discount any cyclical margin recovery.</strong> This framing argues the mispricing is in the margin assumption: the market is pricing in structural stagnation at 17–<strong>18%</strong> margins, not recovery to <strong>20%</strong>+. If even half the <strong>270bps</strong> margin gap is recoverable by 2028, the current multiple understates earnings by 15–<strong>20%</strong>.</div></div>
+<div class="finding"><span class="fnum">43.</span><div class="ftext"><strong>The mispricing argument is NOT a pure cheapness call; it requires conviction on the transformation delivery AND Life Sciences recovery.</strong> Deutsche Bank's counterargument (Hold, 3,000p target) is that <strong>19.5x</strong> FY2026E already adequately prices in the base-case transformation; the stock is "fairly valued" relative to the current portfolio quality. This is the most credible bear framing: the recovery IS priced, and any upside requires over-delivery on the 2028 targets.</div></div>
+<div class="finding"><span class="fnum">44.</span><div class="ftext"><strong>The standard activist framework (Standard Industries, 5% stake) suggests independent confirmation of mispricing.</strong> Activists buy at trough multiples when they see value-unlocking levers. Standard Industries — a chemicals sector activist with a track record in portfolio rationalisation — acquiring a <strong>5%</strong> position in late 2024/2025 is a direct signal that sophisticated, structurally-informed capital believes there is material value to unlock. Redburn's framing: the activist creates optionality for the Seed Enhancement divestiture and manufacturing site rationalisation beyond what management has committed to.</div></div>
+<div class="finding"><span class="fnum">45.</span><div class="ftext"><strong>The key mispricing test will be H1 2026 results (reporting in July/August 2026).</strong> If group operating margin in H1 2026 shows meaningful improvement versus H1 2025's ~<strong>17.2%</strong> (i.e., movement toward <strong>18.5%</strong>+) on similar volumes, the market will begin to price in the 2028 margin path. If margin is flat or declining, the <strong>19.5x</strong> multiple will compress. Morgan Stanley explicitly identified H1 2026 delta margin as the primary share price catalyst — this is the near-term empirical test of the thesis.</div></div>
+<p><strong>CQ5 — Low trading multiple?</strong></p>
+<div class="finding"><span class="fnum">46.</span><div class="ftext"><strong>At ~19.5x FY2026E P/E and ~10–11x EV/EBITDA, the stock is at the lower end of its historical range but not at absolute bottom-quartile levels.</strong> Historical P/E average is ~<strong>25x</strong>; a <strong>22%</strong> discount to historical average is meaningful. EV/EBITDA at ~<strong>10x</strong> versus specialty peer averages of ~12–<strong>13x</strong> implies a 15–<strong>20%</strong> discount. On normalised forward earnings (FY2028E ~200p), the multiple is approximately <strong>15x</strong> — genuinely below-average.</div></div>
+<div class="finding"><span class="fnum">47.</span><div class="ftext"><strong>The "bottom quartile" filter from the Four Patterns framework is not yet fully met — the stock has already bounced 22.7% from the September 2025 trough.</strong> At the trough (2,438p), the stock was trading at approximately 15–<strong>16x</strong> forward earnings — that was the bottom-quartile moment. At 2,991p, the stock has begun its recovery but is not at the maximum cheapness point. This means the "cheapness" pattern (Pattern 4 of the four patterns) is diminishing rather than maximised.</div></div>
+<div class="finding"><span class="fnum">48.</span><div class="ftext"><strong>The forward P/E of ~19.5x is above-average for specialty chemicals peers with similarly weak near-term delivery track records.</strong> IFF, which has a comparable guidance credibility crisis (new CEO, multiple warnings), trades at lower multiples. DSM-Firmenich, Evonik (lower quality, lower margins) also trade cheaper. Croda's premium versus these peers requires the recovery thesis to deliver — it is not a pure "it's cheap" argument.</div></div>
+<div class="finding"><span class="fnum">49.</span><div class="ftext"><strong>The bull case multiple re-rating scenario (19x → 23–25x) requires specific deliverables: two more years of consistent management delivery + H1 2026 margin expansion + Life Sciences Pharma showing positive trajectory.</strong> If those deliverables arrive, the combination of EPS growth (146p → ~200p by 2028) and multiple expansion (<strong>19x</strong> → <strong>23x</strong>) creates a total return of ~60–<strong>70%</strong> from current levels. That is the structural upside case.</div></div>
+<div class="finding"><span class="fnum">50.</span><div class="ftext"><strong>The valuation is set up for asymmetric returns IF the transformation delivers.</strong> Downside scenario (further disappointment, margin stagnates at 17–<strong>18%</strong>): stock re-rates to 16–<strong>17x</strong> on lower estimates — implying ~2,600–2,800p (10–<strong>15%</strong> downside from current). Upside scenario (management delivers <strong>20%</strong>+ margin by 2028): stock re-rates to 23–<strong>24x</strong> FY2028E EPS of 200p — implying ~4,600–4,800p (55–<strong>60%</strong> upside from current). The asymmetry is genuinely favourable IF execution risk is manageable.</div></div>
+<div class="finding"><span class="fnum">51.</span><div class="ftext"><strong>Compared to Givaudan (which never fell to Croda's level, now trading at 35–40x) and Symrise (28–30x), Croda's multiple represents the discount one would expect for a credibility-rebuilding business.</strong> The question is whether the discount is too large (Jefferies' view) or appropriate for the remaining execution risk (Deutsche Bank's view). This is the central valuation debate for ESA stage.</div></div>
+<p><strong>E1 Element Rating: B</strong> Change forces are genuine, multiple, and at an interesting intersection of near-term (Consumer Care recovery, cost transformation) and long-duration (Life Sciences mRNA, Asia expansion). The robust base is compromised by management's capital allocation track record and the slow operating leverage response. The mispricing argument is asymmetric but not extreme. Overall: enough change to progress; not so clear that immediate capital deployment is justified without deeper work.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks" data-spy><span class="id">C.2</span> Pillar II: Case Building Blocks <span class="secn">126 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-first-pass-light" data-spy><span class="id">Grp 1</span> Case Momentum <span class="secn">24 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e5-thematic-fit-second-pass-at-triaging-2-double-weight-6-bu" data-spy><span class="id">E5</span> Thematic Fit <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">24 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Note: Assessed on Croda's own merits as a specialty ingredients business — not through the "avoid European chemicals" macro lens, per Richard's instruction. E5 RAs are adapted to the current market environment.</div>
+<p><strong>Opening synthesis:</strong> Croda's specialty ingredients model — focused on Consumer Care (beauty, fragrance, personal care) and Life Sciences (pharma excipients, crop protection biologics) — is structurally more resilient than commodity chemical peers in the current market environment. The bio-based, sustainability-differentiated model aligns with EU regulatory direction. The business is not immune to macro disruption, but it is significantly more defensible than the "avoid European chemicals" heuristic would suggest.</p>
+<p><strong>RA1 — Suitability for a bear market / economic downturn</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Consumer Care spending on beauty and personal care is structurally more defensive than discretionary consumer categories.</strong> While lipstick economics is an imperfect proxy, spending on beauty actives, fragrances, and personal care ingredients has historically declined far less than consumer discretionary categories in downturns. Croda's L&amp;R customer base (<strong>82%</strong> of Consumer Care sales) consists of premium and functional brands whose customers are relatively income-inelastic.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>The 82% L&amp;R customer mix is a structural buffer against MNC FMCG volume destruction in a downturn.</strong> Global FMCG giants (Unilever, P&amp;G, L'Oreal) typically cut innovation budgets and simplify formulations during downturns — reducing specialty ingredient demand. But L&amp;R customers — the faster-growing tier in beauty — have less scope to reduce formulation complexity without losing their market positioning. Croda's heavy L&amp;R mix means its customer base is more resilient to FMCG austerity than peers.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>Life Sciences Pharma is the most defensive element of the portfolio.</strong> Consumer health ingredients and excipients for established small-molecule drugs are demand-inelastic — people do not stop taking their medications in a recession. The ~<strong>70%</strong> of Pharma revenue that is Pharma Ingredients (excipients for established drugs) is as defensive as specialty chemicals gets.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>Crop Protection is the most cyclical element and a bear-market risk.</strong> Crop Protection volumes are sensitive to farmer income (agricultural commodities prices), credit availability, and inventory cycles — all of which deteriorate in bear markets. The FY2025 +<strong>14%</strong> Crop Protection surge was a one-time restocking event; Q1 2026 -<strong>8%</strong> CC confirms the re-normalisation. In a broad economic downturn, Crop Protection would be the highest-risk segment.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>The bio-based and sustainability positioning may provide pricing power resilience in a downturn.</strong> Regulatory requirements (EU Green Deal, Scope 3 disclosure requirements) mean large brand customers cannot easily substitute away from bio-based ingredients even if conventional alternatives are cheaper during a downturn. The regulatory anchor creates a pricing floor in the premium segment.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>The balance sheet at 1.3x EBITDA provides meaningful resilience headroom.</strong> Net debt £<strong>524m</strong> at <strong>1.3x</strong> EBITDA — well within the 1–<strong>2x</strong> target range. In a bear market, highly leveraged specialty chemical companies face covenant pressure, forced asset sales, and equity dilution risk. Croda's leverage position has been rebuilt to a level that eliminates this as a near-term concern, even under a mild earnings contraction scenario.</div></div>
+<p><strong>RA2 — Suitability for AI disruption</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>Core Consumer Care formulation expertise is structurally resistant to AI disruption in the near-to-medium term.</strong> Croda's value proposition rests on co-creation with customers — the development of bespoke formulations, claims testing data, regulatory support, and deep ingredient knowledge. These services are relationship- and expertise-intensive; AI can augment but not substitute the integrated customer support model in the near term.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>AI is likely to be a net positive for Life Sciences Pharma demand over the medium term.</strong> AI-accelerated drug discovery is increasing the volume of drug development programs entering clinical trials; more clinical programs mean more demand for Croda's pharma excipients and drug delivery systems. The Avanti Polar Lipids LNP platform serves mRNA therapeutics programs that are multiplying partly because AI is accelerating therapeutic target identification.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>There is a genuine medium-term disruption risk from biotech startups bypassing traditional ingredient suppliers.</strong> An expert call (Associate Director of Sales at Arxada, Sep 2025) noted that well-funded biotech startups are increasingly partnering directly with multinational healthcare and consumer brands, bypassing traditional ingredient intermediaries. This disintermediation threat is real but affects the lower-value segments more than Croda's high-IP, co-creation-dependent formulations.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>AI in beauty formulation (generative formula development tools) could reduce the pace of new ingredient adoption in commodity Beauty Care.</strong> If AI tools enable brand formulators to develop new products using existing, known-safe ingredient databases, demand for innovative new Croda actives in the commodity end of the Beauty Care portfolio could slow. This is a risk to the less-differentiated <strong>20%</strong> of the portfolio (the exact segment where Croda is already experiencing pricing pressure from Asian competition).</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>The sustainability data infrastructure Croda has built (Product Carbon Footprint data for 2,250+ products) is a genuine AI-era competitive asset.</strong> In an environment where large brand customers need machine-readable sustainability data to satisfy regulatory reporting and AI-driven supply chain analysis tools, Croda's PCF database is a proprietary data asset that creates switching costs. Competitors without comparable data infrastructure are at a disadvantage in winning sustainability-sensitive customers.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>The overall AI disruption risk to Croda is low-to-moderate, concentrated in the commodity segment.</strong> The differentiated, patent-protected, co-creation-intensive core of the Consumer Care and Life Sciences franchise is well-defended. The commodity/commoditising segments are AI-vulnerable but represent the exact portion of the portfolio Croda has been deliberately divesting and de-emphasising.</div></div>
+<p><strong>RA3 — Suitability for Iran oil-price-induced inflation or demand deterioration</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>Croda's ~5% direct Middle East revenue exposure is small and manageable.</strong> Management explicitly cited Middle East as approximately <strong>5%</strong> of group sales at the Q1 2026 update. Price increases from April 2026 were being implemented to recover input inflation partly attributable to the Middle East conflict. The direct revenue exposure is contained; the indirect supply chain and input cost exposure is more significant.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>Bio-based raw material inputs — largely plant-derived (palm, vegetable derivatives, animal-origin) — are less directly exposed to oil price inflation than petrochemical-dependent competitors.</strong> Croda's approximately <strong>58%</strong> bio-based raw material base means that crude oil price spikes have a muted effect on input costs relative to companies using petrochemical feedstocks. This is a genuine competitive advantage in an oil-price-inflation scenario.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>The pricing agility that Morgan Stanley identifies as a key differentiator (pass-through within ~1 quarter) limits the duration of any margin compression from input inflation spikes.</strong> In contrast to peers with multi-year supply contracts that lock in costs and prevent price recovery, Croda's predominantly shorter-term customer relationships allow for quicker repricing. This means any inflation-driven margin hit would be transient rather than structural.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>Demand deterioration from Iran-linked inflation hitting European consumer confidence would affect the less-essential segments of Consumer Care first.</strong> Premium beauty actives and personal care formulations are somewhat discretionary at the household level; a significant squeeze on European consumer real incomes could suppress volume growth in Beauty Care. L&amp;R customers, however, sell at a wide range of price points including accessible beauty — not purely premium.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>Life Sciences and Crop Protection demand would be largely insulated from Iran-related demand deterioration.</strong> Pharma demand is income-inelastic. Crop Protection demand follows agricultural cycles rather than consumer confidence. A demand deterioration driven by Iran-linked inflation would affect Consumer Care (moderate impact) more than Life Sciences (low impact).</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>The overall Iran/oil-inflation risk for Croda is low-to-moderate, concentrated in Consumer Care volumes.</strong> The combination of bio-based inputs (lower oil pass-through), pricing agility (shorter time-to-reprice), small Middle East direct exposure, and defensive Life Sciences mix means Croda is significantly more resilient to this scenario than pure consumer discretionary or petrochemical-dependent businesses.</div></div>
+<p><strong>RA4 — Paradigm fit from business perspective summary</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>Croda's strategic pivot to bio-based, sustainability-differentiated specialty ingredients is one of the best-aligned business models for the current and emerging regulatory paradigm.</strong> The EU Taxonomy, Green Deal, and Corporate Sustainability Reporting Directive are all creating structural demand for supply chain partners who can provide verifiable sustainability credentials. Croda's <strong>58%</strong>+ bio-based raw material base, 1,500+ PCF-verified products, and sustainability co-development model position it as a preferred supplier in this regulatory environment.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The Local and Regional customer model — serving fast-growing independent beauty brands that are winning market share from MNCs — aligns with the long-term consumer paradigm shift toward authentic, functional, and sustainably-sourced products.</strong> L&amp;R brands are growing faster than global FMCG because consumers in developed and emerging markets are increasingly preferring purpose-driven, locally-relevant brands. Croda's <strong>82%</strong> L&amp;R mix captures this structural market share shift.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>The specialty chemical industry's structural shift from "petrochemical-based, low-margin, commodity" toward "bio-based, high-margin, innovation-intensive" is the mega-trend Croda's transformation is tracking.</strong> Croda divested <strong>40%</strong> of its revenues (the PTIC industrial segment) specifically to move away from the commoditising petrochemical segment of the market. What remains is the higher-quality, more defensible, better-aligned portion.</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>The Avanti Polar Lipids platform positions Croda in one of the most exciting emerging technology paradigms: mRNA therapeutics and gene therapy.</strong> LNP delivery systems for mRNA drugs represent the interface between biotech innovation and pharmaceutical manufacturing scale-up; Croda holds a leading position in this space. The paradigm shift from small-molecule to mRNA and biologics-based therapeutics is real and long-dated; Croda's option on this transition is genuine even if the commercial ramp is delayed.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>The primary paradigm risk is commoditisation pressure from Asia in the less-differentiated Beauty Care segments.</strong> The expert call from a former Ashland VP identified cheap Chinese exports and manufacturing overcapacity as a major sector pressure. In a paradigm where Asian ingredient manufacturers continue to scale capabilities and close the technology gap, the pricing premium for Western bio-based specialty producers will compress over time in the commodity end.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>Overall paradigm fit: B+.</strong> Croda's strategic positioning is well-adapted to where the specialty chemicals industry is going — bio-based, sustainability-integrated, innovation-led, consumer-health-focused. The paradigm risks are real (Asian competition, commoditisation) but concentrated in the non-core segments the business is actively de-emphasising.</div></div>
+<p><strong>E5 Element Rating: B</strong> The business model is well-suited to current and emerging paradigms. Strong thematic tailwinds (sustainability regulation, L&amp;R consumer growth, mRNA therapeutics long-term, bio-based advantage). The key risks (Asian competition in commodity Beauty Care, Iran/oil modest impact) are containable and concentrated in the de-emphasised portfolio segments.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e4-technical-momentum-carry-forward-from-generation-stage" data-spy><span class="id">E4</span> Technical Momentum (carry forward from Generation stage)</div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Carry forward from Generation stage rating. Not updated at Triaging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Key monitoring signals for technical confirmation: (1) SMA200 rising consistently to +<strong>0.5%</strong>+ over 20 days; (2) RS line vs FTSE All-Share at 52-week highs; (3) failure signal: weekly close below SMA200 at 2,772p.</div>
+<p><strong>Technical grade at Generation (IG stage): B-</strong> Price 2,991p; early Stage 2 / late Stage 1; 5.5/7 Minervini criteria met; SMA200 barely rising (+<strong>0.14%</strong> over 20 days); RS vs FTSE All-Share recovering (6-month: -<strong>0.2%</strong>, 12-month: -<strong>18.75%</strong>); peer sector bottoming simultaneously (Evonik, Symrise). Detailed analysis at <code>Files/CRDA-GB/IG/03-technical-momentum/raw-C.md</code>.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e6-sell-side-earnings-momentum" data-spy><span class="id">E6</span> Sell-side earnings momentum</div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Not applicable at Triaging. First written at Early-Stage Assessment.</div>
+<p><strong>Group 1 rating: B-</strong> (first pass — light) The Group 1 case momentum picture is constructively positive but not yet confirmed: technical is borderline Stage 2 requiring validation; sell-side is upgrading (Jefferies upgraded April 2026 to Buy; Morgan Stanley upgraded to Overweight March 2026; estimate revisions stabilising); thematic fit is B (resilient, bio-based, sustainability-aligned). The case lacks the unambiguous momentum of a confirmed Stage 2 stock with RS leadership and accelerating EPS upgrades — those signals are forming but not yet firing.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-first-pass-light" data-spy><span class="id">Grp 2</span> Case Simplicity <span class="secn">76 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e7-required-case-simplicity-guardrails-first-pass-2-double-w" data-spy><span class="id">E7</span> Required Case Simplicity Guardrails <span style="font-size:10px;opacity:.75;font-weight:600">(×2)</span> <span class="secn">50 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<p><strong>Opening synthesis:</strong> The Croda recovery thesis is readable and investable in its simplicity: volume recovery drives fixed-cost leverage, which drives margin expansion from <strong>17.4%</strong> to <strong>20%</strong>+, while the £<strong>100m</strong> cost programme provides a self-help overlay. The two fulcrum drivers are clear (Consumer Care margin recovery; Life Sciences Pharma volume ramp). The perimeter has been deliberately simplified (PTIC divested). The main simplicity risk is the multi-year timeline dependency — simple in structure, but demanding in execution precision over 3+ years.</p>
+<p><strong>RA1 — Focused bet?</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>The thesis has two clear fulcrum drivers, meeting the "2 or fewer" simplicity requirement.</strong> Fulcrum driver 1: Plant utilisation recovery to 80–<strong>85%</strong> (from ~65–<strong>70%</strong> current) — this is the mechanical mechanism for margin expansion; Morgan Stanley and Redburn both identify it as the single most important operational catalyst. Fulcrum driver 2: Life Sciences Pharma re-acceleration (excipient organic growth + eventual mRNA commercial ramp) — the long-duration platform bet underpinning the 2028 ROIC recovery. Both drivers are clear, monitorable, and mechanically linked to the financial targets.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>The key drivers downstream are quantifiable and tied to publicly reported metrics.</strong> Volume growth tracks directly via quarterly CC organic growth reporting; margin tracks via half-yearly adjusted operating profit; utilisation tracks via indirect inference from margin delta and management commentary. This is a well-structured monitoring framework.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The PTIC divestment simplified the investment case significantly.</strong> Pre-2022, Croda carried an industrial segment that complicated margin attribution and diluted the specialty premium narrative. Post-divestment, the analytical focus is clean: Consumer Care + Life Sciences + residual Industrial as overhead-absorption segment. The divestment was as much a narrative clarification as a financial transaction.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The three-year 2028 framework (3–6% organic CAGR, &gt;20% margin, &gt;12% FCF/sales, &gt;10% ROIC) is readable and anchored.</strong> Management has given investors a clear multi-year contract: four metrics to judge success or failure. This is materially cleaner than the annual guidance window that produced multiple revisions in 2022–2024; investors can now set annual progress milestones without relying on quarterly guidance anchors.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>The remaining simplicity complexity is the dual-timeline structure: near-term (Consumer Care + transformation, 2025–2028) vs long-duration (Life Sciences mRNA, 2028+).</strong> These two timeframes require investors to make two separate assessments simultaneously — the near-term recovery (quantifiable via existing data) and the mRNA option (long-dated, speculative at current evidence levels). Holding both in mind without conflating them is the key analytical discipline.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>The thesis does NOT require a V-shaped recovery to be investable.</strong> The consensus is U-shaped (Redburn, Morgan Stanley) and even partial delivery on the 2028 framework would generate significant return from current levels. This makes the simplicity test easier to pass — the investor does not need to bet on a rapid or dramatic recovery, just a gradual one.</div></div>
+<p><strong>CQ1 — Two or fewer fulcrum drivers and four or fewer key drivers?</strong></p>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>Two fulcrum drivers confirmed: plant utilisation recovery + Life Sciences Pharma re-acceleration.</strong> Both are binary in their impact on the investment case — if both deliver, significant upside; if utilisation stalls, near-term investment case is impaired; if Pharma fails to re-accelerate by 2027–2028, the ROIC recovery is structurally impaired.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>Key drivers (supporting, monitoring-level) total approximately four to six.</strong> Key driver 1: Consumer Care organic volume growth (must stay positive CC); Key driver 2: group operating margin delta (H1 and H2 reporting periods); Key driver 3: Life Sciences Pharma organic growth momentum; Key driver 4: FCF/sales ratio progression toward <strong>12%</strong>; Key driver 5 (optional): activist Standard Industries catalyst on Seed Enhancement or manufacturing rationalisation.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>The driver count is at the upper end of the simplicity test (4–6 key drivers).</strong> For a first-pass Triaging assessment, 4–6 is acceptable; at ESA stage, these will need to be further rationalised into a prioritised monitoring hierarchy. The four most mechanically important: volume CC growth, group margin, Pharma organic growth, FCF/sales.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>All key drivers are publicly reported on a half-yearly or quarterly basis — high monitorability.</strong> Croda reports revenue CC growth quarterly (trading updates) and margin/FCF twice per year (interim and full-year results). The monitoring cadence is sufficient for an active investment thesis.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>The absence of a CEO-change catalyst at this stage means the corporate change driver is transformation-execution-led rather than leadership-led.</strong> Foots has been CEO since 2012 — there is no new leader change catalyst. The CFO appointment (Oxley) is the most recent leadership change and is incremental rather than transformational. This is a simplicity advantage (consistency of strategy) but also a risk (the same management team that over-invested is now executing the recovery).</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>M&amp;A risk is low at current leverage (1.3x EBITDA).</strong> Croda is unlikely to do transformative M&amp;A while still delivering on the 2028 framework; leverage discipline and the Standard Industries activist pressure both constrain large deal appetite. This removes M&amp;A execution risk from the key driver set — simplifying the thesis further.</div></div>
+<p><strong>RA2 — Narrow perimeter?</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>Three geographic exposure clusters: UK/Europe (~50%), Americas (~25%), Asia (~25%).</strong> The global footprint is broad but not excessively complex — Croda does not have meaningful presence in markets that create idiosyncratic geopolitical risk. The 11 shared manufacturing sites span the UK, continental Europe, Americas, and Asia — this is a manageable manufacturing footprint.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>Three business divisions (Consumer Care, Life Sciences, Industrial Specialties) with clear analytical boundaries.</strong> Post-PTIC divestment, the division count is lean. Industrial Specialties is a capacity-absorption mechanism rather than a strategic growth vehicle; the analytical focus is two real divisions. The segment reporting is sufficiently granular to allow clean attribution of performance to the two growth divisions.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>The 17,000+ customer count creates revenue diversification but analytical complexity.</strong> Croda's broadest moat is the customer intimacy model across ~17,000 relationships — but this also means no single customer concentration risk (top-5 beauty MNCs represent a manageable percentage) and genuinely diversified end-market exposure. The number of customers is large but the segmentation is clear (L&amp;R vs MNC, Consumer vs Life Sciences).</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>The geographic perimeter has expanded since 2020 (Avanti in the US; Iberchem in Spain/Morocco; Dahej in India; Guangzhou expansion).</strong> The acquisition trail of 2019–2022 increased the manufacturing and customer footprint meaningfully. While the PTIC divestment reduced industrial complexity, the Avanti/Iberchem additions created geographic and product complexity in specific segments. The 11 shared sites is manageable; the multiple cultural and regulatory environments within those sites is a mid-complexity perimeter.</div></div>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>The perimeter passes the Triaging simplicity test, but the "narrow perimeter" designation is qualified.</strong> This is a global specialty chemicals business with 17,000 customers, 11 manufacturing sites, and a presence in dozens of markets. It is not narrow in an absolute sense; it is narrow relative to peers of similar revenue scale (Givaudan, Symrise) and relative to pre-2022 Croda (before the PTIC divestment).</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>At ESA stage, the perimeter assessment should include a site-by-site manufacturing footprint analysis to confirm the activist's thesis that further rationalisation is available.</strong> Standard Industries' <strong>5%</strong> stake is premised on the view that the 11-site network is too large for the post-transformation Croda — implying further perimeter reduction via site consolidation or asset sales.</div></div>
+<p><strong>CQ1 — Ten or fewer geographies and/or business units?</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>Three formal business divisions (post-PTIC divestment) within two key regions (UK/Europe, Americas, Asia).</strong> The formal reporting structure is simple. Consumer Care, Life Sciences, Industrial Specialties — three divisional P&amp;Ls, manageable to analyse.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>However, the real analytical complexity is in the Life Sciences sub-segments: Pharma (Ingredients + Solutions), Crop Protection, Seed Enhancement.</strong> These three Life Sciences sub-divisions have materially different growth and risk profiles (Pharma excipients = defensive; Pharma Solutions / mRNA = long-duration high-risk; Crop = cyclical; Seed Enhancement = small, non-core). At Triaging level, this is acceptable complexity; at ESA, a sub-segment-level analysis of Life Sciences is required.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>The 11 manufacturing sites span the UK (Cowick, Hull, Leeds), continental Europe (Netherlands, Germany, France, Spain), Americas (New Jersey, Iowa, Texas), and Asia (India, Singapore, China).</strong> The site count is 11 — above the "ten or fewer" threshold but meaningfully below the 25+ site network the company operated pre-PTIC. Post-PTIC, the network is clean and focused on Consumer Care and Life Sciences production.</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>The geographic complexity is appropriate for a £1.7bn revenue specialty ingredients business targeting global customers.</strong> Givaudan and Symrise operate comparable global footprints with comparable site counts. The perimeter is not unusually complex for the sector; it is complex relative to a pure focused play, which Croda has never been and is not attempting to become.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>Geography count for analytical purposes: the UK, European, Americas, and Asia regions are the four key reporting clusters — manageable.</strong> Croda does not break out revenues below region-level in quarterly updates, but the four-region structure is standard for a global specialty chemicals business.</div></div>
+<p><strong>RA3 — Zero headwinds?</strong></p>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>The thesis is not zero-headwind; the E1 analysis identified four to six material headwinds.</strong> Crop Protection cycling (Q1 2026 -<strong>8%</strong> CC); China structural substitution risk; Asian competition in less-differentiated Beauty Care; mRNA large-batch timeline delayed; US regulatory environment for Pharma Solutions; GBP strength. These are real, documented headwinds, not speculative risks.</div></div>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>None of the headwinds are existential or binary (i.e., capable of destroying the thesis in a single quarter) at the Triaging stage.</strong> Crop Protection cycling is a known, manageable drag. China substitution and Asian competition are medium-term structural pressures but Croda is responding (localising manufacturing, investing in differentiated actives). The mRNA delay is painful but the Lamar facility is on standby, not decommissioned.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>The most dangerous headwind is not operational but reputational: a further earnings guidance miss in H2 2026.</strong> If H2 2026 margin delivery disappoints consensus — particularly if Life Sciences Pharma fails to compensate for Crop Protection decline — the credibility clock resets to zero, multiple contracts severely, and the recovery thesis is challenged. This is the single scenario that would most materially change the thesis at the next review point.</div></div>
+<div class="finding"><span class="fnum">27.</span><div class="ftext"><strong>Croda passes the "zero headwinds" test at a basic level — there are no dominant headwinds that would prevent the thesis from materialising.</strong> But it fails a stricter interpretation: the case has multiple secondary headwinds that require monitoring and create delivery risk. At ESA stage, the headwind list must be formally integrated into the Go-No-Go Checks.</div></div>
+<div class="finding"><span class="fnum">28.</span><div class="ftext"><strong>The net assessment: headwinds are manageable and partially self-inflicted (mRNA over-investment), with good corporate response underway.</strong> The PTIC divestment removed the largest structural headwind. The Lamar standby removes the largest near-term cash drain. The transformation programme addresses the cost headwind. Management is responding correctly, if belatedly.</div></div>
+<p><strong>CQ1 — Zero value-chain headwind risks to revenue?</strong></p>
+<div class="finding"><span class="fnum">29.</span><div class="ftext"><strong>Not zero — three identified value-chain headwind risks.</strong> (1) Asian specialty chemical producers closing the technology gap in lower-margin Beauty Care segments, creating pricing pressure at the commodity end. (2) Biotech startups bypassing traditional ingredient intermediaries in Life Sciences, creating potential demand leakage at the margin of the Pharma business. (3) Crop Protection end-market cyclicality — inherently linked to agricultural commodity prices and farmer credit conditions, creating periodic volume risk.</div></div>
+<div class="finding"><span class="fnum">30.</span><div class="ftext"><strong>The most material near-term value-chain headwind is the negative price/mix in Consumer Care, driven by pricing concessions to stimulate volume recovery.</strong> FY2025 price/mix was -<strong>1.1%</strong> in Consumer Care. If this pricing concession becomes structural (i.e., Croda has permanently moved to a lower price point in the less-differentiated Beauty Care segment to compete with Asian alternatives), the margin recovery path is structurally impaired relative to the 2028 framework.</div></div>
+<div class="finding"><span class="fnum">31.</span><div class="ftext"><strong>The Crop Protection value chain is inherently cyclical, not permanently headwind.</strong> Post-inventory-normalisation, Crop Protection demand should return to a structural growth trajectory (bio-based crop solutions for precision agriculture). Q1 2026's -<strong>8%</strong> CC decline is a cycle effect, not structural deterioration.</div></div>
+<div class="finding"><span class="fnum">32.</span><div class="ftext"><strong>Life Sciences Pharma's value chain is structurally sound, though execution-dependent.</strong> Drug delivery excipients for small molecules and biologics is a growing, defensible market with high switching costs (regulatory re-qualification). The threat is not from within the value chain but from below (biotech bypassing intermediaries) — a genuine but slow-moving structural risk.</div></div>
+<p><strong>RA4 — Handful of change-from-current items?</strong></p>
+<div class="finding"><span class="fnum">33.</span><div class="ftext"><strong>The change-from-current list is appropriately focused: three primary items.</strong> (1) Plant utilisation recovery to 80–<strong>85%</strong> (from ~65–<strong>70%</strong>). (2) £<strong>100m</strong> cost transformation programme delivery (£<strong>75m</strong> remaining). (3) Life Sciences Pharma organic growth re-acceleration. These three items collectively explain &gt;<strong>90%</strong> of the path from <strong>17.4%</strong> margin (FY2025) to &gt;<strong>20%</strong> margin (2028 target).</div></div>
+<div class="finding"><span class="fnum">34.</span><div class="ftext"><strong>The "handful" criterion is met — management and the sell-side are aligned on the three-to-four primary drivers of value creation.</strong> Morgan Stanley, Redburn, and Deutsche Bank all agree that plant utilisation and transformation savings are the primary margin drivers; they differ on timing and magnitude, not on the identity of the key items.</div></div>
+<div class="finding"><span class="fnum">35.</span><div class="ftext"><strong>No material new unknowns have emerged that would add significantly to the change-from-current list.</strong> Q1 2026 confirmed the guidance framework; no new profit warning; no unexpected restructuring charge. The investment thesis is stable and well-defined at this stage.</div></div>
+<div class="finding"><span class="fnum">36.</span><div class="ftext"><strong>The sub-items within the three primary drivers are manageable.</strong> Within the transformation programme: supply chain optimisation and organisational simplification are well-defined workstreams with named targets and progress metrics. Within utilisation recovery: the shared-site structure makes this measurable via inference from margin delta.</div></div>
+<div class="finding"><span class="fnum">37.</span><div class="ftext"><strong>The one complexity is the Seed Enhancement non-core asset.</strong> If Standard Industries forces a divestiture of Seed Enhancement (per Redburn's thesis), this would add cash proceeds to the balance sheet but remove a Life Sciences sub-segment. This is a positive change-from-current item but not yet confirmed — it is optionality, not plan.</div></div>
+<p><strong>CQ1 — Two or fewer change-from-current items or problems?</strong></p>
+<div class="finding"><span class="fnum">38.</span><div class="ftext"><strong>Three change-from-current items rather than two — marginally above the target.</strong> Plant utilisation, transformation savings delivery, and Life Sciences Pharma re-acceleration are three distinct, non-redundant change items. At Triaging, three is acceptable; at ESA, the analyst must assess whether these are genuinely independent items or are correlated (e.g., do utilisation recovery and transformation savings compound, or are they double-counting the same margin driver?).</div></div>
+<div class="finding"><span class="fnum">39.</span><div class="ftext"><strong>The Lamar standby was a negative change-from-current (mRNA delay) that has been acknowledged and provisioned.</strong> The £<strong>60.5m</strong> exceptional charge at FY2025 removed the uncertainty about how this would be treated; the provision is clean and the path forward (standby mode, awaiting commercial mRNA volume) is clear. This is a resolved negative change-from-current rather than an ongoing problem.</div></div>
+<div class="finding"><span class="fnum">40.</span><div class="ftext"><strong>The net change-from-current count (three positive items, one resolved negative) is manageable and investable.</strong> At ESA stage, the analyst should confirm whether the three positive items are correctly sequenced in timing (utilisation recovery should be visible first in H1 2026 margin; transformation savings should start building in H2 2026 / FY2027; Pharma re-acceleration is 2027–2028).</div></div>
+<p><strong>RA5 — Conservative investor relations?</strong></p>
+<div class="finding"><span class="fnum">41.</span><div class="ftext"><strong>The shift from annual guidance to a three-year 2028 framework is designed to be more conservative — but is also a deliberate de-risking of short-cycle IR accountability.</strong> After 3–4 profit warnings in 2022–2024, switching from annual guidance anchors to a three-year framework is rational. It reduces the risk of near-term revisions, but also reduces the precision of accountability signals.</div></div>
+<div class="finding"><span class="fnum">42.</span><div class="ftext"><strong>Management's "in line with current market expectations at constant currency" for FY2026 is functionally conservative wording.</strong> By anchoring to "in line with market" rather than providing a specific number, management is effectively validating consensus (£<strong>321m</strong> operating profit) without committing to a precise figure. This is typical post-warning IR caution.</div></div>
+<div class="finding"><span class="fnum">43.</span><div class="ftext"><strong>The one-penny dividend increase (111p vs 110p) is a deliberately conservative signal.</strong> Management could have increased the dividend more aggressively given the improving cash position; the minimal increase signals caution about getting ahead of the FCF recovery. This is the right signal for a credibility-rebuilding company but is also a tell on internal uncertainty about the pace of cash generation.</div></div>
+<div class="finding"><span class="fnum">44.</span><div class="ftext"><strong>Morgan Stanley's upgrade thesis partly rests on Croda's pricing agility providing "limited downside risk to 2026 consensus estimates" — suggesting sell-side confidence that management guidance is conservative.</strong> If the sell-side's most sophisticated bull case is predicated on the downside being limited, this implicitly signals that the 2026 guidance is either well-calibrated or marginally conservative. This is a positive IR signal.</div></div>
+<div class="finding"><span class="fnum">45.</span><div class="ftext"><strong>Deutsche Bank views the stock as "fairly valued" at 19.5x 2026E P/E — which implies they believe consensus estimates are achievable, not inflated.</strong> If the consensus bears who believe estimates are too high were more numerous, the multiple would be lower. The market is therefore implicitly treating management guidance as credible rather than optimistic.</div></div>
+<div class="finding"><span class="fnum">46.</span><div class="ftext"><strong>The Q1 2026 update ("order book slightly higher than expected") is a mild positive conservatism signal.</strong> Croda reported order book above internal expectations at the April 2026 trading update — this is consistent with guidance built on cautious assumptions. One data point, but positive.</div></div>
+<p><strong>CQ1 — Does company confirm guidance is conservative?</strong></p>
+<div class="finding"><span class="fnum">47.</span><div class="ftext"><strong>No explicit confirmation of guidance conservatism — management has shifted to a framework structure that avoids precise short-cycle commitments.</strong> The 2028 framework is a directional range (3–<strong>6%</strong> organic CAGR, &gt;<strong>20%</strong> margin) rather than a point estimate. This is structurally different from the aggressive annual guidance that produced the warning cycle, but it also means there is no specific number to hold management accountable to in the near term.</div></div>
+<div class="finding"><span class="fnum">48.</span><div class="ftext"><strong>The track record of 2022–2024 profit warnings means the market is applying a credibility discount to all guidance regardless of stated conservatism.</strong> At Givaudan or Symrise, management confirmation of conservative guidance would carry strong weight — their track records of consistent delivery justify that trust. At Croda in 2025–2026, "in line with market expectations" is the safest possible language; the market will judge by results, not by guidance characterisation.</div></div>
+<div class="finding"><span class="fnum">49.</span><div class="ftext"><strong>Morgan Stanley's view that Croda offers "limited downside risk to 2026 consensus estimates" is the strongest available proxy for guidance conservatism.</strong> The sell-side's most informed buy-side advocates are implicitly stating they believe guidance is achievable or slightly conservative. This is more meaningful than management self-characterisation.</div></div>
+<div class="finding"><span class="fnum">50.</span><div class="ftext"><strong>The key test will be Q2/H1 2026 results.</strong> If the company delivers H1 2026 operating profit materially ahead of the implied interim milestone from the full-year consensus, that will be the first empirical confirmation of conservative guidance framing. If it misses — even slightly — the credibility recovery is set back significantly.</div></div>
+<p><strong>E7 Element Rating: B-</strong> The thesis is readable and appropriately simple: two fulcrum drivers (utilisation recovery, Pharma re-acceleration) driving a specific margin target via a defined programme. The perimeter is acceptable post-PTIC. Headwinds are manageable but not zero. Guidance is cautiously framed but not explicitly conservative. The B- reflects the presence of meaningful (if manageable) headwinds and the multi-year timeline dependency that creates execution complexity not present in a simpler, shorter-duration investment case.</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="e8-fit-with-acceptable-case-setups-first-pass-e8-carve-out-3" data-spy><span class="id">E8</span> Fit with Acceptable Case Setups <span class="secn">26 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<p><strong>Opening note:</strong> At Triaging, Watson sweeps all six acceptable setups and the two negative guardrails to identify primary and secondary fit. The objective is to identify which setup(s) best characterise the Croda investment case, enabling ESA work to be focused on deepening the fit setups rather than re-sweeping all six.</p>
+<p><strong>RA1 — Mis-modelled, high-quality EPS upgrader?</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Partial fit.</strong> The market has gone through a severe downgrade cycle (2022–2024) and consensus is now rebuilding from a reset base. If the 2028 margin target delivers, FY2028E EPS (~200p at Redburn/Morgan Stanley) may prove conservative vs. what the business could earn at 22–<strong>24%</strong> margin (peak capability). There is a plausible mis-modelling story: consensus models ~17–<strong>18%</strong> near-term margins, implying structurally impaired earnings power; the bull case is that the impairment is fully cyclical, not structural.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>However, this is NOT the primary setup.</strong> A mis-modelled EPS upgrader implies the market is systematically wrong about earnings trajectory right now — and the evidence suggests the market is not dramatically wrong. Consensus reflects the recovery trajectory management has communicated; the question is whether delivery accelerates relative to the modelled pace, not whether the model is fundamentally wrong about the business.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>The "high-quality" criterion is partially met.</strong> Croda has the hallmarks of a quality business (moat, switching costs, patents, pricing power) but ROIC at <strong>8.2%</strong> (FY2025) is currently well below the <strong>15%</strong>+ quality threshold; the quality case is forward-looking (ROIC recovery to <strong>10%</strong>+ by 2028) rather than present-tense. This weakens the RA1 fit.</div></div>
+<p><strong>CQ1 (TBD — interpreted as: Is consensus mis-modelling the earnings trajectory?)</strong></p>
+<div class="finding"><span class="fnum">4.</span><div class="ftext">The consensus models a gradual U-shaped recovery (FY2026 +<strong>8%</strong> operating profit, 17–<strong>18%</strong> margin); no broker is modelling a rapid V-shaped return to <strong>24%</strong>+ margins. If the transformation programme lands ahead of schedule AND utilisation recovers faster than expected (as Q1 2026 order book commentary implied), the consensus EPS trajectory could be revised materially higher from H2 2026 onwards. The mis-modelling risk is real but timing-dependent.</div></div>
+<p><strong>RA2 — Big demand change-driven EPSU or EPT?</strong></p>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>Partial fit.</strong> Consumer Care L&amp;R customer growth is a structural demand acceleration versus the MNC-dominated peer group. Life Sciences Pharma demand for excipients and mRNA delivery systems is a structural growth market. But neither constitutes a "market-wide demand explosion" in the way that, for example, EV battery materials or GLP-1 pharmaceutical demand has exploded.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext"><strong>The demand change is recovery-of-depressed-demand, not explosion of new demand.</strong> The specialty ingredients market is growing at 3–<strong>6%</strong> structurally; Croda's immediate opportunity is to recover volume lost during the destocking crisis, not to ride a step-change in total market size. This is a recovery-from-trough demand story, not a demand explosion story.</div></div>
+<div class="finding"><span class="fnum">7.</span><div class="ftext"><strong>The mRNA therapeutics market could become a demand explosion catalyst — but not yet.</strong> If the 60+ clinical programs in Avanti's pipeline convert to commercial production over the next 5–7 years, there is a genuine demand explosion scenario. But at Triaging stage, this remains speculative and long-dated. The RA2 setup requires near-term commercial evidence of a demand explosion; that evidence does not currently exist.</div></div>
+<p><strong>CQ1: Is there a market-wide demand explosion?</strong> Not at present — specialty ingredients market is 3–<strong>6%</strong> structural growth, with Croda's upside being recovery from trough plus share gains from L&amp;R customer mix shift. No near-term explosion. <strong>CQ2: Dominant competitive position?</strong> Yes in key niches (bio-based Consumer Care, pharma excipients, LNP delivery) but not market-dominant across all segments. <strong>CQ3: One-to-many scalable business model?</strong> Partially — the co-creation model is relationship-intensive and therefore partly one-to-one; scalability is limited by the customer support requirement. Not a pure one-to-many model. <strong>CQ4: Oligopolistic market structure?</strong> Partially — the specialty ingredients market has 5–6 large players (Givaudan, Symrise, IFF, DSM-Firmenich, Croda) but is not a true oligopoly; competitive dynamics are disciplined in some segments and aggressive in others (particularly Asian-entry commoditising segments). <strong>CQ5: Fixed cost leverage for margin expansion?</strong> Yes — this is a key mechanism in the recovery thesis. At 65–<strong>70%</strong> utilisation, there is significant operating leverage available from the existing cost base as volumes recover. This is one of the most important structural characteristics of the recovery setup.</p>
+<p><strong>Overall RA2 fit: LOW-MODERATE.</strong> The demand recovery elements are present but the demand-explosion criterion is not met. This is NOT the primary setup.</p>
+<p><strong>RA3 — Strong corporate change driven EPSU/EPT?</strong></p>
+<div class="finding"><span class="fnum">8.</span><div class="ftext"><strong>Strong fit on multiple change dimensions simultaneously.</strong> Portfolio composition (PTIC divestment), strategy reset (end of transition period, 2028 framework), financial guidance upgrade (first meaningful target since 2022), CFO change (Oxley appointment), cost programme (£<strong>100m</strong> transformation), CapEx cycle end, balance sheet deleveraging — this is one of the richest corporate change programmes Croda has undertaken. Multiple of the 9 change deltas are firing simultaneously.</div></div>
+<div class="finding"><span class="fnum">9.</span><div class="ftext"><strong>The intensity of corporate change in 2022–2026 is the most concentrated period in Croda's recent history.</strong> The combination of divestiture, new CFO, transformation programme, CapEx normalisation, and dividend discipline represents a fundamental reset of how the company is managed relative to 2019–2022 peak investment cycle behaviour. This is precisely the corporate change pattern that generates EPS upgrades as cost savings and utilisation recovery combine.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext"><strong>The activist involvement (Standard Industries) amplifies the corporate change thesis.</strong> Activist presence typically accelerates the corporate change programme; if Standard Industries forces a Seed Enhancement divestiture or further manufacturing site rationalisation, additional value-unlocking steps will compound the organic transformation.</div></div>
+<p><strong>CQ1: 1Δ = Financial guidance increase?</strong> YES — 2028 framework published at FY2025 results, providing first forward-looking targets since the warning cycle. The shift from "recovery difficult to predict" (Feb 2024 language) to "framework of 3–<strong>6%</strong> CAGR, &gt;<strong>20%</strong> margin" is a material guidance upgrade signal. <strong>CQ2: 2Δ = Shareholder returns increase?</strong> PARTIAL — dividend increased 1p to 111p; management flagged improving cash generation trajectory toward the &gt;<strong>12%</strong> FCF/sales target. Formal shareholder return increase (buybacks) has not been committed, but the FCF/sales target implies it is the 2028 destination. <strong>CQ3: 3Δ = Balance sheet utilisation increase?</strong> YES — leverage reduced from ~<strong>2.5x</strong> EBITDA post-Avanti to <strong>1.3x</strong> at FY2025. Balance sheet is back inside target range; capital is being released from working capital (£<strong>50m</strong> target by 2028). Cash is being allocated productively rather than accumulated. <strong>CQ4: 4Δ = Perimeter/composition reduction?</strong> YES — PTIC divestment (June 2022) reduced industrial exposure from <strong>40%</strong> to <strong>12%</strong> of revenues. Lamar facility standby reduced the mRNA overcapacity. Seed Enhancement further reduction is an activist-driven optionality. Perimeter is directionally shrinking toward the high-value core. <strong>CQ5: 5Δ = Strategically-sensible M&amp;A step-up?</strong> LOW FIT — no confirmed M&amp;A in the current phase. The transformation period is explicitly "post-acquisition" consolidation; management is focused on extracting value from existing portfolio, not adding to it. <strong>CQ6: 6Δ = Strategy/strategic priorities change?</strong> YES — formal declaration that "transition period ended"; pivot from portfolio construction and CapEx growth to execution and margin recovery. The 2028 framework marks a strategic mode change from expansion to optimisation. <strong>CQ7: 7Δ = Standards improvement?</strong> PARTIAL — the transformation programme targets supply chain and organisational standards improvement; NPS scores in Consumer Care improved (from +31 to +42 in FY2025). Standards improvement is occurring but not yet visible in financial outputs. <strong>CQ8: 8Δ = Other leadership/actor changes?</strong> YES — new CFO Stephen Oxley (ex-Johnson Matthey), Standard Industries activist stake (<strong>5%</strong>), structural change in sell-side coverage sentiment (Jefferies and Morgan Stanley upgrading). <strong>CQ9: 9Δ = CEO change?</strong> NO — Steve Foots remains CEO since 2012. CEO continuity is a double-edged sword as noted above; no CEO change catalyst.</p>
+<p><strong>Overall RA3 fit: HIGH.</strong> Five to six of nine change deltas are firing. This is a clear strong corporate change setup. <strong>Identified as Secondary fit.</strong></p>
+<p><strong>RA4 — Change-from-current clearing in a high-quality compounder?</strong></p>
+<div class="finding"><span class="fnum">11.</span><div class="ftext"><strong>Moderate fit — the "high-quality compounder" criterion is the constraint.</strong> Croda has the hallmarks of a compounding business (IP, customer stickiness, recurring specialty revenues) but the financial outputs are currently not compounding: ROIC <strong>8.2%</strong> (FY2025), well below the <strong>15%</strong>+ threshold for a genuine compounder. The business is a compounder on its way to recovery, not a confirmed compounder under pressure.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext"><strong>The change-from-current elements are clearly present.</strong> Investment phase (CapEx elevated 2020–2025, now declining), guidance delivery uncertainty (gradually resolving), market-level demand down during destocking (now clearing). This is a classic change-from-current clearing story — all the bad news is known, partially provisioned, and the clearing signal is visible.</div></div>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>The key question for RA4 is: is the business high-quality enough on a forward basis to justify this framing?</strong> At ESA stage, E10 (Advantaged business + widening competitive advantage) will provide the rigorous answer. At Triaging, the moat indicators (<strong>90%</strong>+ customer retention, 1,700+ patents, bio-based differentiation, co-creation model) are sufficient to pass the first-pass quality bar.</div></div>
+<p><strong>CQ1: No CEO (leadership vacuum)?</strong> NO — Foots is CEO since 2012; strategy is clear (2028 framework); no leadership vacuum. <strong>CQ2: Strategy vacuum?</strong> NO — the 2028 framework is clear; strategy transition period is explicitly over. <strong>CQ3: Investment phase (near-term financials down, mid-term financials up)?</strong> YES — this is the exact description of 2020–2025 Croda: heavy CapEx (Avanti, Lamar, Atlas Point, Guangzhou) creating near-term financial drag; mid-term payoff expected from Life Sciences platform and Consumer Care Innovation pipeline. Investment phase is now winding down (CapEx declining to ~<strong>6%</strong> of sales). <strong>CQ4: Mid-term guidance (up)?</strong> YES — 2028 framework is an explicit commitment that financials improve through the period. <strong>CQ5: Company mis-execution risk?</strong> MODERATE — the Lamar standby is an example of mis-execution on the mRNA volume bet. The credibility rebuild requires consistent delivery; the risk of further mis-execution (e.g., Life Sciences Pharma fails to recover in H2 2026) is the primary uncertainty. <strong>CQ6: Market-level demand down at-the-moment?</strong> MOSTLY CLEARED — Consumer Care destocking cleared; Crop Protection restocking completed; Life Sciences Pharma recovering but Q1 2026 showed -<strong>3%</strong> CC suggesting the clearing is not complete. <strong>CQ7: Competition down (at-the-moment)?</strong> MIXED — peer sector bottoming simultaneously (Evonik, Symrise) suggests competition has reduced aggression; but Asian competition in commodity Beauty Care segments has NOT calmed and may be structurally intensifying. <strong>CQ8: Disruption threat?</strong> LOW-TO-MODERATE — biotech startup disintermediation risk is real but slow-moving; AI formulation tools are a medium-term risk in the commodity segment. <strong>CQ9: High quality business on mid-term/long-term basis?</strong> YES (with conditions) — flywheel-in-waiting classification; core moat intact; the high-quality designation holds for the co-creation/IP-intensive segments, which represent the large majority of the portfolio.</p>
+<p><strong>Overall RA4 fit: MODERATE.</strong> Strong on the change-from-current clearing elements; the "high-quality compounder" criterion is forward-looking (the quality needs to be validated at ESA stage in E10). Not identified as primary or secondary fit at this stage.</p>
+<p><strong>RA5 — Huge change-from-current clearing event in solid quality?</strong></p>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>Strong fit on the magnitude of the change-from-current.</strong> A -<strong>76.5%</strong> share price decline from peak to trough (Dec 2021 to Sep 2025) with a <strong>52%</strong> PBT decline from peak (£<strong>496m</strong> to £<strong>236m</strong> trough) is definitionally a huge change-from-current event. The scale of the dislocation is extreme, well beyond what the underlying business quality would predict for a structural (as opposed to cyclical + exogenous shock) deterioration.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>The "solid quality" criterion is met at a first-pass level.</strong> The core Consumer Care and Life Sciences franchise — customer stickiness, 1,700+ patents, bio-based differentiation, co-creation model — represents solid (not exceptional, but genuine) business quality. ROIC of <strong>8.2%</strong> understates the underlying return capacity because it includes the temporary utilisation-dislocation period; the pre-pandemic ROIC of ~<strong>14%</strong> provides the reference point for "solid quality at normalised volumes."</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>The clearing signal is emerging but not yet complete.</strong> Consumer Care destocking cleared. Crop Protection restocking completed. Life Sciences Pharma partially recovering. The mRNA overcapacity has been acknowledged and rightsized (Lamar standby). Management guidance has been reset to a credible 2028 framework. These are the classic clearing signals. The clearing is 70–<strong>75%</strong> complete at the time of writing.</div></div>
+<p><strong>CQ1: Bottom quartile trading multiple (2 years forward normalised margins)?</strong> PARTIAL — at <strong>10x</strong> EV/EBITDA (2026E) the stock is near the bottom of its historical range and at a <strong>16%</strong> discount to peers. At the Sep 2025 trough (2,438p), the multiple was unambiguously bottom-quartile. At 2,991p, it has bounced from the deepest cheapness but is still below historical average multiples. <strong>CQ2: Sell-side estimates cut deeply/fully across all analysts to conservative levels?</strong> YES — 3–4 profit warnings drove cumulative EPS estimate cuts of ~<strong>50%</strong> from 2022 peak levels. Consensus now builds in a gradual U-shaped recovery from a reset base; sell-side does not model a V-shape return to peak margins. Estimates appear appropriately conservative, not optimistic. <strong>CQ3: Company numerical guidance rebased lower?</strong> YES — multiple guidance resets (June 2023: cut to £<strong>370</strong>–400m from £<strong>496m</strong>; October 2023: cut again to £<strong>300</strong>–320m; FY2023: delivered £<strong>236m</strong>). By FY2025, management switched to a 3-year framework rather than annual guidance — the terminal form of guidance rebasing. The company has gone through the maximum credibility rebuild cycle. <strong>CQ4: Disruptive impact on day-to-day operations/revenue in last twelve months (cockroach/weirder)?</strong> YES — the 2023–2024 destocking supercycle was highly disruptive to operations: multiple site utilisation collapses, price/mix pressure, forced pricing concessions. The Lamar standby (£<strong>60.5m</strong> exceptional) is the most recent disruptive event. Cockroach risk: Q1 2026 Life Sciences -<strong>3%</strong> CC suggests the disruption clearing is not fully complete. <strong>CQ5: "You know" and "puking/sadness" check?</strong> PARTIAL — the sell-side sentiment has shifted from "sadness" to cautious recovery; institutional investor sentiment is mixed (<strong>50%</strong> OW, <strong>36%</strong> EW, <strong>14%</strong> UW per Morgan Stanley consensus data). The stage of maximum pessimism and forced selling appears to have passed (Sep 2025 trough); but the stock has not yet attracted universal enthusiasm. This is the appropriate psychological profile for an early-stage recovery setup — past peak misery, not yet at re-rating euphoria.</p>
+<p><strong>Overall RA5 fit: HIGH.</strong> Four to five of five CQs are substantially met. This is the most appropriate primary setup characterisation for Croda at this stage of its recovery. <strong>Identified as Primary fit.</strong></p>
+<p><strong>RA6 — Trough-on-trough turn in solid quality cyclical?</strong></p>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>Moderate fit but not the primary characterisation.</strong> Croda has some characteristics of a quality cyclical (materials sector, end-market demand-cycle sensitivity in Crop Protection and Consumer Care) but is fundamentally a specialty ingredients company with moats rather than a commodity cyclical. The "solid quality cyclical" label fits the Crop Protection segment but not the Consumer Care and Life Sciences Pharma segments.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>The "trough-on-trough turn" framing overlaps significantly with RA5 (huge change-from-current clearing).</strong> Both involve recovery from multi-year demand troughs. The distinction is that RA6 implies the business is primarily cyclical by nature (and the competitive moat is weaker), whereas Croda's case is that the trough was caused by exogenous shocks to an otherwise defensive specialty franchise.</div></div>
+<p><strong>CQ1: Bottom quartile trading multiple?</strong> PARTIAL (same as RA5 — near but past the trough multiple). <strong>CQ2: End market demand decreased for 18 months or more?</strong> YES — Consumer Care destocking 2023–2024 (18+ months); Crop Protection destocking 2022–2024 (24+ months); Life Sciences Pharma decline 2022–2024 (24+ months). All segments experienced extended demand weakness. <strong>CQ3: Competitive behaviour calmed versus price-down for volume gain?</strong> PARTIAL — Givaudan, Symrise, DSM-Firmenich stabilising; but Asian competitors have NOT calmed; Asian substitution pressure in Beauty Care commodity segments is ongoing. <strong>CQ4: New contract pricing levels now stable?</strong> PARTIAL — Crop Protection pricing stable post-destocking; Consumer Care showing negative price/mix as volume recovery required pricing concessions; Life Sciences excipient pricing recovering. Mixed signal. <strong>CQ5: Company has executed right-sizing programme for last 6+ months?</strong> YES — £<strong>100m</strong> transformation programme launched, Lamar facility standby, CapEx reduced to ~<strong>6%</strong> of sales. Right-sizing is underway and ahead of plan (£<strong>28m</strong> delivered vs schedule in 2025). <strong>CQ6: Competitors/substitutes retrenched and right-sized for 6+ months?</strong> PARTIAL — Givaudan, Symrise, IFF, Evonik all went through their own restructuring cycles and are now recovering. Asian competitors have NOT retrenched — this is the key departure from a classic trough setup. <strong>CQ7: Sell-side estimates cut deeply?</strong> YES (same as RA5). <strong>CQ8: Company guidance rebased lower?</strong> YES (same as RA5). <strong>CQ9: "You know" and "puking/sadness" check?</strong> PARTIAL (same as RA5).</p>
+<p><strong>Overall RA6 fit: MODERATE.</strong> Strong overlap with RA5; the RA6 framing is less precise for Croda because it is not a pure cyclical. Not identified as primary or secondary fit.</p>
+<p><strong>RA7 — Fit with unacceptable case setups? [NEGATIVE GUARDRAIL]</strong></p>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>Not a significant fit with unacceptable setups.</strong> The most common unacceptable setup patterns — permanent capital impairment risk, leverage trap, commoditisation without moat, regulatory existential threat — are not the primary risks for Croda.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The leverage position (1.3x EBITDA, inside target range) removes the financial distress unacceptable setup risk.</strong> Croda was at ~<strong>2.5x</strong> EBITDA post-Avanti acquisition; the deleveraging trajectory eliminates the covenant/distress scenario.</div></div>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>The primary "unacceptable" risk to watch is if Asian competition in Beauty Care becomes a STRUCTURAL PERMANENT moat erosion rather than a pricing pressure in the commodity segment.</strong> If over a 5–7 year period Asian specialty chemical producers close the innovation gap in premium actives (not just commodity emollients), Croda's core pricing power and premium positioning would be structurally eroded. At Triaging level, this is a watch item for ESA deep dive into E10 (Advantaged business) — not a confirmed unacceptable setup.</div></div>
+<p><strong>CQ1:</strong> No fit with unacceptable setups at the Triaging level. The balance sheet is repaired; the moat is intact in the core segments; management has responded to the strategic over-investment with clear corrective action.</p>
+<p><strong>RA8 — Fit with false friend case setups? [NEGATIVE GUARDRAIL]</strong></p>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>Moderate watch item: the "value trap" false friend pattern deserves scrutiny.</strong> The classic value trap pattern is: stock looks cheap, corporate change narrative is compelling, but the underlying competitive advantage is eroding structurally. The bear case for Croda (Deutsche Bank, certain expert calls) essentially argues a value trap: the <strong>17.4%</strong> margin is the new structural reality, not a temporary trough, because Asian competition and manufacturing overcapacity have permanently altered the pricing dynamics for specialty ingredients.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>The most important false friend test is whether the 2028 margin target (&gt;20%) is achievable or a management aspiration that the market will never price in.</strong> If by FY2028 Croda delivers ~<strong>19%</strong> margin (rather than &gt;<strong>20%</strong>), the stock will be seen as a false friend by investors who bought into the <strong>20%</strong> narrative. The difference between <strong>19%</strong> and <strong>21%</strong> margin on £<strong>1.9bn</strong> estimated revenues (2028E) is ~£<strong>38m</strong> of operating profit — roughly 6–8p of EPS. The market will punish a narrow miss on the flagship target significantly.</div></div>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>The Lamar impairment (£60.5m) and the mRNA timeline downgrade are the most visible false friend signals to date.</strong> Investors who bought the Croda mRNA thesis in 2021–2022 bought into a false friend — a thesis that turned out to be temporally correct (mRNA therapeutics is real) but commercially premature for the scale of manufacturing investment Croda made. The pattern could repeat: the core recovery thesis is correct in direction but premature in timing.</div></div>
+<p><strong>CQ1:</strong> Moderate false friend risk: the "recovery is priced in at <strong>19.5x</strong>" argument (Deutsche Bank, Jefferies' previous Hold) and the "management can't deliver on aspirational targets" pattern (Lamar mis-execution precedent) are the primary false friend scenarios to probe at ESA stage.</p>
+<p><strong>E8 Setup Identification:</strong></p>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>Primary fit: RA5 — Huge change-from-current clearing event in solid quality.</strong> The magnitude of the dislocation (<strong>76.5%</strong> share price decline, <strong>52%</strong> PBT decline from peak), the breadth of the clearing signals (destocking resolved, guidance reset, CapEx normalising, balance sheet repaired), and the quality of the underlying franchise (intact moat, customer stickiness, bio-based differentiation) all align most strongly with the RA5 characterisation. This setup has generated the best investment returns in Richard's track record when correctly identified.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>Secondary fit: RA3 — Strong corporate change driven EPSU/EPT.</strong> Five to six of nine corporate change deltas are firing (guidance upgrade, balance sheet utilisation, perimeter reduction, strategy change, CFO change, activist involvement). The corporate change story is real, broad-based, and beginning to generate financial evidence. This is a supporting setup reinforcing the RA5 primary thesis.</div></div>
+<p><strong>E8 Element Rating: B+</strong> Primary setup confirmed (RA5) with strong secondary support (RA3). The two-setup confluence is consistent with the Four Patterns model: massive corporate change (Pattern 2) + large share price decline (Pattern 4). The case is not yet a three-pattern setup (Pattern 3, demand explosion, is absent), but the two present patterns are strong and self-reinforcing. The B+ reflects the strength of fit with both setups; deducted from A- by the management credibility constraint (RA5 ideally has a "kitchen-sinked" guidance base — Croda has gone through the kitchen-sink process but the cleaning is not yet visibly complete in margin delivery).</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-rating-b-first-pass-light" data-spy><span class="id">Grp 2</span> rating: B</div>
+<p>The case is investable-simple (two fulcrum drivers, three divisions, clear 2028 framework), primary and secondary setups identified (RA5 and RA3), perimeter is acceptable post-PTIC. The B versus B+ reflects the non-zero headwind set (Crop cycling, Asian competition, mRNA delay) and the management credibility constraint on the simplicity guardrails.</p>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-first-pass-light" data-spy><span class="id">Grp 3</span> Core Philosophy <span class="secn">26 findings</span></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="e11-value-chain-dynamics-second-pass-at-triaging-light-floor" data-spy><span class="id">E11</span> Value-chain dynamics <span class="secn">26 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<p><strong>Opening synthesis:</strong> Croda's value chain is broadly supportive in its structural configuration — the company sits at a defensible intermediate position between commodity bio-based raw materials and brand-manufacturing customers, with meaningful differentiation from formulation IP and regulatory data. The competitive environment is more contested than at Croda's 2021 peak (Asian low-cost entry, sector-wide capacity rationalisation), but the structural demand drivers from Consumer Care L&amp;R growth and Life Sciences Pharma/biologics are real. Group 3 is first-pass light; E9 (operator) and E10 (competitive advantage) are not in scope at Triaging.</p>
+<p><strong>RA1 — Demand side — strong/robust or fragile/negative?</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Consumer Care demand is structurally growing, with the L&amp;R customer tier growing faster than the MNC tier.</strong> The structural shift of consumer spending toward independent, purpose-driven beauty brands is a decade-long megatrend. L&amp;R customers — now <strong>82%</strong> of Consumer Care sales — are winning market share from global FMCG at 1–2 percentage points per year. This creates a structural organic growth premium for Croda versus peers over-indexed to MNC accounts.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>Life Sciences Pharma demand is structural and long-duration.</strong> The global pharmaceutical pipeline is the largest in history; the biologics and small molecule development pipeline will continue to require specialised excipients and drug delivery systems at growing scale. Croda's Pharma Ingredients (&gt;<strong>70%</strong> of Pharma revenue) serves this structural demand with high barriers to substitution (regulatory re-qualification costs are prohibitive).</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>Industrial Specialties demand is residual and capacity-absorption driven.</strong> The segment exists to fill unutilised capacity on shared manufacturing sites; demand is determined by available capacity rather than market pull. It is not a growth driver and should not be treated as one in the thesis.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>The near-term demand picture has a Crop Protection headwind in 2026.</strong> After the FY2025 inventory-rebuild tailwind, Crop Protection is cycling higher comparators and faces normalisation through 2026. This is a mechanical headwind for Life Sciences headline growth rates in FY2026, partially offsetting the Consumer Care structural growth trajectory.</div></div>
+<p><strong>CQ1 — Customer demand:</strong></p>
+<div class="finding"><span class="fnum">5.</span><div class="ftext">Consumer Care customer demand is robust and recovering: FY2025 +<strong>8%</strong> CC, Q1 2026 +<strong>4%</strong> CC; L&amp;R customer growth +<strong>9%</strong> CC in FY2025; Beauty Actives +<strong>12%</strong> in Q1 2026; Fragrances and Flavours +<strong>10%</strong> in Q1 2026.</div></div>
+<div class="finding"><span class="fnum">6.</span><div class="ftext">Life Sciences customer demand is mixed: Pharma excipients recovering (Q4 2025 strongest quarter); Crop Protection cycling (-<strong>8%</strong> CC Q1 2026 after +<strong>14%</strong> CC FY2025); Seed Enhancement non-core.</div></div>
+<div class="finding"><span class="fnum">7.</span><div class="ftext">The distribution of customer demand is weighted toward structural growth (Consumer Care L&amp;R + Pharma excipients) with a cyclical Crop overlay — net assessment: structurally positive with a one-year cyclical headwind.</div></div>
+<div class="finding"><span class="fnum">8.</span><div class="ftext">Customer NPS in Consumer Care improved from +31 (2024) to +42 (2025) — the largest single-year improvement across all divisions — signalling strengthening customer satisfaction and formulation partnership quality at precisely the moment when the structural thesis is being rebuilt.</div></div>
+<p><strong>CQ2 — Route to market/intermediaries:</strong></p>
+<div class="finding"><span class="fnum">9.</span><div class="ftext">Croda's direct-selling model to brand manufacturers and formulators is a strategic strength — there is minimal intermediary exposure. Croda's value proposition is embedded in the customer's product development process via its direct technical sales team; this creates stickiness at the formulation/claims-data level that would not exist through a distributor model.</div></div>
+<div class="finding"><span class="fnum">10.</span><div class="ftext">The 17,000+ customer relationships managed directly represent a significant proprietary commercial infrastructure that cannot easily be replicated. Competitors entering through distributors lose the formulation intimacy advantage that Croda uses to justify its premium pricing.</div></div>
+<div class="finding"><span class="fnum">11.</span><div class="ftext">Asia expansion (Guangzhou, Dahej) is extending the direct-selling model to Asian markets where distribution-based competitors have historically had an advantage. The localised direct-sales presence is the correct strategic response to the L&amp;R customer growth opportunity in Asian beauty.</div></div>
+<div class="finding"><span class="fnum">12.</span><div class="ftext">One route-to-market risk: some of the Life Sciences Pharma business flows through pharmaceutical distributors and contract manufacturers rather than direct to drug companies. This creates a layer of intermediary dependency in Life Sciences that does not exist in Consumer Care.</div></div>
+<p><strong>RA2 — Competitive supportiveness or aggression?</strong></p>
+<div class="finding"><span class="fnum">13.</span><div class="ftext"><strong>The specialty ingredients market is moderately competitive at the premium end and increasingly aggressive at the commodity end.</strong> Givaudan, Symrise, DSM-Firmenich, and IFF are the primary peer competitors at the premium end — all are recovering from similar destocking cycles and are not, at present, aggressively pricing to gain share. Competitive behaviour in the premium specialty segment is disciplined.</div></div>
+<div class="finding"><span class="fnum">14.</span><div class="ftext"><strong>Asian competition in the lower-margin Consumer Care beauty segments is structurally aggressive.</strong> Chinese specialty chemical producers (INNOSPEC, SEPPIC analogues, domestic Chinese producers) have been closing the technology gap in emollients, some surfactants, and basic actives. The expert calls in the research data explicitly identify this as a live competitive pressure that Croda management acknowledged by reducing prices in the "least differentiated <strong>20%</strong>" of the Beauty Care portfolio.</div></div>
+<div class="finding"><span class="fnum">15.</span><div class="ftext"><strong>The five-to-six player specialty ingredients peer group (Givaudan, Symrise, DSM-Firmenich, IFF, Evonik, Croda) is recovering in unison from the destocking supercycle — coordinated recovery reduces inter-competitor pricing aggression.</strong> When all major players are simultaneously rebuilding utilisation and margins, there is reduced incentive for volume-destructive pricing wars. The current period (2025–2027) is likely to be more disciplined on pricing than 2023–2024.</div></div>
+<div class="finding"><span class="fnum">16.</span><div class="ftext"><strong>Goldman Sachs' May 2026 sector upgrade (citing 13% average upside) implies analyst consensus that competitive dynamics are improving.</strong> Rising consensus price targets across Croda, Givaudan, Symrise, Evonik all simultaneously is consistent with a view that competitive aggression is easing as utilisation recovers and the oversupply situation normalises.</div></div>
+<p><strong>CQ1 — Existing competition:</strong> Givaudan (leading quality, <strong>23%</strong> EBITDA margin, not distressed), Symrise (recovering, <strong>21.9%</strong> EBITDA), DSM-Firmenich (synergy-driven, ~<strong>19%</strong> EBITDA), IFF (credibility rebuild under new CEO) — the peer set has largely completed its recovery cycle. Croda is the laggard in the peer group; the peers are not aggressively pricing to suppress Croda's recovery because their own utilisation needs are satisfied or improving.</p>
+<p><strong>CQ2 — Adjacencies entering:</strong> No major adjacent sector players have entered the specialty ingredients market meaningfully. BASF has a minor presence in pharma excipients; some specialty biotech companies are developing functional ingredients but do not have the scale or distribution to threaten the core Croda franchise. The adjacency risk is low at present.</p>
+<p><strong>CQ3 — Vanilla new entrants:</strong> High barriers to entry (capital requirements, regulatory qualification of ingredients, long customer co-development relationships, patent portfolios) prevent pure vanilla new entry at scale. The manufacturing infrastructure required to produce bio-based specialty ingredients at Croda's quality standards takes years and hundreds of millions to build. Vanilla entry is negligible.</p>
+<p><strong>CQ4 — Orthogonal/innovative new entrants:</strong> Biotech startups bypassing traditional ingredient suppliers (per the Arxada expert call) are the primary orthogonal new entrant risk. This is real but slow-moving and concentrated at the niche/new-product margins of the market, not in Croda's established core. AI-driven formulation tools could reduce the pace of new ingredient adoption in commodity Beauty Care over the medium term.</p>
+<p><strong>CQ5 — Substitutes/alternatives:</strong> Petrochemical-based alternatives to bio-based ingredients exist and are cheaper in input cost when oil prices are low. In premium Consumer Care and Pharma, however, regulatory requirements for bio-based/natural origin, sustainability certification, and claims data create structural barriers to petrochemical substitution. In the commodity Beauty Care segment, the threat is more real — which is why Croda is reducing its exposure to that segment.</p>
+<p><strong>RA3 — Disruption forces?</strong></p>
+<div class="finding"><span class="fnum">17.</span><div class="ftext"><strong>The primary disruption risk to the Croda value chain is the disintermediation of traditional specialty ingredient suppliers by better-resourced biotech startups.</strong> Expert calls consistently surfaced the same theme: well-funded biotech startups are forming direct partnerships with major consumer and pharmaceutical brands, bypassing the traditional ingredient supplier tier. This is a slow-moving structural threat, most relevant to the Life Sciences Pharma segment at the innovation frontier.</div></div>
+<div class="finding"><span class="fnum">18.</span><div class="ftext"><strong>AI-accelerated drug development increases drug pipeline volume (positive for Pharma demand) but also accelerates formulation complexity (positive for co-creation model).</strong> The net AI disruption impact on Croda is likely slightly positive: more programs in clinical trials means more demand for excipients and delivery systems; more formulation complexity means more reliance on expert suppliers like Croda.</div></div>
+<div class="finding"><span class="fnum">19.</span><div class="ftext"><strong>Sustainability-driven disruption (regulatory mandates requiring bio-based, carbon-verified ingredients) is a tailwind for Croda rather than a threat.</strong> EU Green Deal, CSRD, and brand customer Scope 3 reporting requirements all create demand for Croda's verified bio-based ingredients and PCF data infrastructure. Regulatory disruption favours the sustainable incumbent over conventional-source competitors.</div></div>
+<div class="finding"><span class="fnum">20.</span><div class="ftext"><strong>The most plausible medium-term disruption scenario for Croda is commoditisation creep — Asian producers progressively closing the technology gap in key actives.</strong> This is not a sudden disruption but a gradual erosion over 5–10 years in the less-differentiated segments. Croda's response (focusing R&amp;D on the most innovative, highest-IP actives; exiting commodity segments) is the correct strategic posture.</div></div>
+<p><strong>CQ1 — Disruption forces to demand, competition, regulators, suppliers, political actors:</strong> The disruption landscape is mixed: regulatory disruption is a tailwind (bio-based mandate); competitive disruption from Asian players is a structural headwind in commodity segments; technological disruption from biotech is real but slow-moving; AI disruption is net neutral to slightly positive. No single disruption force is large enough at this stage to be binary for the investment thesis.</p>
+<p><strong>RA4 — Political/regulatory?</strong></p>
+<div class="finding"><span class="fnum">21.</span><div class="ftext"><strong>EU regulatory direction (Green Deal, CSRD, REACH) is structurally positive for Croda's bio-based, sustainability-differentiated model.</strong> The regulatory environment is actively creating market differentiation between conventional petrochemical ingredient suppliers and bio-based/natural-origin alternatives like Croda. This regulatory tailwind is durable and accelerating.</div></div>
+<div class="finding"><span class="fnum">22.</span><div class="ftext"><strong>US regulatory environment (FDA approval timelines, post-COVID healthcare infrastructure) is creating near-term headwinds for Life Sciences Pharma Solutions.</strong> Vaccine adjuvant sales held back by FDA uncertainty in 2025; Pharma Solutions approvals returning to slower pre-pandemic FDA timelines. Management explicitly flagged US regulatory uncertainty as a Life Sciences headwind in FY2025 commentary.</div></div>
+<div class="finding"><span class="fnum">23.</span><div class="ftext"><strong>China regulatory and political risk is a secondary consideration.</strong> The combination of domestic substitution (economic nationalism in specialty chemicals), potential trade restrictions on EU-origin ingredients, and the weaker consumer demand environment creates a political/regulatory risk in China specifically. Croda is localising manufacturing (Guangzhou) to mitigate the political exposure.</div></div>
+<p><strong>CQ1 — Regulator strengths-weaknesses-opportunities-threats:</strong> Regulator SWOT: Strength = EU sustainability mandate creates demand for bio-based credentials; Weakness = FDA approval timeline uncertainty constrains near-term Pharma Solutions revenue; Opportunity = CSRD Scope 3 reporting creates new demand for PCF-verified ingredients (2,250+ products already verified); Threat = US political environment (post-2024 election) creating FDA and BARDA uncertainty; potential rollback of sustainability incentives under different European political configurations.</p>
+<p><strong>CQ2 — Political actor strengths-weaknesses-opportunities-threats:</strong> Political SWOT: Strength = UK government supports specialty manufacturing sector; Weakness = GBP volatility creates FX risk as a UK-listed exporter; Opportunity = German fiscal stimulus (€<strong>14bn</strong> to €<strong>31bn</strong>) is a demand catalyst for European specialty chemicals broadly; Threat = trade policy uncertainty (US tariffs on EU exports); China political risk on manufacturing investments.</p>
+<p><strong>RA5 — Supportive supplier side?</strong></p>
+<div class="finding"><span class="fnum">24.</span><div class="ftext"><strong>The bio-based raw material supply chain — palm, vegetable, animal-derived raw materials — is structurally adequate and not a near-term constraint.</strong> Croda's <strong>58%</strong>+ bio-based raw material base draws on globally available bio-feedstocks with multiple supply routes. The company has historically managed input cost volatility through its pricing agility (pass-through within ~1 quarter) without structural supply shortages.</div></div>
+<div class="finding"><span class="fnum">25.</span><div class="ftext"><strong>Bio-based raw material cost deflation in 2024 was a structural tailwind.</strong> Raw material costs deflated through 2024 as agricultural commodity prices fell from post-Ukraine war peaks; Croda benefited via improved input economics alongside the volume recovery.</div></div>
+<div class="finding"><span class="fnum">26.</span><div class="ftext"><strong>The supplier side risk is sustainability-certification compliance as regulatory requirements intensify.</strong> EU Deforestation Regulation (EUDR) and other supply chain due diligence requirements create compliance complexity for bio-based ingredient sourcing, particularly palm-derived raw materials. Croda has invested significantly in supply chain transparency infrastructure; this positions the company as a compliance-capable supplier rather than a compliance risk.</div></div>
+<p><strong>CQ1 — Supplier side strengths-weaknesses-opportunities-threats:</strong> Supplier SWOT: Strength = globally diverse bio-based raw material sourcing with multiple supply routes; Weakness = palm-derived raw material exposure creates EUDR compliance complexity and occasional ESG scrutiny; Opportunity = bio-based raw material cost deflation cycle has improved margin economics; Threat = escalation of EUDR or similar regulation could increase compliance costs and limit preferred supplier access to certain raw materials; input cost inflation re-escalation (Middle East conflict, agricultural commodity disruption) could compress margins if pricing agility lags.</p>
+<p><strong>E11 Element Rating: B-</strong> The value chain is structurally supportive — demand is growing, the direct sales model creates formulation-level stickiness, the bio-based regulatory environment is a tailwind, and supplier side risks are manageable. The B- reflects the competitive environment's real pressure in commodity Beauty Care segments (Asian competition), the regulatory uncertainty in US Pharma Solutions, and the China political risk to a meaningful revenue exposure (~15–<strong>20%</strong> of sales).</p>
+<p><strong>Elements E9, E10, E12, E13</strong> — not applicable at Triaging. First written at Early-Stage Assessment.</p>
+<p><strong>Group 3 rating: B-</strong> (first pass — light) First-pass light assessment only. Consumer Care demand structure is genuinely positive (L&amp;R secular shift, bio-based regulatory tailwind); competitive environment is disciplined in premium segments but contested in commodity Beauty Care. Management quality (E9) and competitive advantage depth (E10) are reserved for ESA. E11 provides a B- quality read: structurally sound, manageable near-term competitive headwind.</p>
+<p><strong>Step 3d — Group 4 — Case Riskiness (first pass — light, group-level framing only)</strong></p>
+<p><strong>Group 4 framing (~100 words, no Element-level content at Triaging):</strong></p>
+<p>The primary risk in the Croda case is management credibility — one earnings guidance miss after FY2025's fragile recovery baseline would reset the multiple to re-rate downward, not upward. The secondary risk is the margin recovery pace: if plant utilisation recovery stalls at 72–<strong>74%</strong> rather than reaching 80–<strong>85%</strong>, the operating leverage mechanism does not fire and the 2028 framework targets become aspirational. Balance sheet risk is contained (<strong>1.3x</strong> EBITDA, inside target range). Competitive risk from Asian commodity entrants is real but confined to the less-differentiated portfolio tail. E15/E16/E17/E18/E19 are not in scope at Triaging; first rated at Deep Dive.</p>
+<p><strong>Group 4 rating: C+</strong> (first pass — light; explicit note: risk Elements E15–E19 are first rated at Deep Dive. The C+ reflects the real risks present — management credibility fragility, margin-recovery execution dependency — that prevent a higher first-pass rating despite the improving balance sheet position.)</p>
+<p><strong>Group 5 — Case Optionality:</strong> not applicable at Triaging. First written at Early-Stage Assessment.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-investment-case-components-pillar-iii" data-spy><span class="id">D</span> Investment Case Components (Pillar III)</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Pillar III content (Section D.I position-management playbook, Section D.II monitoring plan/Invalidation thresholds, Section D.III key drivers Upstream and Downstream) is not in scope at Triaging. Zero words. First appears at Early-Stage Assessment.</div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions" data-spy><span class="id">E</span> Actions <span class="secn">5 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-1-recommendation" data-spy><span class="id">E.1</span> Recommendation</div>
+<div class="desc">Overall Assessment -- The headline ESA grade, key pillar ratings driving it, and a plain-English verdict: go to Deep Dive, monitor, or close.</div>
+<p><strong>Recommendation: Progress to Early-Stage Assessment (ESA).</strong></p>
+<p>Croda International passes the Triaging stage qualitative test: <em>does the case have large amounts of positive change forces?</em> The answer is yes across multiple dimensions — post-destocking volume recovery, PTIC portfolio transformation, £<strong>100m</strong> restructuring programme, L&amp;R customer structural growth engine, bio-based regulatory tailwind, technical bottoming alongside peer sector, Standard Industries activist optionality, and Life Sciences Pharma long-duration option value. Two of the four patterns are confirmed (massive corporate change plan + very large share price decline). The flywheel-in-waiting classification holds: core moat is intact; the utilisation dislocation is cyclical not structural.</p>
+<p>The case does NOT pass the threshold for immediate capital deployment at Triaging stage. The key gaps: (1) margin recovery has not yet fired — <strong>20bps</strong> in FY2025 versus the <strong>270bps</strong> required over the 2028 framework is insufficient operating leverage evidence; (2) management credibility is rebuilding on one data point after four warnings; (3) Life Sciences Pharma re-acceleration is assertion, not evidence, at Q1 2026. These gaps are addressable at ESA stage; they are not reasons to park the case.</p>
+<p>This investment analyst's recommendation, to be reviewed by the assistant portfolio manager and by Richard at the Friday weekly review meeting, is: <strong>progress to ESA</strong>. This is not a capital deployment recommendation; it is a research progression recommendation.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-2-key-questions-to-investigate-at-early-stage-assessment" data-spy><span class="id">E.2</span> Key Questions to Investigate at Early-Stage Assessment</div>
+<div class="desc">Pre-Conditions Before Acting -- The specific gating events or conditions that must be satisfied before initiating or sizing a position.</div>
+<p>The following key questions (KQs) should drive the ESA research and analytical work. They represent the highest-value uncertainties at this stage — the answers will determine whether the thesis can progress to capital deployment or whether there is a fundamental flaw that Triaging did not surface.</p>
+<p><strong>KQ1 — Margin inflection evidence: Is H1 2026 delta margin showing meaningful improvement?</strong> H1 2026 results (due July/August 2026) are the single most important near-term data point. Morgan Stanley and Redburn both identify H1 2026 delta margin as the primary share price catalyst. The question is whether plant utilisation recovery (from ~<strong>70%</strong> to <strong>75%</strong>+) is generating the expected fixed-cost leverage — visible as margin above <strong>18%</strong> in H1 2026. If margin is still 17–<strong>17.5%</strong> on higher volumes, the operating leverage thesis is not working as modelled, and the 2028 &gt;<strong>20%</strong> target is in question.</p>
+<p><strong>KQ2 — Management credibility: Is the FY2025 delivery pattern the beginning of a multi-quarter track record, or a single-period anomaly?</strong> The credibility rebuild requires 4–6 consecutive result periods of delivery against guidance. At Triaging, we have one positive data point (FY2025 upper-end delivery) and one neutral data point (Q1 2026 in line with expectations). At ESA, the analyst should assess: is management's Q2 2026 / H1 2026 guidance language more precise than the pre-FY2025 hedged language? Are sell-side estimates being revised upward for outer years? Is the downgrade cycle truly concluded, or merely paused?</p>
+<p><strong>KQ3 — Pricing power sustainability: Is the Consumer Care negative price/mix structural or temporary?</strong> FY2025 Consumer Care price/mix was -<strong>1.1%</strong> as Croda selectively reduced prices in the lower-differentiation Beauty Care tail to reclaim volume. The crucial question for ESA: is the pricing concession reversing (transitioning back to positive price/mix as volumes recover and the company exits the less-differentiated segments) or is it structural (Asian competition having permanently set a lower price equilibrium in those segments)? If structural, the path to <strong>20%</strong>+ margin is materially impaired.</p>
+<p><strong>KQ4 — Life Sciences Pharma trajectory: Is excipient growth self-sustaining and sufficient to offset Crop Protection cycling?</strong> Q1 2026 Life Sciences -<strong>3%</strong> CC, with Crop Protection -<strong>8%</strong> CC. The question is whether Pharma excipients are growing sufficiently to offset the Crop headwind from H2 2026 onwards, per the full-year 2026 guidance maintained at the Q1 update. The 4–<strong>7%</strong> organic CAGR target for Life Sciences in the 2028 framework requires Pharma to be the primary growth engine once Crop normalises. ESA stage should access the Pharma sub-segment trajectory from broker research and management commentary.</p>
+<p><strong>KQ5 — Valuation vs. quality: At ~19.5x FY2026E P/E, is there sufficient margin of safety for the execution risk embedded in the thesis?</strong> The historical P/E of <strong>25x</strong> provides <strong>22%</strong> multiple upside if the recovery delivers; the current <strong>19.5x</strong> P/E provides a cushion against modest execution risk but not against a major disappointment. The question for ESA is: what is the right multiple for a specialty ingredients business with Croda's current ROIC (<strong>8.2%</strong>), margin (<strong>17.4%</strong>), and credibility trajectory? The <strong>10x</strong> EV/EBITDA (2026E) versus Givaudan's <strong>25x</strong> and Symrise's <strong>20x</strong> reflects the appropriate quality discount; does the discount adequately compensate for the remaining execution risk?</p>
+<p><strong>KQ6 — Competitive advantage depth: Is the core Consumer Care and Life Sciences Pharma moat widening or narrowing?</strong> At ESA, E10 (Advantaged business + competitive advantage) will receive its first full treatment. The key analytical question: is the <strong>90%</strong>+ customer retention, 1,700+ patent portfolio, and co-creation model genuinely widening (as L&amp;R customers become more dependent on Croda's innovation pipeline) or narrowing (as Asian competitors close the technology gap and as AI formulation tools reduce the uniqueness premium of Croda's formulation expertise)? This is the structural quality question that determines the appropriate long-term holding period and sizing discipline.</p>
+<p><strong>KQ7 — Activist and corporate change path: Will Standard Industries force value-unlocking portfolio action?</strong> The <strong>5%</strong> Standard Industries stake is a genuine optionality element not yet in the consensus financial models. The question for ESA: what is the most likely activist intervention (Seed Enhancement divestiture? Further manufacturing site rationalisation? CEO transition pressure?), what is the value unlocking potential, and is management receptive or resistant? Redburn's framing of this as a "highly positive catalyst" deserves rigorous assessment at ESA — if the activist succeeds in forcing a major divestiture, the FCF profile and ROIC improvement could be front-loaded relative to the 2028 framework timeline.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="e-3-esa-timeline-and-next-steps" data-spy><span class="id">E.3</span> ESA Timeline and Next Steps <span class="secn">5 findings</span></div>
+<div class="desc">Deep Dive Work Plan -- Phased research agenda: which elements require full depth, which experts to contact, and in what sequence.</div>
+<p><strong>Suggested ESA research queries (for Researcher):</strong></p>
+<div class="finding"><span class="fnum">1.</span><div class="ftext">ESA Q8: E2 Required case outputs — EPS growth trajectory and analyst model deep-dive</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext">ESA Q9: E3 TSR/valuation upside — normalised earnings power assessment at 2026/2028 assumed margins</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext">ESA Q10: E9 Management quality — Steve Foots' track record in detail; new CFO Oxley's JM track record</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext">ESA Q11: E10 Competitive advantage — specialist assessment of moat sustainability vs Asian competition; pricing power testing</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext">ESA Q12: E12 Industry structure — specialty ingredients sector concentration and competitive dynamics deep dive</div></div>
+<p><strong>ESA timeline suggestion:</strong> H1 2026 results (July/August 2026) are the critical empirical test. Ideally, ESA research is completed before H1 2026 results, enabling the analyst to assess whether the results confirm or contradict the ESA-level thesis. Target ESA completion: June/July 2026.</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">9 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-research-sources" data-spy><span class="id">F.1</span> Research sources</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Query</th><th>File</th><th>Word count</th><th>Gate status</th></tr></thead><tbody><tr><td>Q1 Business Description</td><td>Files/CRDA-GB/IG/01-business-description/merged.md</td><td>4,680w</td><td>PASS</td></tr><tr><td>Q2 Change Forces</td><td>Files/CRDA-GB/IG/02-change-forces/merged.md</td><td>5,500w+</td><td>PASS</td></tr><tr><td>Q3 Technical Momentum</td><td>Files/CRDA-GB/IG/03-technical-momentum/raw-C.md</td><td>~3,100w</td><td>Single-source (no AS counterpart at IG stage)</td></tr><tr><td>Q4 Earnings Trends vs Peers</td><td>Files/CRDA-GB/Triaging/04-earnings-trends/merged.md</td><td>~5,350w</td><td>PASS</td></tr><tr><td>Q5 Most Recent Earnings Delivery</td><td>Files/CRDA-GB/Triaging/05-earnings-delivery/merged.md</td><td>~3,900w</td><td>PASS</td></tr><tr><td>Q6 Sell-Side Commentary</td><td>Files/CRDA-GB/Triaging/06-sell-side-commentary/highlighted.md</td><td>~2,100w</td><td>AS-only (highlighted); no merged</td></tr><tr><td>Q7 KD Assessment</td><td>Files/CRDA-GB/Triaging/07-kd-assessment/merged.md</td><td>~5,450w</td><td>PASS</td></tr></tbody></table>
+<p>All seven research reports were fully read before analytical writing began. Q6 is AS-only (no Claude counterpart); Q3 is Claude-only (no AS counterpart at IG stage). All other reports are dual-source [C] + [AS] merged.</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-wisdom-library-models-consulted" data-spy><span class="id">F.2</span> Wisdom Library models consulted <span class="secn">5 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Four Patterns (Gold):</strong> Applied in E1 and Section B BLUF — two patterns confirmed (massive corporate change, large price decline); three-pattern confluence not yet met (demand explosion absent). See Section B BLUF.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>Flywheel vs Treadmill (Gold):</strong> Applied in E5 and E7 — classified Croda as "flywheel-in-waiting"; core co-creation/IP model is a flywheel structure temporarily running on treadmill mode due to utilisation dislocation. The investment thesis requires the flywheel to restart.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>Pricing Power (Gold):</strong> Applied in E1 (CQ5) and E5 (RA1) — Morgan Stanley's "pricing agility" thesis is consistent with genuine pricing power; the negative price/mix in Consumer Care is a partial contradiction that requires resolution at ESA stage.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>Mission-Critical Products (Silver):</strong> Applied in E11 and E7 — pharma excipient regulatory re-qualification costs create genuine switching cost moats in the Life Sciences segment, consistent with the mission-critical product archetype.</div></div>
+<div class="finding"><span class="fnum">5.</span><div class="ftext"><strong>Value Chain Analysis (Silver):</strong> Applied throughout E11 — the positioning analysis (between bio-based raw material suppliers and brand manufacturers) confirmed Croda's defensible intermediary position.</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-phase-0-notes" data-spy><span class="id">F.3</span> Phase 0 notes <span class="secn">4 findings</span></div>
+<div class="finding"><span class="fnum">1.</span><div class="ftext"><strong>Cohort check:</strong> No active cohort found for CRDA-GB in cohorts-v3.json at the time of writing. CRDA-GB is in the universe.json (added 16-Apr-2026; sector: Materials). No cohort comparison group to reference at this stage.</div></div>
+<div class="finding"><span class="fnum">2.</span><div class="ftext"><strong>Notion notes:</strong> Not located — Richard indicated uncertainty about existence of Notion notes; not confirmed available for Phase 0 pre-flight.</div></div>
+<div class="finding"><span class="fnum">3.</span><div class="ftext"><strong>Technical momentum report:</strong> Q3 is Claude-only (raw-C.md, no merged.md); single-source is acceptable for technical analysis which is Claude-native at IG stage. Report is complete and used at full weight in E4 and the Master Rating for Technical Momentum.</div></div>
+<div class="finding"><span class="fnum">4.</span><div class="ftext"><strong>Current price:</strong> 2,991p as of 22-May-2026 (Master Dashboard data, per Q3 research report header).</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-4-quality-control-audit-pointer" data-spy><span class="id">F.4</span> Quality Control Audit pointer</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>QC Audit (§7) is located in the self-review debrief file: Files/CRDA-GB/Triaging/self-review-debrief-triaging-2026-05-27.md. The QC Audit covers word/bullet floor compliance, communication and presentation discipline, source provenance, dual-source coverage, and analytical gate checks. Review the QC Audit before delivering this memo to Richard.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Memo compiled 2026-05-27 | Investment Analyst role (Watson) | Triaging stage | CRDA-GB</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Self-initiated research queries: nil (all required material present in existing Q1–Q7 reports)</div>
+<div class="lead"><div class="lead-label">Judgement summary</div>Next review: Friday weekly meeting — Richard to decide: Progress to ESA, or Park</div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={};</script>
+</body>
+</html>

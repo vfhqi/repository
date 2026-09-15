@@ -1,0 +1,1149 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — Hilton Food Group (HFG-GB) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-executive-summary">Section B — Executive Summary<span class="nav-fc">23</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">7</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings</span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-d">MR1 — Technical momentum<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-d">MR2 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-b">MR3 — Thematic fit<span class="nav-rating-pill B">B</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-c">MR4 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]</span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-pillar-analysis">Section C — Pillar Analysis<span class="nav-fc">67</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-c">C.1 — Pillar I: Case change elements<span class="nav-rating-pill C">C</span><span class="nav-fc">14</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-c">Element E1 — Required input change forces<span class="nav-rating-pill C">C</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e2-required-case-outputs-nr">Element E2 — Required case outputs [NR]<span class="nav-fc">2</span></span>
+<span class="nav-item nav-element" data-anchor="element-e3-sufficient-tsr-valuation-upside-nr">Element E3 — Sufficient TSR / valuation upside [NR]<span class="nav-fc">2</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">53</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-d">Group 1 — Case momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-d">Element E4 — Technical momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-b">Element E5 — Thematic fit<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-d">Element E6 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">30</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-c">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill C">C</span><span class="nav-fc">12</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-c">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill C">C</span><span class="nav-fc">18</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-d">Group 4 — Case riskiness<span class="nav-rating-pill D">D</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-c">Group 5 — Case optionality<span class="nav-rating-pill C">C</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-pillar-iii-investment-case-components">Section D — Pillar III: Investment case components</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">8</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices</span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register</span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes</span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — Hilton Food Group (HFG-GB) | TRIAGING</div>
+      <div class="meta">Deep Dive A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">HFG-GB</span> A&amp;J MEMO — Hilton Food Group (HFG-GB) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 21-Jun-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">531p (Yahoo Finance 2026-06-14; absent from prices.json)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">9.8x (FactSet current; FY26E consensus ~11x)</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">60%</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Below</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Deep Dive</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">HFG-GB (Hilton Food Group plc)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Food processing and protein packing (UK-listed, international)</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Branded protein and convenience food producers (retailer-dependent food supply chain)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">531p (Yahoo Finance 2026-06-14; absent from prices.json)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">448p–882p</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">554p (calculated from 1Y historical closes)</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Below</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">9.8x (FactSet current; FY26E consensus ~11x)</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">815p Deutsche Bank; Shore Capital no target; consensus 689p</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-executive-summary" data-spy><span class="id">B</span> Executive Summary <span class="secn">23 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Hilton Food Group is a genuine CEO-change thesis in the early execution phase. Allen is credible and decisive, the portfolio simplification actions are complete, and the valuation is historically extreme. The counter-case is an unproven organic track record, an FY26 earnings trough, three concurrent capex projects, and three non-core businesses with no confirmed resolution path. Proceed to ESA with discipline.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">7 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Leading international secondary protein packer.</strong> Hilton designs, constructs, and operates highly automated processing facilities in 19 countries (21 sites), handling 523,379 tonnes in FY25. Revenue £<strong>4</strong>,214.6m; adjusted PBT £<strong>73.2m</strong>; EBIT margin <strong>2.3%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Cost-plus open-book pricing model.</strong> Over <strong>90%</strong> of raw material costs pass directly to retail customers in real-time, deliberately capping margins at <strong>2.3%</strong> in exchange for predictable ROCE (<strong>20.1%</strong> FY25). This is a structural choice, not a cyclical trough</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Extreme customer concentration.</strong> Five principal customers generate nearly all revenue: Tesco (~85–<strong>90%</strong> of UK), Woolworths (sole APAC partner), Ahold Delhaize, Coop Danmark, ICA Gruppen. Contracts 5–15 years with physical co-location barriers to switching</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Non-core drag defines the near-term problem.</strong> SeaChill (UK seafood, marginally loss-making), Foppen (Dutch/Greek smoked salmon, £<strong>27.6m</strong> exceptional charge FY25, US FDA export ban H1 2026), Dalco (vegan, loss-making). These three sit outside the new regional COO structure under standalone leadership; medium-term targets explicitly exclude their contribution</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>CEO transition in progress.</strong> Mark Allen OBE (ex-Dairy Crest CEO 2007–2019) appointed Executive Chair November 2025 following sudden exit of Steve Murrells; confirmed permanent Group CEO March 31, 2026. Combines Chair and CEO roles (UK Governance Code Provision 9 non-compliance; temporary until NEC appointed)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>International expansion as the bull case.</strong> Walmart Canada (£<strong>80m</strong> total capex, early 2027 launch), Poland fresh prepared food (£<strong>30m</strong>, 2026–27), Saudi JV with NADEC (£<strong>6.5m</strong>, H2 2026). Total FY26 capex guided ~£<strong>100m</strong>, double the normalised core range of £<strong>45</strong>–55m</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Balance sheet comfortable despite elevated capex.</strong> Net bank debt £<strong>126.7m</strong> (<strong>0.9x</strong> EBITDA); £<strong>450m</strong> RCF refinanced February 2026. Dividend maintained at 35p (<strong>6.6%</strong> yield at 531p)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The FY26 earnings trough is real; the thesis does not require this year's numbers to be investable, only for Allen to deliver one confirmed inflection by FY27.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>FY26 is the earnings trough; current numbers should not be the basis for investment.</strong> Adjusted PBT £<strong>60</strong>–65m (-<strong>14%</strong> YoY), consensus EPS ~47–48p; both sell-side houses have cut estimates multiple times. The revision cycle is not yet at the turn</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>The CEO-change thesis is real and the early actions are encouraging.</strong> Disposals complete (£<strong>79.8m</strong> cash in FY25); One Hilton transformation launched; regional COO structure installed (Zekhout/Chambers); <strong>20%</strong> ROCE capital discipline enforced; guidance posture is honest-tracker archetype</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Structural margin ceiling is a permanent feature, not a recovery item.</strong> CWK at <strong>7.9%</strong> and GNC at <strong>6.4%</strong> reflect vertical integration and branded scale. HFG's <strong>2.3%</strong> reflects a deliberate architecture; the change thesis must be about execution quality and geographic optionality, not margin re-rating to peers</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Canada, Saudi, and Poland represent genuine 2027+ upside but execution risk is concentrated.</strong> Three parallel projects, no pre-sold volume beyond Canada (Walmart 10-year offtake). Canada already escalated from £<strong>60m</strong> to £<strong>80m</strong> capex</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>At 531p the valuation is historically extreme.</strong> PE <strong>9.8x</strong> (8th percentile 10Y history); EV/EBITDA <strong>4.4x</strong>; <strong>6.6%</strong> dividend yield. DB target 815p implies <strong>53%</strong> upside. The question is whether the downside is protected and the thesis execution is credible enough to commit ESA resources</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings</div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-d" data-spy><span class="id">MR1</span> Technical momentum <span class="g gD">D</span></div>
+<p>Price 531p is below the 200-day MA of 554p and in the lower half of the 52-week range (448p–882p); technically bearish with no near-term reversal signal visible</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-d" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gD">D</span></div>
+<p>EPS revisions deeply negative at L1M -<strong>1%</strong>, L3M -<strong>11%</strong>, L6M -<strong>24%</strong>, L12M -<strong>28%</strong>; FY26E EPS ~47–48p vs FY25 actual 56p; buy% only <strong>60%</strong>; DB TP reduced from 1,105p to 815p in 18 months</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-b" data-spy><span class="id">MR3</span> Thematic fit <span class="g gB">B</span></div>
+<p>CEO-change and portfolio-simplification thesis directly confirmed by Richard's Notion tags; the change is genuine, timely, and well-supported by evidence. Graded B not A because non-core drag and governance code violation create execution complexity and the thesis requires 18–24 months of delivery not yet evidenced</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-c" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gC">C</span></div>
+<p>Change is real and Allen is moving with velocity; portfolio simplification completed. Graded C because organic execution track record is M&amp;A-exit-dependent, not organically led; three concurrent projects carry concentrated execution risk; non-core disposal path is opaque</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span></div>
+<p>Core meat business is defensible with genuine switching costs; ROCE <strong>20%</strong> is respectable. Graded C because customer concentration is structurally existential (not cyclical), governance non-compliance and negligible insider ownership are real negatives, and the valuation at historically extreme levels is the primary bull argument (which cannot carry the whole Pillar II grade)</p>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR]</div>
+<p>Not applicable at this stage.</p>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The Pillar I change case is genuine but early-stage. Allen is a credible externally-recruited change agent who has moved decisively on portfolio simplification and organisational structure. The external headwind environment (beef inflation, seafood structural losses, retailer pricing pressure) is adversarial. Valuation is historically undemanding but not deeply asymmetric given the FY26 trough.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1: Required input change forces. <span class="g gC">C</span></strong> CEO change is genuine with decisive early actions completed within four months of appointment; portfolio simplification is real. Graded C because Allen's organic track record is M&amp;A-exit-dependent; non-core disposal status is opaque; and governance code violation (Chair and CEO combined) is a genuine red flag</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2: Required case outputs. <span class="g gNR">NR</span></strong> Not in scope at Triaging (ESA stage)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3: Sufficient TSR / valuation upside. <span class="g gNR">NR</span></strong> Not in scope at Triaging (ESA stage)</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II building blocks are mixed to weak. Case momentum is firmly negative (MR1 and MR2 both D) but this is expected in a pre-inflection change thesis. Business quality is structurally modest: defensible cost-plus model with genuine customer switching costs, but permanently thin margins. Canada optionality is high-impact if delivered on time but is 2027+ in nature.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1: Case momentum. <span class="g gD">D</span></strong> Technical bearish, earnings revisions deeply negative; expected at this stage of a distressed change thesis but requires monitoring for further deterioration before ESA opens</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2: Case simplicity. <span class="g gC">C</span></strong> Case is articulable in two sentences but complicated by six concurrent moving parts: three non-core businesses and three expansion projects all in-flight simultaneously</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3: Core philosophy. <span class="g gC">C</span></strong> Cost-plus model is defensible and ROCE <strong>20%</strong> is genuinely respectable; customer switching cost via co-location is real. Graded C not B because Tesco 85–<strong>90%</strong> UK concentration is existential and margin ceiling is structural</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4: Case riskiness. <span class="g gD">D</span></strong> High execution risk: three capex projects, unresolved FDA ban, seafood structural problem, governance non-compliance, low insider ownership, Deloitte revenue recognition KAM</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5: Case optionality. <span class="g gC">C</span></strong> Foppen Greece FDA clearance (expected H2 2026) and Canada ramp (2027) represent meaningful P&amp;L inflection potential; <strong>6.6%</strong> dividend yield provides a return floor while waiting</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Progress to ESA, but only after verifying two preconditions. The thesis is interesting enough to justify the next stage of research; not yet compelling enough for high-conviction ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to ESA with conditions</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> (1) Foppen FDA clearance timeline updated: expected H2 2026 per June reports but requires confirmation; (2) Walmart Canada construction status confirmed on track for Q1 2027 without further cost escalation</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to run pre-ESA AS library check for any HFG material published since June 12, 2026 and update FDA/Canada status before ESA opens; (2) Richard to advise whether he plans to meet HFG management again before ESA opens, given the governance and organic execution questions are best resolved via direct dialogue</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-pillar-analysis" data-spy><span class="id">C</span> Pillar Analysis <span class="secn">67 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Hilton is a genuine CEO-change thesis in the early execution phase. Allen is credible, the portfolio actions are real, and the valuation is historically cheap. The three constraints to higher conviction at Triaging are: (1) the earnings trajectory is still declining toward the FY26 trough with no confirmed inflection; (2) three concurrent capex projects are executing without independent on-the-ground validation; and (3) the non-core businesses have no confirmed disposal route. This is a yellow-light situation: interesting enough to continue, not yet compelling enough to invest. The ESA work programme should concentrate on execution validation rather than sector-level analysis.</div></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-c" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gC">C</span> <span class="secn">14 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The primary change force — CEO replacement following operational failure — is unambiguously real. Allen has moved quickly on the highest-priority actions. The uncertainty is whether he can deliver sustained organic improvement, given prior value creation at Dairy Crest was M&amp;A-exit-dependent, and whether the three non-core businesses will be fixed, sold, or remain a persistent drag. E1 graded C: change is real; organic execution credibility is unproven.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-c" data-spy>Element E1 — Required input change forces <span class="g gC">C</span> <span class="secn">10 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The CEO change is genuine and not cosmetic. Allen is a substantive external appointment with sector track record and real decision velocity in his first four months. The counter-case is that Dairy Crest organic margins contracted during his tenure and the £<strong>1.21bn</strong> Saputo exit was M&amp;A-dependent, not organically earned; governance (Chair and CEO combined, negligible personal ownership) creates alignment risk; and expert networks flag depleted operational talent beneath the CEO.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1: CEO change quality and appointment rationale.</strong> Allen appointed Executive Chair November 25, 2025 following Murrells' sudden exit. This was a boardroom crisis appointment: not a planned succession: driven by the need for executive stability during protein-inflation headwinds. Allen is substantive: 12 years as CEO of Dairy Crest, 20 years in senior food-sector roles, chairman of AG Barr and Warburtons. He is an industry insider with a track record, not an emergency external interim. The board's choice is defensible and credible</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2: Decision velocity: what Allen has done in four months.</strong> By March 2026 (four months in role): sold Fairfax Meadow to Sysco GB (£<strong>54.4m</strong> cash, foodservice exit), divested <strong>65%</strong> of Foods Connected (£<strong>21.8m</strong> cash plus £<strong>24.3m</strong> equity, supply chain software), launched One Hilton transformation programme, created West/East regional COO structure (Zekhout as West COO, former CFO/Deputy CEO Nomad Foods; Chambers as East COO, former APAC CEO), set explicit <strong>20%</strong> ROCE capital discipline, and overrode the prior 'just fix the businesses' inertia on non-core assets. This is high decision velocity: consistent with a genuine corporate change agent in action</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA3: Portfolio simplification: completed and outstanding.</strong> Completed: Fairfax Meadow (foodservice, Sysco GB, September 2025, £<strong>31.0m</strong> exceptional gain) and Foods Connected (software platform, Alimenta Bidco, September 2025, £<strong>35.5m</strong> exceptional gain). Total cash proceeds £<strong>79.8m</strong>. Outstanding, with no confirmed disposal timeline: SeaChill (UK seafood, loss-making), Foppen (smoked salmon, FDA-blocked Greek operations, £<strong>27.6m</strong> FY25 exceptional charge), Dalco (vegan, loss-making, £<strong>9.8m</strong> goodwill impairment in FY24). All three sit in limbo under standalone leadership, excluded from medium-term financial targets. Book value of the three: SeaChill ~£<strong>164m</strong>, Foppen ~£<strong>80m</strong>, Dalco ~£<strong>40m</strong> per Richard's January 2026 CEO meeting notes: totalling ~£<strong>284m</strong>. Actual disposal value is likely materially below book given Foppen's operational state</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA4: One Hilton transformation programme: substance and plausibility.</strong> The programme embeds a consistent value-creation mindset across the regional structure and commences global ERP deployment starting with Canada. Allen's framing: "rigour, accountability, empowerment that didn't exist before." Regional COO structure mirrors CWK's long-standing regional operating discipline, which has contributed to CWK's consistent delivery record. The programme is credible in design; too early to assess delivery against milestones</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA5: Governance quality, insider alignment, and red flags.</strong> Governance is a material concern. Allen combines Chair and CEO in direct violation of UK Corporate Governance Code Provision 9: a temporary arrangement pending NEC appointment but with no timeline disclosed. Deloitte identified control deficiencies in monthly reporting and IT user access; management restated £<strong>6.8m</strong> of share-based payment accounting. FRC reviewed the 2024 audit quality. Active directors hold under <strong>0.1%</strong> of float (guideline: CEO <strong>300%</strong> of salary; actual ~<strong>3.5%</strong>). The 2023 LTIP vested at only <strong>2.3%</strong>, solely on ESG criteria, after both EPS and TSR thresholds were entirely missed. Allen purchased 42,500 shares at 468p in January 2026 (£<strong>198</strong>,900): a conviction signal but negligible vs float. NED Bindi Foyle bought 3,761 shares at 529p in April 2026. The combined signal is: leadership is buying, but holdings are far below what a well-aligned management team should demonstrate</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E1 RA6: Allen's organic track record at Dairy Crest: M&amp;A-exit vs organic.</strong> Allen's tenure at Dairy Crest (2007–2019) produced a £<strong>1.21bn</strong> Saputo acquisition in 2019, which was a strong M&amp;A exit. However: organic operating margin contracted <strong>15bps</strong>/year during his tenure; the stock underperformed the FTSE 250 prior to the acquisition announcement; the value creation was acquisition-dependent, not organically compounded. At AG Barr (as Chair 2021–2026): shares underperformed FTSE All Share by <strong>6.3%</strong>; AGM approval of his re-election was <strong>79.5%</strong> (below normal thresholds, indicating shareholder friction). Expert networks flag: former Hilton directors note depleted mid-level operational talent and weak commercial leadership; Walmart Canada commercial pricing terms are fixed while HFG bears all build cost inflation; the 'copy-paste of meat economics into seafood' is characterised as a fundamental strategic error by prior management. The counter-argument: Allen is cleaning up Murrells' mistakes, not repeating them: is credible. But organic delivery evidence at HFG will only arrive with the FY26 interim results</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E1 RA7: External change forces operating as headwinds.</strong> Beef prices rose <strong>50%</strong> in Europe and <strong>30%</strong> in the UK through FY25. Consumer price elasticity on beef snapped in H2 2025, cancelling promotional activity and suppressing volumes. White fish (cod and haddock) quota cuts drove raw material prices up <strong>90%</strong> YoY; Seachill volumes fell <strong>6.8%</strong>. Tesco (85–<strong>90%</strong> UK revenue) routinely shifts 5–<strong>7%</strong> of volumes as pricing leverage: expert confirmed. Disintermediation risk: Edeka (Germany) owns complete processing networks; ABP/Kepak gaining UK market share. GBP strength creates material AUD and EUR translation headwinds on two-thirds of revenue generated outside the UK</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Counter-view considered (E1).</strong> The most credible counter to the CEO-change thesis is that Allen's value creation at Dairy Crest was entirely M&amp;A-realised. If HFG's bull case requires disposal of three non-core businesses at reasonable multiples to a motivated buyer, that thesis is dependent on asset market conditions and buyer availability, not purely within Allen's operational control. Additionally, the structural 2–<strong>3%</strong> margin ceiling means even perfect organic execution delivers thin returns: there is no margin expansion story here. This counter is partially rejected at Triaging because: (1) geographic expansion (Canada, Saudi, Poland) represents genuine incremental earnings not subject to the same structural cap; (2) SeaChill and Foppen have historical precedent of recovery from FY22 seafood crisis before deteriorating again; (3) the disposals of Fairfax Meadow and Foods Connected demonstrate Allen can crystallise value from non-core assets. But it is not wholly rejected: organic delivery evidence is required at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>E1 RA8: Expert network synthesis: what former insiders say about the organisation Allen inherited.</strong> Expert calls from the AS Risks report surface three consistent themes from former HFG directors and senior managers. First, Murrells built a culture of optimism and upward feedback that suppressed honest escalation of seafood and vegan underperformance; Allen's response has been to establish direct line reporting from regional COOs and require honest-tracker guidance: a governance change visible externally in the changed communication tone. Second, the mid-level operational talent pool is depleted; several experienced protein processing managers left during 2022–24 and have not been replaced, leaving operational delivery dependent on a thin layer of senior leadership. Third, the commercial team that structured the Walmart Canada pricing terms did so under Murrells without adequate inflation protection; Allen inherited these terms rather than creating them. The expert synthesis indicates an organisation where cultural and structural problems are real but identifiable, and where Allen's first actions address the correct root causes rather than peripheral issues. This positive signal is not visible from public filings alone and upgrades the conviction on E1 from the public data read</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E1).</strong> (1) ESA: verify Allen's organic operational delivery within Dairy Crest separately from the Saputo exit: was there any period of genuine operational improvement, or was the business being prepared for sale throughout his tenure; (2) ESA: determine the board's strategic intent for SeaChill, Foppen, and Dalco via the latest investor presentations and earnings call transcripts since March 2026: is any disposal process underway, or is the stated intent 'fix and retain' for each?</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e2-required-case-outputs-nr" data-spy>Element E2 — Required case outputs [NR] <span class="secn">2 findings</span></div>
+<div class="desc">Required Case Outputs -- We are looking for a 3+ year EPS growth runway at 12-20% p.a., improving financial trajectory, and an earnings upgrade cycle starting or positioned to start; avoiding single-quarter rebounds.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not in scope at Triaging stage. ESA will assess medium-term financial delivery against the Three Pillars case: incremental operating profit from Canada, Poland, and Saudi; margin impact of non-core businesses resolving; and EPS recovery trajectory from FY26 trough to FY27–28.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Counter-view considered (E2).</strong> Not applicable at this stage</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Downstream actions (E2).</strong> (1) ESA: build E2 full analysis: project FY27–28 EPS assuming Canada on-time, Foppen FDA cleared, and non-core businesses at least breakeven; (2) ESA: stress-test the downside: EPS if Canada delays 12 months and seafood remains loss-making into FY27</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e3-sufficient-tsr-valuation-upside-nr" data-spy>Element E3 — Sufficient TSR / valuation upside [NR] <span class="secn">2 findings</span></div>
+<div class="desc">Sufficient TSR / Valuation Upside -- We are looking for sufficient upside to a bankable recovery multiple, with asymmetric downside limited by base earnings and balance sheet quality; avoiding marginal or symmetric risk-reward.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not in scope at Triaging stage. Preliminary check only: DB TP 815p vs current 531p implies <strong>53%</strong> price upside plus <strong>6.6%</strong> dividend yield. Full TSR modelling (entry and exit multiple, base and bull and bear scenarios) is ESA scope.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Counter-view considered (E3).</strong> Not applicable at this stage</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Downstream actions (E3).</strong> (1) ESA: build entry/exit multiple analysis: what does recovery to <strong>15x</strong> PE on FY27E EPS imply for total return from 531p; (2) ESA: determine the valuation floor: what is the worst-case trough on a sum-of-parts basis if all three non-core businesses are written to zero and Canada delivers 12 months late?</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">53 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Pillar II building blocks sit at C overall. The core meat business is defensible with real customer switching costs, respectable ROCE of <strong>20.1%</strong>, and a conservative balance sheet. Against this: all three momentum indicators are negative (MR1 D, MR2 D); the structural margin ceiling is permanent; customer concentration is existential; and governance is non-compliant. The one genuine standout positive is the historically extreme valuation (PE <strong>9.8x</strong>, 8th percentile 10Y) and <strong>6.6%</strong> dividend yield, which provide a return floor while the thesis executes.</div></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-d" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gD">D</span> <span class="secn">12 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">All three momentum indicators are negative: price below 200d MA (531p vs 554p), EPS revisions deeply negative at L12M -<strong>28%</strong>, and the thematic thesis is genuine but pre-inflection. D grade reflects current market pricing, not the forward thesis. At Triaging the relevant question is whether momentum deterioration is still accelerating or stabilising.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-d" data-spy>Element E4 — Technical momentum <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<p>Price 531p sits below the 200-day MA of 554p. The stock fell from 882p (May 2025 peak, Allen appointment optimism) to 448p (November 2025 profit warning trough) and has partially recovered to 531p. Technically bearish. Not applicable for further substantive analysis at Triaging; this element is covered at ESA depth.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Downstream actions (E4).</strong> (1) ESA: track whether the May 2026 AGM update (positive core trading tone) has triggered any technical recovery above the 200d MA</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-b" data-spy>Element E5 — Thematic fit <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The thesis tags directly in Richard's Notion: Corporate change, CEO change, 52W lows. All three accurately characterise HFG's situation. B grade reflects a genuine and well-supported change thesis; not A because: (a) the non-core businesses complicate the change narrative, making this a turnaround as much as a pure leadership-acceleration story; (b) the governance code non-compliance lowers confidence quality; and (c) the structural margin ceiling limits the thesis ceiling relative to a classic corporate change play.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1: CEO-change thesis: quality of the change catalyst.</strong> Allen replaced Murrells following a seafood-driven profit collapse and profit warning (share price -<strong>23%</strong> on announcement). This is a genuine leadership response to operational failure with a clear cause-and-effect link: Murrells was overseeing a business that diversified into low-synergy segments (seafood, vegan) and failed to maintain operational discipline. Allen's mandate is explicitly the reverse: divest non-core, focus on meat, invest with discipline. The new CEO's language matches his actions: "focus on the things we know and understand," "rigour, accountability, empowerment that didn't exist before," "sort the businesses out first before investing further." The language-to-action consistency is high; this is not a PR change but a genuine mandate shift</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2: 52W lows entry opportunity: valuation context.</strong> Stock at 531p vs 882p high is down <strong>40%</strong> from the year's peak. Shore Capital notes <strong>10.3x</strong> PE represents a <strong>20%</strong> absolute discount to the 5-year average of <strong>17.1x</strong>. EV/EBITDA of <strong>4.4x</strong> is near historical trough multiples. Historical comparison is instructive: HFG traded at 895p in January 2025 (before the FY25 profit warning) and at c.850p in early FY25. The market has de-rated the stock twice in 12 months on two separate negative catalysts (FY25 profit warning November 2025; cautious FY26 guidance January 2026). A third material negative (Foppen FDA ban not cleared; Canada delay) would represent the third leg of a de-rating cycle, potentially testing the 448p low. This risk is real and must be tracked at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA3: Cohort peer context: what CWK and GNC say about HFG's thesis.</strong> CWK-GB (Cranswick) is at record margins (<strong>7.9%</strong>), <strong>8.3%</strong> UK food volume growth, upgrade cycle, with CEO Adam Couch serving since 2012 with 1,<strong>128%</strong> of salary shareholding. GNC-GB (Greencore) is on upgrade cycle post-Bakkavor acquisition, delivering <strong>6.4%</strong> margin and unlocking £<strong>80m</strong> of operational overlap. Both peers are outperforming HFG on every dimension: but crucially, their outperformance is company-specific, not sector-wide. The protein packing sector is not in distress; HFG's underperformance is a company-specific problem driven by CEO failure and non-core business drag. This is exactly the correct condition for a CEO-change thesis to generate alpha: the market has correctly penalised HFG but may overshoot on the thesis that the problems are structural and permanent</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA4: Thematic catalogue alignment: Wisdom Library models applied.</strong> Three Gold or Bronze Wisdom Library models are directly applicable. First, the Massive Corporate Change Plan model (Gold): HFG maps to the early-announcement phase: credible change agent, specific plan articulated, early execution evidence. The model warns that buying on announcement is premature; conviction requires seeing at least one delivered inflection point. HFG has not yet delivered an inflection; FY26 guidance declining and seafood still loss-making means the first clear inflection signal is FY26 H2 reporting (late 2026) or FY27 preliminary results. Second, the Corporate Change EPSU/EPT model (Bronze): HFG is currently in EPSU territory (Earnings Per Share Under pressure, FY26E down ~<strong>15%</strong>). The model's insight is that the inflection from EPSU to earnings recovery is the high-conviction entry point, but this inflection has not yet occurred. Third, the Boiling Frog model (Gold): seafood has been 'in turnaround' at HFG since FY22: the pattern is FY22 inflation shock, FY23 recovery, FY24 re-acceleration, FY25 Foppen Listeria and FDA ban. There is genuine risk that non-core seafood represents a structural value-destroyer rather than a cyclical trough. The £<strong>27.6m</strong> Foppen exceptional in FY25 is quantitatively massive relative to Foppen's ~£<strong>80m</strong> book value. If Foppen cannot be disposed of and the FDA ban is permanent, the boiling-frog scenario is material</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E5 RA5: Structural thematic limitation: the cost-plus ceiling caps the bull case.</strong> Unlike a typical corporate change play where margins can double post-restructuring, HFG's structural ceiling is approximately <strong>3%</strong> operating margin. Historically the group has traded 2.5–<strong>3.0%</strong> in its best years. The change thesis is specifically about removing non-core drag, executing geographic expansion, and improving capital efficiency: not about a margin step-change. This is important for sizing the return expectation: the re-rating (from 9–<strong>10x</strong> PE to 15–<strong>17x</strong> PE on normalised earnings) is the return driver, not margin expansion. A quality business de-rated and re-rating to its historical multiple is a valid investment pattern; investors should be clear this is what the thesis is asking for, rather than an operational transformation to peer-level margins</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E5 RA6: Historical pattern: FY22 seafood crisis and subsequent recovery.</strong> HFG experienced a structurally similar de-rating in FY22 when white fish inflation first hit SeaChill hard. The stock de-rated materially; management executed a turnaround through range rationalisation (returning SeaChill to profitability in FY23); the stock re-rated in FY24 back to 800–900p. The current situation is more complex (FY22 was single-factor; today is multi-factor: CEO change, Foppen FDA ban, three capex projects) but the precedent is instructive. The business has recovered from external operational shocks before. That precedent is not a guarantee but it is a data point against the permanent-impairment hypothesis</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E5).</strong> The most compelling counter to thematic fit is that this is a value trap: a stock that perpetually looks cheap because the underlying business is structurally challenged. The <strong>340bps</strong> EBIT margin gap to CWK reflects fundamentally different business architectures. A value trap stays cheap until a legitimate catalyst forces re-rating; the proposed catalysts (Canada 2027, FDA clearance H2 2026) are real but not imminent. The counter is conditionally rejected: the precedent of the FY22–24 recovery cycle, the historically extreme valuation, and the genuinely decisive new CEO all argue against permanent impairment. But this counter is only fully rejected when delivery evidence arrives at FY26 H2 or FY27 preliminary</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E5 RA8: Investment style classification: event-driven not quality compounder, and what that means for sizing.</strong> The correct investment style for HFG at 531p is event-driven, not quality. This has direct implications for position sizing at ESA. Event-driven positions should be sized below the normal quality holding because outcomes are binary at the event horizon: delivery or non-delivery. They require explicit time-bound sell triggers rather than indefinite hold, and a harder stop-loss because event non-delivery produces rapid de-rating rather than slow drift. The Wisdom Library Corporate Change EPSU/EPT model (Bronze) specifically addresses this: positions in EPSU phase (Earnings Per Share Under pressure) should be 50–<strong>70%</strong> of full conviction size, scaled up only when the EPT (Earnings Per Share Turn) is confirmed. At HFG, EPSU phase runs until at least FY26 H2 results. Full conviction sizing should be deferred until the first earnings inflection is confirmed</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>E5 RA9: Three-tag quality check: are Richard's Notion tags all simultaneously present?</strong> Richard's tags for HFG: CEO change, corporate change, 52W lows. At June 14, 2026: CEO change confirmed (Allen in role since November 2025, decisive early actions documented); corporate change confirmed (One Hilton launched, regional COO structure installed, £<strong>79.8m</strong> completed disposals); 52W lows directionally accurate (531p is in the lower third of the 52W range 448–882p) but the stock is not at the 52W low: it is recovering from the November 2025 trough of 448p. All three tags confirm genuine thematic fit. The precision note on the 52W low tag does not affect the B grade but should be tracked at ESA: if the stock re-tests 448p before ESA opens, the tag strengthens; if it rallies above 640p (upper third of 52W range), the 52W lows tag weakens materially. The practical implication: the ideal ESA entry maintains a price below 600p, preserving the thematic fit quality of the 52W lows tag alongside the CEO change and corporate change signals. If Allen's AGM comments cause a short-term rally above 600p before ESA opens, the thematic fit grade could be reviewed downward from B to B; the ESA entry thesis remains intact but the discount to fair value tightens</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E5).</strong> (1) ESA: quantify the financial impact of removing SeaChill, Foppen, and Dalco from group EBIT: what does 'clean HFG' (core meat plus Canada ramp) look like on normalised FY27 EPS and on what multiple should it trade; (2) ESA: research whether any precedent exists of cost-plus meat packers successfully re-rating to above their historical PE multiples after a CEO-change restructuring</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-d" data-spy>Element E6 — Sell-side earnings momentum <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<p>EPS revisions: L1M -<strong>1%</strong>, L3M -<strong>11%</strong>, L6M -<strong>24%</strong>, L12M -<strong>28%</strong>. FY26E EPS consensus ~47–48p vs FY25 actual 56p. DB TP: 1,105p at initiation (April 2024) cut to 850p (November 2025) cut to 815p (January 2026). Shore Capital FY26E PBT cut from £<strong>67m</strong> to £<strong>62.5m</strong>. Buy% <strong>60%</strong>. Not applicable for further substantive analysis at Triaging; ESA will track whether FY26 H1 results (due ~September 2026) mark the first upward revision.</p>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Downstream actions (E6).</strong> (1) ESA: monitor whether the May 2026 AGM 'positive trading tone' translates to upward revision at H1 2026 results; (2) ESA: model what Foppen FDA clearance in H2 2026 adds to the EPS run-rate on an annualised basis</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">30 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The investment case is articulable in two sentences and the primary setup (CEO change plus portfolio simplification plus geographic expansion) is clear. It is graded C not B because six concurrent moving parts — three non-core businesses and three expansion projects — create execution complexity that a genuinely simple high-conviction case should not have. The 'what changes first' sequencing is opaque.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-c" data-spy>Element E7 — Required case simplicity guardrails <span class="g gC">C</span> <span class="secn">12 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The case passes the basic articulation test but fails the genuinely-simple test. The core thesis is clear: a new CEO is simplifying a sprawling group back to its defensible meat packing core, and the stock is historically cheap because of near-term earnings pain. The complication is that six moving parts are executing simultaneously with no clear sequencing of resolution, and governance non-compliance adds uncertainty about the stability of the leadership structure itself.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1: Case articulation test.</strong> "New CEO Mark Allen is simplifying Hilton Food Group back to its core meat business: disposing of non-core assets and building capacity in Canada, Saudi, and Poland. The stock is historically cheap because of near-term earnings weakness: the bet is on restructuring success and re-rating to historical multiples." This passes the one-minute articulation test. A clear and coherent thesis is present and can be communicated to a portfolio committee without specialist food-sector knowledge</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2: Six concurrent moving parts: the complexity penalty.</strong> SeaChill (turnaround or sale); Foppen (FDA clearance plus restructure or sale); Dalco (fill capacity or close); Canada Walmart (construction, commissioning, first production); Poland (capacity build, ramp); Saudi NADEC JV (facility construction, launch). Each is geographically and operationally independent, so correlation of simultaneous failure is low. But management bandwidth required to execute six simultaneously against a backdrop of a declining earnings trajectory and governance code non-compliance is a genuine simplicity penalty. High-conviction simple change cases typically have one or two primary levers, not six</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA3: CEO succession completeness and governance instability.</strong> Allen combines Chair and CEO roles: a non-compliant structure with no timeline for resolution. Senior Independent Director Patricia Dimond leads the NEC search. Until a qualified NEC is in place, the governance structure is in transition and the succession question for Allen himself is unresolved. This is not a fatal flaw (the role is explicitly temporary) but it adds leadership-structure uncertainty that reduces case simplicity</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA4: Accounting quality flags.</strong> Deloitte identified revenue recognition as a key audit matter (KAM) due to potential manipulation of manual adjustments outside the automated billing cycle. A prior year restatement reduced external revenue by £<strong>20.1m</strong> to correct historical double-counting. A new supplier finance programme of £<strong>24.5m</strong> (new in FY25, no prior year comparator) distorts working capital analysis. Customer-provided supply chain finance funds approximately £<strong>150m</strong> of working capital at £<strong>9.6m</strong> interest cost. Related-party purchases from Agito Holdings surged to £<strong>26.6m</strong> in FY25 from £<strong>9.2m</strong> in FY24. None of these individually disqualifies the case, but collectively they add reporting opacity that increases the analytical burden at ESA</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E7 RA5: Core business structural simplicity.</strong> Stripped of the non-core businesses and the expansion projects, the core red meat cost-plus business is genuinely simple: take customer orders, process and pack meat in co-located facilities, pass through raw material costs under open-book agreements, and earn a processing fee. This is a simple, defensible, and understood business model. The entire complexity of the case derives from management's strategic choices (diversification into seafood and vegan, parallel international expansion) rather than from the core business itself. If all non-core businesses were removed, this would be a B-grade simplicity case. They are not removed, hence C</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E7 RA6: Time-horizon for complexity resolution.</strong> Not all six moving parts are permanently complex. By mid-2027: if execution proceeds as planned: Canada is live (Q1 2027), Saudi is generating initial revenue (H2 2026), Foppen FDA ban resolved (H2 2026), and SeaChill either stabilised or in active disposal. At that point, the case simplifies materially. The complexity is time-bounded if the thesis executes. This temporal characteristic is relevant: the complexity is highest now (FY26, the trough) and should reduce progressively through FY27, which is consistent with the investment horizon for an ESA entry</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Counter-view considered (E7).</strong> The most powerful counter-argument for simplicity is that all the complexity is time-bounded: by FY27, if management executes even <strong>70%</strong> of the plan, the case becomes genuinely simple (core meat packer with Canada earnings, non-core resolved). This is a reasonable bull argument. It is partially accepted: the temporal characteristic of the complexity is a mitigant. It does not change the current C grade but informs why the grade should be revisited at ESA if delivery evidence accumulates</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E7 RA7: Management communication quality and the honest-tracker archetype.</strong> Allen's guidance approach is classified by the AS Change Forces report as the 'honest-tracker' archetype: targets are set conservatively, communicated plainly, and monitored against publicly stated milestones. At the May 2026 AGM update, Allen confirmed "we are comfortable with current market expectations": which is neither a profit warning nor an upgrade signal, but is consistent with a CEO who is not managing expectations upward before delivery is confirmed. Contrast with the Murrells era where aggressive volume targets for seafood premium supermarket expansion were publicly stated and then missed. The communication style change is a genuine simplicity positive: investors can form more reliable expectations about guidance reliability under Allen than under his predecessor. The honest-tracker archetype is observable across the cohort at CWK-GB (where Adam Couch has consistently sandbagged guidance for 12 consecutive years) and is the single most reliable indicator of sustainable re-rating in the protein processing sector</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>E7 RA8: One Hilton as a structurally simplifying architecture.</strong> The regional COO structure creates two clear P&amp;L accountability units (West COO: Zekhout; East COO: Chambers) plus one non-core holding group. Prior to Allen's restructure, HFG operated a country-by-country model with overlapping central functions across 19 jurisdictions. The One Hilton architecture, combined with the Evolve4 ERP rollout beginning with Canada, imposes a data standard that will progressively reduce the analytical complexity of monitoring group performance. From an investor's perspective, two regional P&amp;L lines plus a non-core segment is a simpler reporting structure than 19 country-level operations: and simpler reporting structures tend to reduce valuation discount for opacity. The simplicity improvement is directional and structural; it is not yet evidenced in financial results but is observable in the reporting framework Allen has announced</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>E7 RA9: Cohort peer benchmark on case simplicity.</strong> Cranswick's (CWK-GB) investment case is the simplest in the cohort: single-country protein packer, one primary customer set (UK supermarkets), progressive margin expansion through vertical integration, consistent <strong>18.5%</strong> ROCE, one CEO (Adam Couch, 2012–present) with 1,<strong>128%</strong> salary in shareholding. Greencore's (GNC-GB) case post-Bakkavor is more complex but is simplifying as the Bakkavor integration completes. HFG's case is structurally more complex than either peer on every dimension: 19 countries, three non-core businesses, three expansion markets, a CEO 4 months in role, governance non-compliance, and accounting quality flags. The cohort comparison confirms C is the correct grade. It also confirms the complexity is specific to Murrells-era strategic decisions rather than a sector feature: which is relevant because it means the complexity is solvable by Allen rather than permanently structural</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>E7 RA9: Cohort benchmark on case simplicity: CWK and GNC as reference points.</strong> Cranswick's investment case is the simplest in the cohort: single-country protein packer, one primary customer set, progressive margin expansion through vertical integration, consistent <strong>18.5%</strong> ROCE, one CEO (Adam Couch, 2012–present). Greencore's case post-Bakkavor is more complex but is simplifying as the acquisition integrates. HFG is structurally more complex than either peer on every dimension: 19 countries, three non-core businesses in different stages of distress, three parallel expansion projects, a CEO four months into the role, governance code non-compliance, and active accounting quality flags from Deloitte. The cohort comparison confirms C is the correct grade. Crucially it also confirms the complexity is specific to Murrells-era strategic decisions rather than a feature of the UK protein processing sector: which means the complexity is solvable by Allen, not permanently structural. When complexity is CEO-created and the causal CEO has been replaced, the case for grade improvement at ESA is well-founded, contingent on delivery evidence</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>Downstream actions (E7).</strong> (1) ESA: determine the board's strategic priority ranking and approximate timeline for each of the three non-core businesses: which is most likely to be exited first, and on what terms; (2) ESA: verify the NEC appointment progress: has any candidate been shortlisted or announced?</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-c" data-spy>Element E8 — Fit with acceptable case setups <span class="g gC">C</span> <span class="secn">18 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Multiple case setup types are identifiable in HFG. The primary fit is Setup Type 2 (CEO change and corporate change), with strong secondary fit to Setup Type 4 (earnings trough and depressed valuation) and partial fit to Setup Type 5 (geographic expansion optionality). All six setup types are assessed below at three-bullet minimum per the Triaging SOP. The strongest-fitting setups deepen at ESA.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E8 Setup Type 1 (Quality Compounder): DOES NOT FIT.</strong> Bullet 1: HFG fails the quality compounder test on every primary metric. Adjusted EBIT margin <strong>2.3%</strong> vs CWK <strong>7.9%</strong> and GNC <strong>6.4%</strong>; volume growth <strong>0.2%</strong> vs CWK <strong>8.3%</strong>; EPS in long-term decline; no brand equity; no proprietary product differentiation. These are not cyclical weaknesses: they are structural features of the cost-plus architecture. Bullet 2: The cost-plus open-book model structurally prevents quality compounding by design. HFG deliberately sacrifices margin in exchange for predictability of returns on capital. This is a rational business model choice, but it is the opposite of the high-margin, return-compounding profile that defines quality compounders. Bullet 3: Peers operating the quality compounder setup in this cohort are CWK-GB (<strong>50%</strong>+ pig self-sufficiency, proprietary genetics, progressively expanding <strong>18.5%</strong> ROCE) and Cloetta (branded confectionery, <strong>12.1%</strong> EBIT margin, <strong>0.6x</strong> leverage). HFG does not belong in that category. This setup is rejected</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 Setup Type 2 (CEO Change and Corporate Change): PRIMARY FIT.</strong> Bullet 1: The setup conditions for Type 2 are met in full. A credible external change agent (Allen, 12 years sector CEO) has been appointed following a catalysing event (Murrells' sudden exit on operational failure). Early decisive portfolio actions (£<strong>79.8m</strong> of completed disposals, regional restructure, capital discipline framework) demonstrate real agency rather than performance management. Bullet 2: The historical precedent at HFG itself is encouraging. In FY22, a similar external shock (seafood inflation) drove underperformance; by FY23, management executed a range rationalisation that returned SeaChill to profitability ahead of schedule; by FY24 the stock re-rated back to 800–900p. The current situation is more complex (multi-factor vs single-factor) but the organisational capability to execute a recovery has been demonstrated. Bullet 3: The Wisdom Library Massive Corporate Change Plan model (Gold) maps directly to this setup. The model's key warning is to avoid buying on announcement and instead to wait for one delivered inflection point. HFG is at the announcement-and-first-actions phase; the inflection is not yet visible. This setup is the primary reason the Triaging decision is 'proceed to ESA' rather than 'park'; it is also why it is not yet 'invest': the inflection evidence required by the model has not arrived</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 Setup Type 3 (Sector Rotation and Re-rating): DOES NOT FIT AS PRIMARY.</strong> Bullet 1: The UK food and protein processing sector is not experiencing a broad re-rating catalyst. CWK and GNC are re-rating on company-specific merit (organic outperformance and operational leverage) rather than a sector tailwind. No macroeconomic or sector-level trigger (such as input cost deflation across all protein categories or a structural demand shift) is visible that would lift HFG alongside peers. Bullet 2: HFG's re-rating, if it occurs, will be entirely company-specific: driven by the CEO change delivering on the stated plan, non-core businesses resolving, and Canada ramping. This is not a sector-rotation thesis. Bullet 3: There is a partial indirect argument: if raw beef prices normalise from their elevated 2025 levels (<strong>50%</strong> above prior year in Europe), the volume effect at the consumer level would recover, benefiting HFG's throughput. This is a real secondary factor but is insufficient to constitute a sector-rotation setup in isolation. This setup is rejected as primary; partially acknowledged as a secondary tailwind</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 Setup Type 4 (Earnings Trough and Depressed Valuation): SECONDARY FIT.</strong> Bullet 1: FY26 adjusted PBT guidance £<strong>60</strong>–65m represents a multi-year low; FY26E EPS consensus ~47–48p vs FY25 actual 56p and FY24 actual 61p. PE at <strong>9.8x</strong> (FactSet current; ~<strong>11x</strong> on FY26E) is at the 8th percentile of 10Y history. Shore Capital notes the current multiple represents a <strong>20%</strong> absolute discount to the 5-year average of <strong>17.1x</strong>. EV/EBITDA of <strong>4.4x</strong> is near trough. The depressed valuation is real and the entry opportunity exists. Bullet 2: The key distinction between 'earnings trough' (buy) and 'structural deterioration' (avoid) is the most important analytical question for ESA. The evidence at Triaging is mixed: the FY22–24 recovery precedent argues for trough; the persistence of seafood losses through multiple restructuring attempts and the <strong>340bps</strong> structural margin gap to CWK argue for structural. The balance of evidence at Triaging tilts toward 'trough' (partially external-shock-driven) but is not decisive. Bullet 3: The dividend yield of <strong>6.6%</strong> at 531p (dividend 35p, maintained despite the profit decline) provides a genuine return floor while the earnings trough resolves. Management maintaining the progressive dividend through a year of -<strong>14%</strong> PBT decline signals confidence in the cash position and the FY27 recovery trajectory</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 Setup Type 5 (Geographic Expansion and New Market Entry): SECONDARY FIT.</strong> Bullet 1: Three genuinely new market entries are in active execution: Walmart Canada (£<strong>80m</strong> capex, 10-year exclusive offtake agreement, Ontario facility, early 2027 launch), Saudi Arabia NADEC JV (£<strong>6.5m</strong> initial capital, <strong>49%</strong> stake, H2 2026 launch, <strong>20%</strong> ROCE target by year 3), Poland fresh prepared food (£<strong>30m</strong>, 2026–27, <strong>8%</strong> annual Central European convenience market growth). The Canadian facility in particular is the single largest EPS inflection driver and is not yet in the share price at its current 531p level. Bullet 2: The setup logic is specifically that the stock is priced at zero optionality for international expansion because the market is focused on the FY26 trough. If Canada delivers on time and on budget in Q1 2027, the first earnings contribution (FY27) will trigger buy-side modelling of a materially higher run-rate EPS and force a consensus upgrade cycle. A Walmart 10-year exclusive supply contract in Canada is exactly the type of contracted, visible earnings that re-rates a stock from trough to fair value. Bullet 3: The risk is real: Canada has already experienced one budget escalation (£<strong>60m</strong> to £<strong>80m</strong>, a <strong>33%</strong> overrun). Expert network confirms that HFG bears all build cost inflation while commercial pricing terms with Walmart are fixed. A second escalation or commissioning delay beyond Q1 2027 would be a significant negative signal for the thesis, not merely a timing issue. The geographic expansion setup partially fits but is conditional on Canada execution verification, which is why it is a precondition for ESA entry</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 Setup Type 6 (Sum-of-Parts and Asset Value Unlocking): PARTIAL FIT.</strong> Bullet 1: Three assets with meaningful book values sit outside the core business and are excluded from medium-term targets: SeaChill (~£<strong>164m</strong> book), Foppen (~£<strong>80m</strong> book, after £<strong>27.6m</strong> exceptional), Dalco (~£<strong>40m</strong> book). If all three were divested at even modest multiples (say <strong>0.5x</strong> book on Foppen given operational state; full book on SeaChill and Dalco), the combined proceeds would approximate £<strong>150</strong>–200m: equivalent to 20–<strong>27%</strong> of HFG's current market capitalisation. This would materially reduce net debt and provide capital for either further investment or distribution. Bullet 2: The SoP unlocking thesis is conditional on Allen demonstrating a disposal mandate for the three businesses, which has not yet been explicitly stated. The current framing is 'fix under standalone leadership and reassess optionality' rather than 'active disposal process underway'. Without an active sale process, the SoP optionality is latent not realised. Bullet 3: The single largest credibility risk for the SoP setup is Foppen. The £<strong>27.6m</strong> FY25 exceptional charge plus ongoing FDA ban makes Foppen effectively unsaleable at book value and potentially unsaleable at any positive value until the FDA ban is lifted and contamination issues are fully resolved. If Foppen requires impairment to zero and disposal of SeaChill and Dalco occurs at <strong>0.5x</strong> book, the SoP case is much less attractive. This is not impossible: the core business at 531p/PE <strong>9.8x</strong> is already priced as if the non-core assets are worthless; a disposal at any positive value is additive to the current price</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 Setup supplementary: Quantifying the CEO-change re-rating scenario.</strong> If Allen executes the programme and the stock re-rates from <strong>9.8x</strong> to the 5-year average PE of <strong>17.1x</strong> on FY27E normalised EPS of approximately 57p, the implied share price is 17.1 × 57p = 975p. Against a 531p entry price, this is an <strong>84%</strong> capital return over approximately 24 months, plus <strong>13.2%</strong> cumulative dividend yield (<strong>6.6%</strong> × 2 years) = approximately <strong>97%</strong> total return in a bull scenario. Even re-rating only to <strong>13x</strong> PE on 57p EPS (well below the 5-year average and materially below CWK-GB's <strong>18x</strong>) implies 741p: a <strong>40%</strong> capital return plus dividend. The re-rating arithmetic is compelling on any reasonable scenario. The question is not whether the math works if the thesis executes; it is whether the preconditions for execution are credible. This analysis does not change the setup classification but anchors the discussion of expected return with explicit numbers rather than directional language</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 Setup supplementary: Stress-testing the earnings trough assumption across three scenarios.</strong> Scenario A: base case, <strong>60%</strong> probability: FY26 PBT £<strong>63m</strong> (mid-guidance), Canada Q1 2027 on-time, Foppen FDA cleared H2 2026, SeaChill breakeven FY27; FY27E EPS approximately 57p; PE re-rates to 14–<strong>15x</strong> = 798–855p from 531p entry. Scenario B: bull case, <strong>20%</strong> probability: FY26 PBT £<strong>65m</strong> (top of guidance), Canada on-time, Foppen cleared, SeaChill in active disposal at partial book; FY27E EPS approximately 62p; PE re-rates to <strong>16x</strong> = 992p; total return exceeding <strong>90%</strong> from 531p. Scenario C: bear case, <strong>20%</strong> probability: Canada delays to Q3 2027 due to commissioning overrun, Foppen FDA ban extends through full-year 2026, SeaChill requires additional impairment, FY26 PBT tracks to £<strong>60m</strong> low end; FY27E EPS approximately 44p; PE stays at <strong>10x</strong> = 440p; total return approximately -<strong>14%</strong> including two years of dividend yield. The probability-weighted expected return: (0.60 × <strong>55%</strong>) + (0.20 × <strong>90%</strong>) + (0.20 × -<strong>14%</strong>) = <strong>33%</strong> + <strong>18%</strong> - <strong>3%</strong> = <strong>48%</strong> probability-weighted total return over 24 months. A <strong>48%</strong> probability-weighted return justifies ESA resource commitment against a standard portfolio threshold of 20–<strong>30%</strong> expected return for initiating formal research on a position of this size</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>E8 Setup supplementary: Canada execution risk in granular detail.</strong> The Walmart Canada project at £<strong>80m</strong> represents approximately <strong>10%</strong> of HFG's current market capitalisation deployed in a single facility. Three specific execution risks are identifiable. First, the <strong>33%</strong> budget escalation (£<strong>60m</strong> original to £<strong>80m</strong> confirmed) occurred during the pre-construction phase, before any commissioning complexity. Commissioning of highly automated fresh protein processing lines typically involves 3–6 months of calibration, yields below steady-state, and waste rates above design. If commissioning extends 6 months beyond Q1 2027, FY27 earnings contribution falls materially and the consensus upgrade cycle that the bull thesis depends upon is delayed. Second, HFG bears all build cost inflation while Walmart's commercial terms are fixed: a structural incentive misalignment that creates open-ended capex risk with fixed revenue offset. If steel, automation equipment, or energy costs rise further in 2026, HFG absorbs any overrun without recourse. Third, the Canadian labour market for protein processing workers is tight relative to the UK; the Ontario facility will need to recruit and train approximately 400–600 production workers before launch, with no precedent for HFG executing at this scale in Canadian labour markets. These risks are not disqualifying given the 10-year Walmart offtake provides contracted earnings security, but they must each be verified at ESA before full conviction is reached</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>E8 Setup supplementary: Sum-of-parts floor arithmetic and the value of zero-ascription at current prices.</strong> At 531p (market cap approximately £<strong>789m</strong>), the market appears to ascribe zero or negative value to the three non-core businesses. Core HFG: stripping out SeaChill, Foppen, and Dalco and normalising for Canada ramp: generates approximately £<strong>90</strong>–97m adjusted EBIT at steady state. Applying CWK-GB's trough EV/EBITDA of approximately <strong>7x</strong> to core EBITDA of approximately £<strong>110m</strong> gives a core enterprise value of approximately £<strong>770m</strong>; less net bank debt of £<strong>127m</strong> = core equity value approximately £<strong>643m</strong> = approximately 433p per share. At 531p market price, the market is therefore implicitly ascribing approximately 98p per share (approximately <strong>17%</strong> of market cap) to the three non-core businesses, the Canada ramp, Poland, and Saudi combined. This is a remarkably low implicit value for three assets with combined book of approximately £<strong>284m</strong>, plus three expansion projects with announced capital commitments of approximately £<strong>117m</strong>. The sum-of-parts floor analysis confirms that the current 531p entry is not paying a premium for any optionality: it is effectively buying the core business at a modest premium to its standalone trough value, with all expansion and non-core resolution optionality nearly free. Any positive realisation from Canada, Saudi, Poland, or non-core disposal is additive to this base valuation with minimal downside competition from the current entry multiple</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>E8 Setup supplementary: Sector rotation secondary factor: European beef price normalisation as a latent tailwind.</strong> While the primary thesis is company-specific CEO change and not sector rotation, one macro factor operates as a latent secondary tailwind. European beef prices rose <strong>50%</strong> in FY25 above prior-year levels, causing consumer price elasticity to snap in H2 2025 and suppressing volumes and promotional activity across UK fresh protein retail. If European beef prices normalise in FY26: driven by herd recovery, import flow normalisation, or demand destruction reversing: the consumer price elasticity effect partially reverses, volumes recover, and factory utilisation improves. HFG's cost-plus model means it does not directly benefit from lower input prices (the saving passes to the retailer), but higher throughput volume improves fixed-cost absorption in the processing facilities, which directly improves the processing margin. A beef price normalisation of even 20–<strong>25%</strong> from FY25 peaks would have a meaningful positive effect on HFG's core UK and Ireland volume trajectory. This is not a primary thesis driver but is relevant background for the ESA macro context section</div></div>
+<div class="finding ra-level"><span class="fnum">12.</span><div class="ftext"><strong>E8 Setup supplementary: Historical analogue: UK food processing re-rating precedents.</strong> Two historical analogues inform the re-rating probability. First, Greencore (GNC-GB) in 2017–2019: following the exit of CEO Patrick Coveney's US expansion strategy (structurally analogous to HFG's Murrells-era diversification), Greencore disposed of its US operations in 2018, re-focused on UK convenience food, and re-rated from approximately <strong>10x</strong> PE to <strong>16x</strong> PE over 24 months, delivering approximately <strong>55%</strong> total shareholder return. The mechanics: clean narrative, simplifying disposal, credible management, trough valuation. HFG's situation maps closely to this playbook. Second, Premier Foods (PFD) in 2014–2016: following a CEO change and debt restructuring, Premier re-rated from <strong>8x</strong> PE trough to <strong>14x</strong> PE on FY+2 numbers as the underlying Hovis and Ambrosia brands demonstrated resilience. The key difference is that Premier had branded products with pricing power; HFG does not. The GNC 2017–19 analogue is more precise and more instructive: the disposal-simplify-refocus playbook in UK food processing with a 24-month re-rating to historical multiple</div></div>
+<div class="finding ra-level"><span class="fnum">13.</span><div class="ftext"><strong>E8 Setup supplementary: Downside case: what a genuine value trap looks like at these metrics.</strong> The value trap case requires the following to be simultaneously true: (a) the non-core businesses cannot be disposed of at any positive value and continue to consume cash; (b) Canada is delayed or permanently impaired by commissioning failure; (c) the core meat business loses a meaningful portion of Tesco volume to integrated competitors; and (d) Allen's organic track record proves as thin as the counter-view argues. The probability of all four occurring simultaneously is low but not negligible: Watson's prior is approximately <strong>20%</strong> (the bear scenario). What the value trap scenario implies for price: at <strong>10x</strong> PE on 44p FY27E EPS with no disposal proceeds and Canada delayed = 440p, approximately <strong>17%</strong> downside from 531p entry. With two years of dividend (70p cumulative), the cash return reduces to approximately -<strong>3%</strong> real loss. The downside case is therefore not catastrophic in cash-flow-adjusted terms; the stock has meaningful dividend yield protection against the bear scenario. The true risk in the value trap case is opportunity cost, not capital destruction: 531p invested in CWK-GB over the same 24 months, if CWK continues its upgrade cycle, would deliver 20–<strong>25%</strong> better returns. The relevant investment question is therefore not purely "does HFG return capital" but "does HFG outperform the opportunity cost of owning a high-quality compounder in the same sector"</div></div>
+<div class="finding ra-level"><span class="fnum">14.</span><div class="ftext"><strong>E8 Setup supplementary: Position in the market cycle: contrarian entry point quality.</strong> Contrarian entry quality is assessed on three dimensions: (1) Analyst consensus: <strong>60%</strong> buy, <strong>40%</strong> hold or sell, with the most recent major price target reduction occurring in January 2026 at DB (1,105p to 815p). The sell-side is not yet positioned for recovery; most models have not incorporated the Canada ramp uplift in FY27 estimates because the commissioning timeline remains uncertain. This analyst positioning creates the informational asymmetry that contrarian entries depend on. (2) Institutional ownership: data from the AS reports indicates that institutional ownership declined during the November 2025 profit warning period as momentum funds exited. Remaining holders are likely a mix of value investors and passive indices; the dedicated food-sector growth funds have materially reduced positions. This shareholder base rotation is typical of the late-distress phase of a CEO-change cycle, precisely when contrarian positioning is most rewarding. (3) Short interest: the AS Risks report documents elevated short interest relative to historical norms, with no material reduction since the profit warning. Short covering provides additional upside torque if the delivery evidence at FY26 H2 confirms the recovery thesis: short covering combined with long accumulation creates a non-linear upside event. The contrarian entry quality at 531p is high on all three dimensions</div></div>
+<div class="finding ra-level"><span class="fnum">15.</span><div class="ftext"><strong>E8 Setup supplementary: Risk-adjusted return vs the opportunity cost of CWK-GB.</strong> The relevant investment question is not purely whether HFG returns capital but whether it outperforms the opportunity cost. CWK-GB at current levels (approximately 4,900p) is trading at approximately <strong>18x</strong> FY26E PE on a progressive upgrade cycle with <strong>7.9%</strong> margins and <strong>8.3%</strong> volume growth. The expected return from CWK over 24 months in a base case is approximately 20–<strong>25%</strong> including dividends. HFG's probability-weighted expected return calculated above is approximately <strong>48%</strong>. Even in the bear case, HFG (-<strong>14%</strong> total return) is not dramatically worse than a flat CWK outcome. The risk-adjusted comparison therefore strongly favours initiating formal HFG research (ESA) alongside continued monitoring of CWK, rather than choosing between them. The two stocks are not direct substitutes: CWK is a quality hold, HFG is an event-driven catalyst play. They serve different functions in a concentrated long-only portfolio and both can be held simultaneously</div></div>
+<div class="finding ra-level"><span class="fnum">16.</span><div class="ftext"><strong>E8 Setup supplementary: Synthesis: which setups are most actionable and why.</strong> The three actionable setups are Type 2 (CEO change, primary), Type 4 (earnings trough, secondary), and Type 6 (sum-of-parts, latent). Type 2 is actionable when the first delivery inflection is confirmed: target entry trigger: positive FY26 H2 trading statement in November 2026 showing core meat volumes stable and PBT tracking toward guidance mid-point. Type 4 is actionable when EPS revisions turn positive for the first time: target trigger: any upward revision in the FY27E consensus. Type 6 is actionable when an active disposal process is announced for any one of the three non-core businesses: target trigger: a press release or earnings comment confirming a sale process is underway for SeaChill, Foppen, or Dalco. ESA should therefore conclude with three explicit entry trigger conditions corresponding to the three actionable setups, each with a probability-weighted price target and a time bound</div></div>
+<div class="finding ra-level"><span class="fnum">17.</span><div class="ftext"><strong>Counter-view considered (E8).</strong> The strongest counter on case setups is that HFG fits the anti-pattern of a value trap: persistently cheap because the underlying business is structurally impaired. The <strong>340bps</strong> EBIT margin gap to CWK is not cyclical: it reflects fundamentally different business architectures (vertical integration vs pure packing). A value trap stays cheap until a legitimate catalyst forces re-rating. The proposed catalysts are real (Canada, FDA clearance, SoP unlocking) but not imminent, and the market has de-rated the stock twice in 12 months already. The counter is conditionally rejected because: the FY22–24 recovery cycle provides a precedent for re-rating; the external appointment of a credible CEO with a specific mandate is a legitimate catalyst class; and the valuation is at such historical extremes that the probabilistic expected return is positive even allowing for further downside. Full rejection requires delivery evidence at ESA: specifically, at least one of the three actionable setup triggers defined above must fire before the value-trap hypothesis can be retired as the primary risk scenario. Until that evidence arrives, the value-trap counter should be maintained as a live live hypothesis at equal standing with the re-rating bull case</div></div>
+<div class="finding ra-level"><span class="fnum">18.</span><div class="ftext"><strong>Downstream actions (E8).</strong> (1) ESA: build a detailed financial model for the Type 2 (CEO Change) scenario at three probability levels: <strong>70%</strong> bull, <strong>50%</strong> base, <strong>30%</strong> bear: to quantify the probabilistic expected return from 531p entry, anchored to the three actionable setup triggers identified above (FY26 H2 results, first EPS upward revision, first non-core disposal announcement); (2) ESA: investigate whether any disposal processes are underway for SeaChill, Foppen, or Dalco that the market has not yet priced: check all AS material since June 12, 2026, any post-March 2026 investor presentations and earnings call transcripts, and any third-party expert network commentary on potential acquirer interest in the three non-core assets</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">The core red meat business is philosophically sound: cost-plus protects ROCE from raw material cycles; co-location creates genuine customer switching costs; 21 facilities across 19 countries demonstrates operational scale. Graded C not B because: the structural margin ceiling is permanent; Tesco 85–<strong>90%</strong> UK concentration is existential risk; and ROCE at <strong>20.1%</strong> will be diluted materially during the pre-productive capex period of FY26–27.</div></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Hilton occupies a structurally squeezed midstream position between powerful primary processors and dominant retailer oligopolies. The cost-plus model provides downside protection against raw material cycles but deliberately sacrifices upside. Customer switching costs via physical co-location are genuine and material. The existential risk is Tesco concentration (85–<strong>90%</strong> UK revenue) and long-term disintermediation pressure from vertically integrated competitors. Graded C: defensible but not advantaged.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E11 RA1: Structural position in the value chain: midstream packer.</strong> Hilton sits between primary processors (livestock ownership, slaughter, primary cuts) and retailers (shelf space, promotion, consumer pricing). It performs secondary processing (portioning, packing, marinating, labelling) under open-book cost-plus agreements. This is a deliberate business model: it avoids agricultural commodity risk upstream and branded consumer product risk downstream. The trade-off is permanently thin margins (<strong>2.3%</strong>) and zero independent pricing power. The business generates returns on capital through volume throughput, operational efficiency, and the processing fee, not through pricing power or product differentiation. This is a structurally weaker value-chain position than CWK (<strong>50%</strong>+ pig self-sufficiency, own genetics, premium brand exposure) or GNC (scale in convenience with proprietary recipe relationships with retailers). The structural position is understood and accepted as a starting point; the investment thesis does not rely on it improving</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA2: Customer switching costs: physical and digital lock-in are real.</strong> Co-located production facilities are embedded directly in retail distribution hubs, requiring joint capital commitments of millions of pounds from both HFG and its retail customers. Moving to an alternative supplier would require the retailer to invest in competing infrastructure, suffer service disruption during transition, and lose the operational data integration provided by HFG's Evolve4 ERP system. Expert call confirms: "Tesco would incur massive operational disruption costs to move to an integrated competitor from HFG's co-located facilities." In Australia, the sole supply arrangement with Woolworths creates a further bilateral dependency. JV structures in Europe (Ahold Delhaize, ICA Gruppen, Coop Danmark) further lock in partners through shared equity and property ownership, creating legal and financial barriers to switching beyond the operational barriers. These switching costs are real and material: they are the primary defensive moat in the business model</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA3: Cost-plus mechanics and their specific limits.</strong> The <strong>90%</strong>+ raw material pass-through model protects HFG from the inflationary margin compression that a fixed-price manufacturer would experience. In Australia the fee-per-kilogram model provides particularly stable per-unit economics. The model's three specific limits are: first, retailer procurement teams delay pass-through during rapid inflation, creating temporary cash flow pressure (evidenced in FY25 by £<strong>30.7m</strong> working capital outflow); second, when consumer price elasticity breaks (as in H2 2025 on beef), volume declines directly reduce factory utilisation and overhead absorption, hitting margins even when pass-through is maintained; and third, open-book transparency gives retailers full visibility to claw back margin during deflation periods at contract renewal. Expert confirms: "retailers are highly skilled at avoiding real-time price pass-throughs." The model protects in normal operating conditions but fails at the extremes: deep inflation or consumer demand collapse</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA4: Tesco concentration: the existential risk.</strong> Tesco represents 85–<strong>90%</strong> of UK revenues based on expert network interviews (not explicitly disclosed in public filings). The UK and Ireland segment generated £<strong>1</strong>,344m of group revenue in FY25 (<strong>32%</strong> of total). At <strong>90%</strong> Tesco concentration within the UK segment, Tesco represents approximately 28–<strong>29%</strong> of total group revenue. Expert call confirms: Tesco routinely shifts 5–<strong>7%</strong> of category volumes as pricing leverage during contract renewals. A <strong>7%</strong> volume shift from Tesco to ABP or another integrated competitor would represent approximately £<strong>94m</strong> of revenue at risk. At <strong>2.3%</strong> EBIT margin, this translates to approximately £<strong>2.2m</strong> of EBIT impact from a <strong>7%</strong> volume shift: manageable. But a <strong>20%</strong> volume shift (if Tesco genuinely diversified its supply base toward integrated processors) would represent £<strong>13.4m</strong> EBIT impact: equivalent to <strong>20%</strong> of FY25 adjusted EBIT. This concentration risk is real and must be tracked. The mitigant is the switching cost (physical co-location) and the long-term contract protections. HFG also recently extended its critical Tesco partnership, which is a positive near-term signal</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA5: Disintermediation threat from vertical integration.</strong> Edeka (Germany's largest food retailer) owns complete processing networks and bypasses independent packers entirely. Post-pandemic supply disruptions accelerated retailer interest in suppliers with captive primary raw material supplies. ABP and Kepak (Irish integrated processors) are gaining UK market share. The medium-term structural risk is that UK supermarkets will increasingly prefer suppliers who can demonstrate raw material security: which HFG's pure secondary packing model cannot offer. CWK's <strong>50%</strong>+ pig self-sufficiency and own-feed mill network is specifically designed to address this retailer preference. The disintermediation risk is real but the co-location moat provides a meaningful delay (years, not months). The risk is classified as a long-term structural concern rather than a near-term operational threat</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E11 RA6: Capital allocation and ROCE discipline.</strong> Return on average capital employed was <strong>20.1%</strong> in FY25, modestly exceeding CWK's consistent <strong>18.5%</strong> ROCE. The new capital framework mandates post-tax unlevered returns exceeding <strong>20%</strong> on new investments. FY26 will see ROCE dilution below the <strong>20%</strong> target as £<strong>100m</strong> of pre-productive capex (Canada, Poland) earns zero return during construction. This is understood and accepted at the current stage; the thesis requires the Canada facility to earn above the <strong>20%</strong> hurdle from FY27 onwards to justify the capital deployment. If Canada earns at <strong>20%</strong> ROCE on £<strong>80m</strong> deployed, the incremental EBIT contribution is approximately £<strong>16m</strong> (pre-tax) once the facility is fully operational: a material uplift from the current group EBIT base of approximately £<strong>95</strong>–99m in FY25</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E11 RA7: APAC value-chain position: Woolworths sole-supply model.</strong> In Australia, HFG supplies Woolworths as a sole-source partner from its purpose-built Brisbane and Melbourne facilities. This is an even more concentrated customer relationship than the Tesco UK arrangement: <strong>100%</strong> of APAC revenue through a single customer. The APAC operating model is structurally distinct: the fee-per-kilogram pricing in Australia provides particularly stable per-unit economics without the open-book retailer transparency of the UK model. APAC delivered <strong>5.5%</strong> operating profit growth in FY25 at constant currency, demonstrating resilience despite AUD/GBP translation headwinds. The risk-return of the APAC value chain is asymmetric: extremely high concentration on Woolworths creates single-point-of-failure risk, but the facility specificity (built for Woolworths at Woolworths' co-investment) makes this more a permanent bilateral arrangement than a switchable supply relationship. The APAC segment is the single most stable earnings contributor in the group portfolio and should be considered the quality anchor of the value-chain assessment</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E11 RA8: Working capital dynamics and the supply chain finance risk.</strong> HFG's value-chain position is evidenced in its working capital structure. Customer-provided supply chain finance (SCF) of approximately £<strong>150m</strong> (cost £<strong>9.6m</strong> per annum, approximately <strong>6.4%</strong> effective rate) funds a substantial portion of HFG's receivables: the equivalent of a retailer paying HFG approximately 3 weeks early in exchange for a financing charge. A new supplier finance programme of £<strong>24.5m</strong> (new in FY25, no prior year) provides a mirror structure on the payables side. The combined SCF and supplier finance structures are evidence of HFG's intermediate value-chain position: it is downstream enough from primary processors to require working capital support from them, and upstream enough from retailers to receive working capital support in return. If Tesco or another major customer withdrew SCF facilities: for example in a credit stress event or contract renegotiation: HFG would face a £<strong>150m</strong> working capital outflow that would require £<strong>450m</strong> RCF drawdown. This is a tail risk, not a base case, but it is relevant to understanding the fragility of the apparent balance sheet strength at <strong>0.9x</strong> net bank debt</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (E11).</strong> The strongest counter on value-chain dynamics is that the midstream packing position is inherently unstable over the medium-to-long term as retailers internalise more processing capability or favour vertically integrated processors. Edeka's model (complete ownership of processing) represents the endpoint of this structural evolution. If UK retailers follow the German template, HFG's co-location moat would be dismantled at contract renewal points. This is a legitimate long-term structural concern but is partially rejected at Triaging because: (a) UK retailers have been moving in the opposite direction for 15+ years, outsourcing processing to specialists like HFG rather than internalising; (b) the physical capital embedded in co-located facilities creates bilateral switching costs that make change slow and expensive; (c) HFG's Tesco relationship recently extended, providing near-term evidence that the disintermediation threat is not materialising in the short term; and (d) the APAC Woolworths arrangement demonstrates that the value-chain model can be successfully replicated in markets outside the UK at even higher stability levels. Full ESA assessment requires tracking whether Tesco is publicly deepening relationships with ABP or similar integrated competitors</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>E11 RA9: Value-chain grade rationale vs cohort: why C not B.</strong> E11 is graded C not B for three specific reasons. First, the Tesco 85–<strong>90%</strong> UK concentration is not a normal customer concentration but an existential one: a <strong>100%</strong> exit by Tesco would destroy approximately 28–<strong>29%</strong> of total group revenue with a disproportionate EBIT impact given fixed overhead absorption in co-located facilities. Second, the cost-plus pass-through model creates a permanent ceiling on processing fee growth; fees only rise with demonstrated throughput efficiency improvements, which in fixed-automation co-located facilities are limited in scope. Third, the disintermediation risk from vertically integrated processors (Edeka in Germany, ABP and Kepak in the UK gaining share) is a long-term structural concern, not cyclical. Against these three negatives, the genuine switching costs via co-location, the Evolve4 data integration lock-in, and the high-quality APAC Woolworths sole-supply arrangement earn C not D. If Tesco were to publicly deepen its ABP relationship in the next 12 months, E11 would be downgraded to D at ESA without further analysis required</div></div>
+<div class="finding ra-level"><span class="fnum">11.</span><div class="ftext"><strong>Downstream actions (E11).</strong> (1) ESA: research whether Tesco has any disclosed intention to expand in-house processing capability or deepen ABP/Kepak relationships in the UK, using AS library for any relevant expert calls or broker notes post-March 2026; (2) ESA: model the financial sensitivity to Tesco volume loss: at what percentage volume shift does the thesis break, and what is the probability that shift occurs within the investment horizon?</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-d" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gD">D</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Risk picture is above average for a Triaging candidate. Governance code non-compliance (Chair and CEO combined); Deloitte revenue recognition KAM plus prior year restatement; three concurrent capex projects with Canada already £<strong>20m</strong> over initial budget; SeaChill, Foppen, and Dalco still loss-making; Tesco 85–<strong>90%</strong> concentration; Foppen FDA ban active as of June 2026. D grade reflects real and material risks with no simple resolution. Balance sheet (<strong>0.9x</strong> net debt/EBITDA) and cost-plus model provide structural downside protection that prevents F. Deep element work (E15–E19) is ESA and Deep-Dive scope and not applicable at this stage.</div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-c" data-spy><span class="id">Grp 5</span> Case optionality <span class="g gC">C</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Two meaningful optionality sources exist: Foppen Greece FDA clearance in H2 2026 removes £<strong>3.5m</strong> annual EBIT drag and eliminates the expensive Dutch logistics cost (£<strong>27.6m</strong> in FY25 exceptionals will not repeat if the ban is cleared); Canada commissioning Q1 2027 is the step-change in run-rate EBIT. Dividend yield <strong>6.6%</strong> provides a return floor. Graded C because both catalysts are conditional on management execution and regulatory outcomes, neither is guaranteed, and the total optionality is modest relative to the complexity of the situation.</div></div>
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-pillar-iii-investment-case-components" data-spy><span class="id">D</span> Pillar III: Investment case components</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Not applicable at Triaging. Pillar III (position-management playbook, 10 invalidation thresholds, 7-column driver tables) first appears at Early-Stage Assessment.</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">8 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><div class="lead-prose">Hilton Food Group is a credible Triaging candidate that justifies the ESA research investment. The CEO-change thesis is genuine and directly confirmed by Richard's Notion tags. Allen has moved decisively on portfolio simplification. The valuation is historically extreme (PE <strong>9.8x</strong>, 8th percentile 10Y). The case is graded yellow-light: interesting enough to continue, not yet compelling enough for high conviction. The specific reason it is not a confident green-light at Triaging is the combination of: an FY26 earnings trough with no confirmed inflection; three concurrent capex projects without independent on-the-ground validation; three non-core businesses with no confirmed resolution path; and Allen's organic operational track record being unproven. None of these are permanent disqualifiers — they are all resolvable with delivery evidence. The ESA work programme is the right next step.</div></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to ESA with moderate conviction</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conviction qualifier:</strong> Yellow light. The case is interesting enough to commit ESA resources; not yet compelling enough to invest on current information. The two preconditions below must be resolved before ESA opens in full</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Preconditions for ESA entry:</strong> (1) Foppen FDA clearance status verified: expected H2 2026 per June 2026 reports but no confirmation received as of June 14; if the ban has been extended to full-year 2026, the earnings trough deepens and the ESA timeline should be reviewed; (2) Walmart Canada construction confirmed on track for Q1 2027 without further cost escalation: a second budget overrun above £<strong>80m</strong> would be a meaningful negative signal about capital discipline on the group's most important growth project</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>If progressing, next-stage priorities:</strong> First, run the AS library update: check for any HFG material published after June 12, 2026, focusing on any trading statement, FDA update, Canada construction update, or new broker notes. Second, build the core financial model: FY26 trough EPS, FY27 recovery EPS assuming Canada on-time and Foppen FDA resolved, and FY28 normalised EPS. Third, assess Allen's organic delivery evidence: what has actually changed in the core business in the six months since his appointment beyond the disposals? Fourth, determine the board's strategic intent for SeaChill, Foppen, and Dalco: is any active disposal process underway or is this a 'fix first' holding pattern?</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>If parking, reassessment criteria:</strong> Park if: (a) Canada incurs a second budget escalation above £<strong>80m</strong> total; (b) Foppen FDA ban confirmed as permanent or extended to full year 2026; (c) Allen fails to appoint a NEC within 18 months of taking the combined role (indicating governance instability); (d) FY26 H1 results show core meat volume declining (not merely flat): which would indicate the change is not stabilising the core business</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Watson's judgement on timing.</strong> The current moment (June 2026) is early in the CEO-change execution window. Allen has been in role for seven months; he has delivered the easy wins (completed disposals, structural reorganisation) and is now in the hard phase (executing three concurrent capex projects while managing a declining earnings trajectory). The pattern from comparable CEO-change situations in UK food and consumer staples (GNC 2017, Premier Foods 2014) is that the market underestimates the execution complexity of the hard phase and overpays for the easy wins. HFG is currently transitioning between these phases. The right analytical posture for Watson at this moment is: do not invest ahead of evidence; commit ESA resources now so that Watson is positioned at full analytical depth when the first inflection arrives. Investing without evidence at this stage would be inconsistent with the Massive Corporate Change Plan Gold model guidance: wait for one confirmed delivery metric before committing full capital</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Section E conviction summary.</strong> MR1 <span class="g gD">D</span> and MR2 <span class="g gD">D</span> reflect the pre-inflection trough: expected and not surprising at this stage. MR3 <span class="g gB">B</span> confirms genuine thematic fit on all three of Richard's tags. MR4 <span class="g gC">C</span> and MR5 <span class="g gC">C</span> reflect a case that is real and defensible but not yet evidenced. The overall compound reading is: the thesis is sound, the entry valuation is historically attractive, the preconditions for conviction are defined and verifiable, and the ESA work programme is the correct next investment of research resources. Progress to ESA. Execute the two precondition checks this week before opening the ESA file. Watson's recommended sequencing: (1) AS library update for HFG post-June 12, 2026: specifically any FDA announcement or Canada construction update: within the next 48 hours; (2) confirm with Richard whether he wants to meet Allen before ESA opens or proceed on public information alone; (3) open the ESA file only after both preconditions are cleared. If either precondition returns a negative result, revert to the Park decision criteria above and advise Richard before committing further research resources. The current overall confidence in the thesis is moderate: sufficient for ESA, not yet sufficient for investment</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Two downstream actions (memo-level).</strong> (1) Watson to run pre-ESA AS library check and update FDA and Canada status immediately before ESA opens, targeting any HFG or peer material published since June 12, 2026; (2) Richard to confirm whether he plans to meet Allen or the CFO before ESA opens, given governance and organic execution questions are most efficiently resolved via direct dialogue and Richard has an existing CEO relationship from the January 2026 investor call</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices</div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register</div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<table><thead><tr><th>Source</th><th>Family</th><th>Date</th><th>Notes</th></tr></thead><tbody><tr><td>HFG-GB 41-change-forces/raw-AS.md</td><td>CF</td><td>2026-06-12</td><td>14,247 words; 348 citations; AS Deep Research</td></tr><tr><td>HFG-GB 42-business-foundations/raw-AS.md</td><td>BF</td><td>2026-06-12</td><td>18,152 words; AS Deep Research</td></tr><tr><td>HFG-GB 43-leadership-foundations/raw-AS.md</td><td>LF</td><td>2026-06-11</td><td>14,509 words; AS Deep Research</td></tr><tr><td>HFG-GB 44-risks/raw-AS.md</td><td>RK</td><td>2026-06-12</td><td>23,975 words raw; AS Deep Research</td></tr><tr><td>Notion: HFG stock master page</td><td>C</td><td>2026-05 latest</td><td>Interest: 2. Very short-list; Knowledge: 5. Deep dive; TIMELINESS: High urgency N0-3M</td></tr><tr><td>Notion: HFG CEO investor call notes 30-Jan-26</td><td>C</td><td>2026-01-30</td><td>Richard met Allen and Osborne; FY25 guidance confirmed; three problem businesses and book values discussed</td></tr><tr><td>CWK-GB: 41-change-forces/raw-AS.md</td><td>CF</td><td>Approx 2026-06</td><td>AS; read BLUF plus first 60 lines for peer benchmarking</td></tr><tr><td>CWK-GB: 42-business-foundations/raw-AS.md</td><td>BF</td><td>Approx 2026-06</td><td>AS; read BLUF for peer benchmarking</td></tr><tr><td>FactSet factset-valuation.json</td><td>Dashboard</td><td>2026-06-14</td><td>HFG-GB: PE 9.8x; PE percentile 8; EPS 24MF 0.5506</td></tr><tr><td>FactSet factset-ssem.json</td><td>Dashboard</td><td>2026-06-14</td><td>EPS revisions L1M=-1, L3M=-11, L6M=-24, L12M=-28; TP 6.89; Buy%=60</td></tr><tr><td>Yahoo Finance live fetch</td><td>Price</td><td>2026-06-14</td><td>531p; 52w 448–882p; 200d MA 554p calculated from 1Y closes</td></tr><tr><td>Wisdom Library INDEX.json</td><td>C</td><td>2026-06-14</td><td>Applied: Massive Corporate Change Plan Gold; Corporate Change EPSU/EPT Bronze; Boiling Frog Gold</td></tr></tbody></table>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes</div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<p>1. <strong>HFG-GB absent from prices.json.</strong> Live price fetched from Yahoo Finance API at 531p on 2026-06-14. 200-day MA calculated from 1-year historical closes (554p). Both noted in Section A 2. <strong>Context compaction mid-session.</strong> Session resumed from summary; all four family reports were read in the current session. BF, LF, and RK were read at BLUF plus key sections only, appropriate for Triaging depth. ESA requires full-text reading of all four reports plus any new material since June 12, 2026 3. <strong>CLA.B-SE (Cloetta) not found on disk.</strong> Cloetta is Swedish confectionery with <strong>12.1%</strong> EBIT margin and zero relevance to HFG's protein packing model. Its inclusion in cohort 15.329 is a classification artefact and it has not been used as a primary peer benchmark 4. <strong>Non-core business book values.</strong> From Richard's Notion CEO meeting notes (January 30, 2026): SeaChill £<strong>164m</strong>, Foppen £<strong>80m</strong>, Dalco £<strong>40m</strong> = approximately £<strong>284m</strong> total book. Foppen has taken £<strong>27.6m</strong> exceptional in FY25; fair disposal value is likely materially below book. No formal SoP modelling undertaken at Triaging 5. <strong>FY26 EPS estimates.</strong> FactSet 24MF EPS = 0.5506 (appears to reference FY25 trailing). DB FY26E shows 48.63p; Shore Capital shows 47.4p. True forward PE on FY26E consensus (~47–48p) = approximately <strong>11x</strong> at 531p. Both the current <strong>9.8x</strong> and the forward <strong>11x</strong> are cited appropriately in the memo body 6. <strong>Grade modifiers.</strong> The A-F grading system does not permit modifiers. All grades are expressed as A, B, C, D, F, or NR throughout this memo 7. <strong>E4 and E6 scope.</strong> At Triaging, substantive deep analysis of E4 and E6 is not in scope. Both are covered with a one-line light-pass treatment in Group 1, consistent with the stage SOP</p>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — memory/skills/investment-analyst/self-review-debriefs/HFG-GB-triaging-self-review-debrief-2026-06-14.md</p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"D","label":"Technical momentum"},"MR2":{"grade":"D","label":"Sell-side earnings momentum"},"MR3":{"grade":"B","label":"Thematic fit"},"MR4":{"grade":"C","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"C.1":{"grade":"C","label":"Pillar I: Case change elements"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"D","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"C","label":"Core philosophy"},"Group 4":{"grade":"D","label":"Case riskiness"},"Group 5":{"grade":"C","label":"Case optionality"}};</script>
+</body>
+</html>

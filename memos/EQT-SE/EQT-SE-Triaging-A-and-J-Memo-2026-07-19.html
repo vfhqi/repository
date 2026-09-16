@@ -1,0 +1,1162 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A&amp;J MEMO — EQT AB (EQT-SE) | TRIAGING — A&J Memo Viewer</title>
+<!--
+  ============================================================================
+  A&J MEMO VIEWER — BASE TEMPLATE  (REDESIGN v1 — 11-Jun-26)
+  Build: Sonnet Session 13 — implements MEMO-REDESIGN-SPEC.md signed off 11-Jun-26
+  ----------------------------------------------------------------------------
+  Design tokens: research-report renderer family (render_family_engine.py).
+  Russian-doll nesting: .sec-wrap > .pil-wrap > .ele-wrap > .ra-wrap.
+  Frozen sticky stack: .h-sec top:0 / .h-pil top:34px / .h-ele top:64px / .h-ra top:91px.
+  CRITICAL: NO overflow:hidden on ANY ancestor of sticky bars (breaks position:sticky).
+  Numbered findings (.finding .fnum .ftext); lettered sub-points (ol.sub).
+  Five-tile snapshot hero + 3-col grouped detail.
+  TOC keeps ALL original functionality (5 toggles, search, scroll-spy, pills, counts).
+
+  SLOTS (each token appears exactly ONCE in this file):
+    [MEMO_TITLE]    -> .cover .ttl + document <title>
+    [MEMO_SUBTITLE] -> .cover .meta
+    [MEMO_SNAPSHOT] -> rendered snapshot HTML block (Section A hero tiles)
+    [MEMO_LEGEND]   -> rendered legend strip HTML
+    [NAV_TREE]      -> 7-level nav-item tree
+    [MEMO_BODY]     -> document-flow memo body (Section B onwards)
+
+  JS CHANGES from Phase 1 base template:
+    - getStickyStackHeight() now returns hardcoded 130 (no .main-header to read)
+    - setMainHeaderCssVar() REMOVED (no sticky .main-header in new design)
+    - updateBreadcrumb() kept but returns early (no #breadcrumb in HTML)
+    - All 5 toggle handlers preserved verbatim
+    - scroll-spy, click-to-scroll, search, grade fallback: preserved verbatim
+  ============================================================================
+-->
+<style>
+/* ===== DESIGN TOKENS (match research-report renderer / v2 mockup exactly) === */
+:root {
+  --bg:#eceef1; --paper:#fff; --ink:#1f2933; --dim:#5b6570; --line:#e3e7eb;
+  --pos-bg:#e8f1e4; --pos-tx:#1f3d18;
+  --mid-bg:#fbf0d6; --mid-tx:#5a3d0a;
+  --neg-bg:#fbe6e6; --neg-tx:#5e1a1a;
+  --u:#8a6518; --accent:#2f4858;
+  --sec:#143a5a; --pil:#0b6b57; --ele:#8a5a18; --ra:#5f6b78;
+  --sec-bg:#eef4fb; --pil-bg:#e8f1e4; --ele-bg:#fbf4e2;
+  --obs:#3f74b8;
+}
+
+/* ===== RESET + BASE ====================================================== */
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'Aptos','Segoe UI',system-ui,sans-serif;
+  font-size:15px; line-height:1.6;
+  background:var(--bg); color:var(--ink);
+}
+
+/* ===== SHELL ============================================================= */
+.app-shell { display:flex; flex-direction:row; height:100vh; }
+
+/* ===== LEFT NAV PANE ===================================================== */
+.nav-pane {
+  flex:0 0 350px; width:350px; min-width:240px;
+  background:#fafbfc; border-right:1px solid var(--line);
+  display:flex; flex-direction:column; height:100vh;
+}
+.nav-header {
+  padding:10px 12px; background:var(--sec); color:#fff; flex:0 0 auto;
+}
+.nav-title { font-size:11pt; font-weight:700; letter-spacing:0.3px; margin-bottom:6px; }
+
+/* --- nav toggle bar: 5 buttons, class names PRESERVED (JS binds them) --- */
+.nav-header-controls {
+  display:flex; flex-wrap:wrap; gap:4px;
+  align-items:center; justify-content:flex-end;
+}
+.nav-header-controls .nav-toggle-btn {
+  font-size:7.5pt; padding:1px 5px;
+  background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.65);
+  border:1px solid rgba(255,255,255,0.18); border-radius:4px; cursor:pointer;
+  font-family:inherit; transition:background 0.15s, color 0.15s;
+}
+.nav-header-controls .nav-toggle-btn:hover {
+  background:rgba(255,255,255,0.18); color:#fff;
+}
+.nav-header-controls .nav-toggle-btn.active {
+  background:#fff; color:var(--sec); border-color:#fff;
+  font-weight:700; box-shadow:0 0 0 1px rgba(255,255,255,.4);
+}
+.nav-toggle-spacer { display:inline-block; width:10px; flex:0 0 10px; }
+
+/* --- nav search --------------------------------------------------------- */
+.nav-search-wrap { padding:5px 8px 3px; }
+#nav-search {
+  width:100%; box-sizing:border-box; font-size:8pt; padding:4px 8px;
+  border:1px solid #c8c5b8; border-radius:3px; background:#fff;
+  color:#333; outline:none; font-family:inherit;
+}
+#nav-search:focus { border-color:var(--sec); box-shadow:0 0 0 2px rgba(20,58,90,.12); }
+#nav-search::placeholder { color:#aaa; }
+
+/* --- nav tree ----------------------------------------------------------- */
+.nav-tree {
+  flex:1 1 auto; overflow-y:auto;
+  padding:8px 6px 24px 6px; font-size:13px; scroll-behavior:smooth;
+}
+
+/* --- nav items (generic; depth set by tier class) ----------------------- */
+.nav-item {
+  padding:2px 4px; cursor:pointer; line-height:1.4; user-select:none;
+  border-radius:3px; transition:background 0.15s; display:block;
+}
+.nav-item:hover { background:#eef2f6; }
+.nav-item.focused { background:#ddeef8; font-weight:700; }
+
+/* 7 DEPTH TIERS — class names PRESERVED; colours updated to v2 tokens */
+.nav-section {
+  font-size:10.5pt; font-weight:700; color:#fff;
+  background:var(--sec); border-radius:4px;
+  padding:4px 8px; margin:5px 0 2px;
+}
+.nav-section:first-child { margin-top:0; }
+.nav-section:hover { background:rgba(20,58,90,.85); }
+.nav-section.focused { background:rgba(20,58,90,.75); color:#fff; font-weight:700; }
+
+.nav-subsection {
+  font-size:9.5pt; font-weight:700; color:var(--sec);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--sec);
+}
+
+.nav-pillar {
+  font-size:9.5pt; font-weight:700; color:var(--pil);
+  margin-left:6px; padding:2px 6px;
+  border-left:3px solid var(--pil);
+}
+
+.nav-group {
+  font-size:9pt; font-weight:700; color:#3a5040;
+  margin-left:14px; padding:2px 6px;
+  border-left:2px solid rgba(11,107,87,.35);
+}
+
+.nav-element {
+  font-size:12.5px; color:var(--ink);
+  margin-left:14px; padding:2px 6px;
+  border-left:3px solid var(--ele);
+}
+
+.nav-ra {
+  font-size:8pt; color:var(--dim);
+  margin-left:24px; padding:1px 6px;
+  border-left:2px solid #c7ced6; display:none; cursor:pointer;
+}
+
+.nav-cq {
+  font-size:7.5pt; color:#888;
+  margin-left:36px; padding:1px 6px 1px 8px;
+  border-left:1px dotted #ccc; display:none; cursor:pointer; line-height:1.4;
+}
+
+/* finding count chip in nav items */
+.nav-fc {
+  color:var(--dim); font-size:10px; white-space:nowrap;
+  font-weight:600; float:right; margin-left:4px;
+}
+
+/* --- progressive disclosure: class names PRESERVED --------------------- */
+.nav-ra-list { display:none; }
+.nav-ra-list.expanded { display:block; }
+.nav-ra-list.expanded .nav-ra { display:block; }
+.nav-cq-list { display:none; }
+.nav-ra.expanded + .nav-cq-list { display:block; }
+
+/* --- nav rating pills: class names PRESERVED ---------------------------- */
+.nav-rating-pill {
+  display:inline-block; font-size:7.5pt; font-weight:700;
+  padding:1px 5px; border-radius:3px; margin-left:5px;
+  vertical-align:baseline; min-width:14px; text-align:center;
+}
+.nav-rating-pill.A { background:#cdebd6; color:#14532d; }
+.nav-rating-pill.B { background:#d2e6f7; color:#11507d; }
+.nav-rating-pill.C { background:#fbf0d6; color:#5a3d0a; }
+.nav-rating-pill.D { background:#fbe2cf; color:#7a3d0a; }
+.nav-rating-pill.F { background:#fbd5d5; color:#5e1a1a; }
+.nav-rating-pill.NR { background:#e0e0e0; color:#666; }
+body:not(.show-pills) .nav-rating-pill { display:none; }
+
+/* --- nav audit chip: class names PRESERVED ----------------------------- */
+.nav-audit { display:none; margin-left:6px; font-size:7pt; line-height:1.3; vertical-align:baseline; }
+body.show-audit .nav-audit { display:inline; }
+.nav-audit-words { padding:0 4px; border-radius:3px; font-weight:700; }
+.nav-audit-words.nav-audit-pass { background:#d4edda; color:#155724; }
+.nav-audit-words.nav-audit-warn { background:#fff3cd; color:#856404; }
+.nav-audit-target { color:#888; margin:0 2px; }
+.nav-audit-weight { padding:0 4px; border-radius:3px; font-weight:700; text-transform:lowercase; }
+.nav-audit-weight-normal  { background:#eee; color:#555; }
+.nav-audit-weight-double  { background:var(--sec); color:#fff; }
+.nav-audit-weight-quadruple { background:#A2306E; color:#fff; }
+.nav-audit-weight-half    { background:#aaa; color:#fff; }
+
+/* --- toggle body classes: PRESERVED ------------------------------------ */
+body.ras-always-on .nav-ra { display:block !important; }
+body.ras-always-on .nav-ra-list { display:block !important; }
+body.cqs-always-on .nav-cq-list { display:block !important; }
+body.cqs-always-on .nav-cq { display:block !important; }
+body.cqs-always-on .nav-ra { display:block !important; }
+body.cqs-always-on .nav-ra-list { display:block !important; }
+body.element-details .nav-ra.force-show,
+body.element-details .nav-cq.force-show { display:block !important; }
+body.element-details .nav-ra-list.force-show,
+body.element-details .nav-cq-list.force-show { display:block !important; }
+
+/* ===== RIGHT MAIN PANE ================================================== */
+.main-pane {
+  flex:1 1 auto; min-width:0; height:100vh;
+  overflow-y:auto; padding:0 0 80px 0;
+  scroll-behavior:smooth; background:var(--paper);
+}
+
+/* --- cover: NOT sticky — scrolls with page ----------------------------- */
+/* Old .main-header was position:sticky; new .cover is not. This is       */
+/* intentional: the frozen level bars provide the sticky navigation.       */
+.cover {
+  border-bottom:3px solid var(--accent);
+  padding:20px 28px 14px;
+}
+.cover .ttl {
+  font-size:22px; font-weight:700; letter-spacing:-.2px; color:var(--accent);
+}
+.cover .meta { font-size:13px; color:var(--dim); margin-top:3px; }
+
+/* --- memo body container ----------------------------------------------- */
+.memo-body { padding:0; }
+
+/* ===== GRADE PILLS (body) =============================================== */
+.g {
+  font-size:11px; font-weight:700; border-radius:5px;
+  padding:1px 7px; letter-spacing:.02em;
+  display:inline-block; margin-left:8px; vertical-align:1px;
+}
+.gA { background:#cdebd6; color:#14532d; }
+.gB { background:#d2e6f7; color:#11507d; }
+.gC { background:#fbf0d6; color:#5a3d0a; }
+.gD { background:#fbe2cf; color:#7a3d0a; }
+.gF { background:#fbd5d5; color:#5e1a1a; }
+.gNR { background:#e0e0e0; color:#666; }
+
+/* legacy .rating pill: kept for JS compat / old content */
+.rating {
+  display:inline-flex; align-items:center; justify-content:center;
+  min-width:20px; height:18px; border-radius:2px;
+  font-size:8.5pt; font-weight:700; padding:0 5px;
+  vertical-align:1px; margin-left:6px;
+}
+.rating.A  { background:#cdebd6; color:#14532d; }
+.rating.B  { background:#d2e6f7; color:#11507d; }
+.rating.C  { background:#fbf0d6; color:#5a3d0a; }
+.rating.D  { background:#fbe2cf; color:#7a3d0a; }
+.rating.F  { background:#fbd5d5; color:#5e1a1a; }
+.rating.NR { background:#e0e0e0; color:#666; }
+.rating.cond { background:#eef0ff; color:var(--sec); }
+
+/* ===== LEGEND STRIP ===================================================== */
+.legend {
+  display:flex; gap:18px; flex-wrap:wrap; align-items:center;
+  font-size:12px; background:#f6f8fa; border:1px solid var(--line);
+  border-radius:6px; padding:7px 13px; margin:10px 28px 14px;
+  color:var(--dim); line-height:1.4;
+}
+.legend b { color:var(--ink); }
+.legend .lsep {
+  display:inline-block; width:1px; background:var(--line);
+  height:14px; margin:0 4px; vertical-align:middle;
+}
+.legend .lsamp {
+  display:inline-block; border-radius:3px;
+  padding:0 5px; font-size:11px; font-weight:700; vertical-align:2px;
+}
+.legend .lsamp.pos { background:var(--pos-bg); color:var(--pos-tx); }
+.legend .lsamp.mid { background:var(--mid-bg); color:var(--mid-tx); }
+.legend .lsamp.neg { background:var(--neg-bg); color:var(--neg-tx); }
+
+/* ===== SNAPSHOT HEADER (Section A) ====================================== */
+.snap {
+  border:2px solid var(--sec); border-radius:9px;
+  margin:14px 28px; overflow:hidden;
+}
+.snap-bar {
+  background:var(--sec); color:#fff; font-weight:700; font-size:15px;
+  padding:8px 14px; display:flex; align-items:center; gap:10px;
+}
+.snap-bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:10.5px; padding:1px 8px; font-weight:700;
+}
+.snap-bar .live {
+  margin-left:auto; font-weight:600; font-size:10.5px; opacity:.9;
+  display:flex; align-items:center; gap:5px;
+}
+.dot-live {
+  width:7px; height:7px; border-radius:50%; background:#2bbf72;
+  display:inline-block;
+}
+
+/* 5-tile hero row */
+.hero {
+  display:grid; grid-template-columns:repeat(5,1fr);
+  gap:8px; padding:11px; background:var(--sec-bg);
+}
+.tile {
+  background:#fff; border:1px solid #d9e3ee;
+  border-top:3px solid var(--dim); border-radius:7px;
+  padding:9px 10px; text-align:center; min-width:0;
+}
+.tile.good  { border-top-color:#2f9e57; }
+.tile.info  { border-top-color:var(--sec); }
+.tile.warn  { border-top-color:#c07a18; }
+.tile.bad   { border-top-color:#c03030; }
+.tile .lbl  {
+  font-size:9.5px; letter-spacing:.04em; text-transform:uppercase;
+  color:var(--dim); font-weight:700;
+}
+.tile .big  { font-size:clamp(12px,1.3vw,19px); font-weight:700; margin-top:2px; line-height:1.1; overflow-wrap:anywhere; }
+.tile .big.up  { color:#1f7a3d; }
+.tile .big.dn  { color:#b03030; }
+.tile .sub  { font-size:10.5px; color:var(--dim); margin-top:2px; }
+
+/* 3-col grouped detail rows */
+.details {
+  display:grid; grid-template-columns:repeat(3, minmax(0,1fr));
+  gap:0 18px; padding:11px 16px;
+  background:#fff; border-top:1px solid var(--line);
+}
+.gh {
+  font-size:9.5px; letter-spacing:.07em; text-transform:uppercase;
+  color:var(--sec); font-weight:700; margin:8px 0 3px;
+}
+.gh.top { margin-top:0; }
+.dr {
+  display:flex; justify-content:space-between; gap:10px; min-width:0;
+  padding:2px 0; border-bottom:1px dotted #eceef1;
+  font-size:12.5px; line-height:1.5;
+}
+.dr:last-child { border-bottom:none; }
+.dr .k { color:var(--dim); }
+.dr .v { font-weight:600; text-align:right; white-space:normal; overflow-wrap:anywhere; min-width:0; }
+
+/* ===== RUSSIAN-DOLL WRAPPERS ============================================ */
+/* CRITICAL: NO overflow:hidden on ANY of these — breaks position:sticky!  */
+.sec-wrap {
+  border:2px solid var(--sec); border-radius:9px;
+  background:var(--sec-bg); padding:8px;
+  margin:14px 28px;
+}
+.pil-wrap {
+  border:1.5px solid var(--pil); border-radius:8px;
+  background:var(--pil-bg); padding:8px;
+  margin:8px 0 0;
+}
+.ele-wrap {
+  border:1.5px solid var(--ele); border-radius:8px;
+  background:var(--ele-bg); padding:8px;
+  margin:9px 0 0;
+}
+.ra-wrap {
+  border:1px solid #d7dde3; border-radius:7px;
+  background:#fff; padding:7px 11px;
+  margin:9px 0 0;
+}
+.subsec-wrap {
+  border:1.5px solid rgba(184,103,7,.2); border-left:4px solid var(--ele);
+  border-radius:7px; background:#fff; padding:8px 13px;
+  margin:10px 0 0;
+}
+.group-wrap {
+  border:1px solid rgba(11,107,87,.18); border-radius:6px;
+  background:rgba(11,107,87,.03); padding:6px 10px;
+  margin:8px 0 0;
+}
+
+/* ===== FROZEN STICKY LEVEL BARS ========================================= */
+/* Each bar is position:sticky at a stepped top offset.                    */
+/* It escapes its wrapper at scroll time — this REQUIRES no overflow:hidden */
+/* on any ancestor. The bars unseat at the end of their wrapper.           */
+.bar {
+  display:flex; align-items:center; gap:9px;
+  color:#fff; font-weight:700;
+  padding:5px 12px; border-radius:6px;
+  position:sticky;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+/* code chip inside a bar */
+.bar .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+/* finding count at right of bar */
+.bar .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+.h-sec { background:var(--sec); font-size:16px;   top:0;    z-index:40; }
+.h-pil { background:var(--pil); font-size:14px;   top:34px; z-index:30; }
+.h-ele { background:var(--ele); font-size:13px;   top:64px; z-index:20; }
+.h-ra  { background:var(--ra);  font-size:12.5px; top:91px; z-index:10; }
+
+/* subsection (B.1, B.2) heading — amber bar treatment (same visual tier as elements) */
+.subsec-head {
+  background:var(--ele); color:#fff; font-weight:700;
+  font-size:13px; padding:5px 12px; border-radius:6px;
+  display:flex; align-items:center; gap:9px;
+  position:sticky; top:34px; z-index:25;
+  box-shadow:0 2px 6px rgba(10,20,30,.18);
+  margin-bottom:6px;
+}
+.subsec-head .id {
+  background:rgba(255,255,255,.22); border-radius:4px;
+  font-size:.78em; padding:1px 7px; font-weight:700; flex-shrink:0;
+}
+.subsec-head .secn {
+  margin-left:auto; font-weight:600; font-size:11px; opacity:.92;
+  white-space:nowrap; flex-shrink:0;
+}
+
+/* group heading */
+.group-head {
+  font-size:13.5px; font-weight:700; color:var(--pil);
+  border-left:3px solid var(--pil); padding:3px 8px;
+  margin:6px 0 4px; display:flex; align-items:center; gap:8px;
+}
+.group-head .id {
+  background:rgba(11,107,87,.1); border-radius:4px;
+  font-size:10.5px; padding:1px 7px; font-weight:700; color:var(--pil);
+}
+.group-head .secn { margin-left:auto; font-weight:600; font-size:11px; color:var(--dim); }
+
+/* CQ heading */
+.cq-head {
+  font-size:13px; font-weight:700; color:#555;
+  border-left:2px solid #aab5bb; padding:2px 6px; margin:6px 0 2px;
+}
+
+/* ===== INSTITUTIONAL DESCRIPTION ======================================== */
+.desc {
+  font-style:italic; font-weight:600; color:#3c4a57; font-size:13px;
+  margin:4px 4px 8px; padding:4px 9px;
+  border-left:3px solid rgba(0,0,0,.13); line-height:1.55;
+}
+
+/* ===== LEAD BOX (judgement summary) ===================================== */
+.lead {
+  background:#eef4fb; border:1px solid #cfe0f0;
+  border-left:4px solid var(--accent); border-radius:0 6px 6px 0;
+  padding:9px 15px; margin:8px 0 10px; font-size:15px;
+}
+.lead-label {
+  font-size:11px; font-weight:700; color:var(--accent);
+  margin-bottom:4px; text-transform:uppercase; letter-spacing:.06em;
+}
+/* bulleted judgement summary (format reform 16-Jun-26): bullets INSIDE the lead
+   box; italic body, demi-bold non-italic lead-in, nested sub-bullets. A plain
+   prose summary still renders as a paragraph (backward-compatible). */
+.lead .lead-in { font-size:14px; line-height:1.55; color:#2b3a47; margin-bottom:5px; font-style:italic; }
+.lead-bullets { margin:3px 0 1px; padding-left:19px; list-style:disc; }
+.lead-bullets > li { font-size:14px; line-height:1.55; color:#2b3a47; margin:4px 0; font-style:italic; }
+.lead-bullets > li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+.lead-bullets ul { margin:3px 0 4px; padding-left:18px; list-style:circle; }
+.lead-bullets ul li { font-size:13.5px; line-height:1.5; color:#33414f; margin:2px 0; font-style:italic; }
+.lead-bullets ul li > strong:first-child { font-style:normal; font-weight:600; color:var(--accent); }
+
+/* ===================== FORMAT REFORM v2 (2026-06-16) ===================== */
+/* nested numbered sub-findings 1.1 / 1.1.1 (F9 / F11) */
+.subfindings { margin:2px 0 2px 0; }
+.subfinding { display:flex; align-items:flex-start; gap:0; margin:3px 0; }
+.subnum { flex:0 0 auto; min-width:38px; color:var(--dim); font-size:12.5px; font-weight:600; margin-top:1px; }
+.subtext { flex:1; font-size:13px; line-height:1.55; color:#3a4754; font-weight:400; }
+.subtext > strong:first-child { font-weight:600; color:var(--accent); }
+.subfinding .subfindings { margin-left:8px; padding-left:6px; border-left:1px solid rgba(0,0,0,.06); }
+/* inline A-F grade pills in body text (F10) */
+.ftext .g, .subtext .g, .lead-bullets .g, .memo-body p .g, .lead-prose .g, .lead-in .g { font-size:10.5px; padding:0 5px; }
+/* visual hierarchy via weight + subtle colour: Section/Group > Element > RA > CQ (F6) */
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; }
+.cq-head   { font-weight:500; color:#42566a; margin-top:9px; }
+.ftext { font-weight:400; }
+.ftext > strong:first-child { font-weight:600; }
+/* line break / spacing before a new RA sub-section (F12) */
+.ra-wrap { margin-top:15px; }
+/* sharper tier gradient so RA reads clearly below Element, and CQ below RA (F6 v2) */
+.bar.h-sec { font-weight:800; }
+.bar.h-pil { font-weight:750; }
+.bar.h-ele { font-weight:700; }
+.bar.h-ra  { font-weight:600; background:#7c8794; }   /* lighter slate = clearly a lower bar than the brown Element */
+.cq-head   { font-weight:600; color:#5b6b7a; }
+/* CQ-level finding signposts a touch lighter/cooler than the RA bar text */
+.ftext > strong:first-child { font-weight:600; color:#3a5066; }
+.subtext > strong:first-child { font-weight:600; color:#52606e; }
+/* RA-level vs CQ-level BODY FINDING text differentiation (F6 corrected, green-area) */
+.finding.ra-level > .ftext { font-weight:500; color:#26333d; }
+.finding.ra-level > .ftext > strong:first-child { font-weight:700; color:#1f2c36; }
+.finding.cq-level > .ftext { font-weight:400; color:#33414d; }
+.finding.cq-level > .ftext > strong:first-child { font-weight:600; color:#3f5161; }
+.finding.cq-level .subtext { color:#4a5663; }
+.finding.cq-level .subtext > strong:first-child { color:#4c5d6c; }
+
+/* ===== NUMBERED FINDINGS ================================================ */
+.finding { display:flex; align-items:flex-start; gap:0; margin:8px 0; }
+.fnum {
+  flex:0 0 auto; min-width:24px; color:var(--dim);
+  font-size:13.5px; font-weight:600; margin-top:1px;
+}
+.ftext { flex:1; font-size:14px; line-height:1.6; }
+
+/* signpost: bold lead word on a finding */
+.sign { font-weight:600; color:var(--accent); }
+
+/* lettered sub-points (evidence under a finding) */
+ol.sub { margin:4px 0 2px; padding-left:42px; list-style:lower-alpha; }
+ol.sub li { font-size:13.5px; margin:2px 0; color:#33414f; line-height:1.55; }
+ol.sub li .ll { font-weight:600; color:var(--accent); }
+
+/* closing italic sentence */
+.memo-closing {
+  font-style:italic; color:#444; font-size:13px;
+  border-left:3px solid var(--line); padding:4px 4px 4px 10px;
+  margin:9px 0 0; background:rgba(240,240,240,.25); border-radius:0 4px 4px 0;
+}
+
+/* plain note line (italic standalone) */
+.memo-note {
+  font-style:italic; color:#666; font-size:13px;
+  margin:3px 0 8px; line-height:1.5;
+}
+
+/* paragraph */
+.memo-body p { font-size:14px; line-height:1.65; margin:6px 0; }
+
+/* ===== SENTIMENT HIGHLIGHTING =========================================== */
+.s-pos { background:var(--pos-bg); color:var(--pos-tx); padding:0 3px; border-radius:3px; }
+.s-mid { background:var(--mid-bg); color:var(--mid-tx); padding:0 3px; border-radius:3px; }
+.s-neg { background:var(--neg-bg); color:var(--neg-tx); padding:0 3px; border-radius:3px; }
+.hl    { background:#fef9c3; color:#713f12; padding:0 3px; border-radius:3px; }
+
+/* ===== MASTER RATING ROW ================================================ */
+.mrow {
+  border:1px solid #e1e6eb; border-radius:6px;
+  background:#fcfdfe; padding:7px 11px; margin-top:8px;
+}
+.mrh {
+  font-weight:700; font-size:13.5px; display:flex; align-items:center; gap:8px;
+}
+.mrh .secn { margin-left:auto; font-weight:600; font-size:10.5px; color:var(--dim); }
+
+/* ===== RISK CALLOUT ===================================================== */
+/* Invalidation thresholds (Section D.II) */
+.risk-callout {
+  border-left:4px solid #c03030; background:#fef7f7;
+  border-radius:0 6px 6px 0; padding:7px 13px; margin:8px 0;
+  font-size:13.5px;
+}
+.risk-callout .risk-label {
+  font-size:10px; font-weight:700; color:#c03030;
+  text-transform:uppercase; letter-spacing:.06em; margin-bottom:3px;
+}
+
+/* inline risk badge */
+.risk {
+  font-size:10px; font-weight:700; border-radius:4px;
+  padding:0 5px; color:#fff; background:#b03030; vertical-align:1px;
+}
+
+/* ===== TABLES =========================================================== */
+.memo-body table { border-collapse:collapse; width:100%; font-size:13px; margin:9px 0; }
+.memo-body table th {
+  background:#f8fafc; text-align:left; padding:5px 8px;
+  border-bottom:2px solid var(--line); font-weight:700; color:var(--ink);
+}
+.memo-body table td { padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+.memo-body table tr:last-child td { border-bottom:none; }
+.memo-body table tr:nth-child(even) td { background:#fafbfc; }
+
+/* ===== EMPHASIS TYPOGRAPHY ============================================== */
+strong { font-weight:600; }
+u {
+  text-decoration:underline;
+  text-decoration-color:var(--u);
+  text-decoration-thickness:1.5px;
+  text-underline-offset:2px;
+}
+a { color:var(--obs); text-decoration:none; }
+a:hover { text-decoration:underline; }
+.cv { font-style:italic; color:#4f46b5; }
+
+/* ===== PRINT ============================================================ */
+@media print {
+  .nav-pane { display:none; }
+  .main-pane { padding:8mm; height:auto; overflow:visible; }
+  .bar { box-shadow:none; position:static !important; }
+}
+</style>
+</head>
+<body class="show-pills element-details">
+<div class="app-shell">
+
+  <aside class="nav-pane">
+    <div class="nav-header">
+      <div class="nav-title">Memo navigation</div>
+      <div class="nav-header-controls">
+        <button class="nav-toggle-btn active" id="pill-toggle"
+          title="Toggle rating chips in navigation pane">Ratings</button>
+        <button class="nav-toggle-btn active" id="element-details-toggle"
+          title="Show all RAs + CQs for the focused element">Element details</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="ras-on-toggle"
+          title="Always show all RAs in the taxonomy">All RAs on</button>
+        <button class="nav-toggle-btn" id="cqs-on-toggle"
+          title="Always show all CQs in the taxonomy">All CQs on</button>
+        <span class="nav-toggle-spacer"></span>
+        <button class="nav-toggle-btn" id="audit-toggle"
+          title="Show RA word count vs target + weight badge">Audit</button>
+      </div>
+    </div>
+    <div class="nav-search-wrap">
+      <input type="search" id="nav-search" placeholder="Filter…"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <nav class="nav-tree">
+<span class="nav-item nav-section" data-anchor="section-a-summary-snapshot">Section A — Summary Snapshot<span class="nav-fc">16</span></span>
+<span class="nav-item nav-section" data-anchor="section-b-investment-case-executive-summary-bluf-bottom-line">Section B — Investment case — Executive summary (BLUF, Bottom Line Up Front)<span class="nav-fc">32</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-1-business-description">B.1 — Business Description<span class="nav-fc">10</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-2-bluf">B.2 — BLUF<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-3-master-ratings">B.3 — Master Ratings<span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="mr1-technical-momentum-c">MR1 — Technical momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr2-sell-side-earnings-momentum-d">MR2 — Sell-side earnings momentum<span class="nav-rating-pill D">D</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr3-thematic-fit-b">MR3 — Thematic fit<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr4-pillar-i-case-change-elements-b">MR4 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr5-pillar-ii-case-building-blocks-c">MR5 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="mr6-pillar-iii-investment-case-components-nr">MR6 — Pillar III: Investment case components [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-4-change-elements-summary">B.4 — Change Elements Summary<span class="nav-fc">3</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-5-building-blocks-summary">B.5 — Building Blocks Summary<span class="nav-fc">5</span></span>
+<span class="nav-item nav-subsection" data-anchor="b-6-action-recommendation">B.6 — Action &amp; Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-c-investment-case-attributes-pillar-i-pillar-ii">Section C — Investment case attributes (Pillar I + Pillar II)<span class="nav-fc">47</span></span>
+<span class="nav-item nav-subsection" data-anchor="c-1-pillar-i-case-change-elements-b">C.1 — Pillar I: Case change elements<span class="nav-rating-pill B">B</span><span class="nav-fc">9</span></span>
+<span class="nav-item nav-element" data-anchor="element-e1-required-input-change-forces-internal-external-b">Element E1 — Required input change forces (internal / external)<span class="nav-rating-pill B">B</span><span class="nav-fc">9</span></span>
+<div class="nav-ra-list">
+<span class="nav-item nav-ra" data-anchor="e1-ra1-change-forces-b" data-element-id="element-e1-required-input-change-forces-internal-external-b">E1 RA1 — Change forces?<span class="nav-rating-pill B">B</span><span class="nav-fc">2</span></span>
+<span class="nav-item nav-ra" data-anchor="e1-ra2-robust-base-b" data-element-id="element-e1-required-input-change-forces-internal-external-b">E1 RA2 — Robust base?<span class="nav-rating-pill B">B</span><span class="nav-fc">7</span></span>
+</div>
+<span class="nav-item nav-subsection" data-anchor="c-2-pillar-ii-case-building-blocks-c">C.2 — Pillar II: Case building blocks<span class="nav-rating-pill C">C</span><span class="nav-fc">38</span></span>
+<span class="nav-item nav-group" data-anchor="group-1-case-momentum-c">Group 1 — Case momentum<span class="nav-rating-pill C">C</span><span class="nav-fc">8</span></span>
+<span class="nav-item nav-element" data-anchor="element-e4-technical-momentum-nr">Element E4 — Technical momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e5-thematic-fit-c">Element E5 — Thematic fit<span class="nav-rating-pill C">C</span><span class="nav-fc">6</span></span>
+<span class="nav-item nav-element" data-anchor="element-e6-sell-side-earnings-momentum-nr">Element E6 — Sell-side earnings momentum [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-2-case-simplicity-c">Group 2 — Case simplicity<span class="nav-rating-pill C">C</span><span class="nav-fc">17</span></span>
+<span class="nav-item nav-element" data-anchor="element-e7-required-case-simplicity-guardrails-d">Element E7 — Required case simplicity guardrails<span class="nav-rating-pill D">D</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="element-e8-fit-with-acceptable-case-setups-b">Element E8 — Fit with acceptable case setups<span class="nav-rating-pill B">B</span><span class="nav-fc">10</span></span>
+<span class="nav-item nav-group" data-anchor="group-3-core-philosophy-c">Group 3 — Core philosophy<span class="nav-rating-pill C">C</span><span class="nav-fc">11</span></span>
+<span class="nav-item nav-element" data-anchor="element-e9-great-operator-nr">Element E9 — Great operator [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e10-advantaged-business-and-widening-competitive-adv">Element E10 — Advantaged business and widening competitive advantage [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e11-value-chain-dynamics-c">Element E11 — Value-chain dynamics<span class="nav-rating-pill C">C</span><span class="nav-fc">7</span></span>
+<span class="nav-item nav-element" data-anchor="element-e12-supportive-industry-structure-nr">Element E12 — Supportive industry structure [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e13-high-secular-growth-potential-nr">Element E13 — High secular growth potential [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-4-case-riskiness-c">Group 4 — Case riskiness<span class="nav-rating-pill C">C</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-group" data-anchor="group-5-case-optionality-nr">Group 5 — Case optionality [NR]<span class="nav-rating-pill NR">NR</span><span class="nav-fc">1</span></span>
+<span class="nav-item nav-element" data-anchor="element-e20-nice-to-have-attributes-nr">Element E20 — Nice-to-have attributes [NR]<span class="nav-fc">1</span></span>
+<span class="nav-item nav-section" data-anchor="section-d-investment-case-components-pillar-iii">Section D — Investment case components (Pillar III)</span>
+<span class="nav-item nav-section" data-anchor="section-e-actions-and-recommendation">Section E — Actions and Recommendation<span class="nav-fc">3</span></span>
+<span class="nav-item nav-section" data-anchor="section-f-appendices">Section F — Appendices<span class="nav-fc">14</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-1-source-register">F.1 — Source register<span class="nav-fc">6</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-2-process-notes">F.2 — Process notes<span class="nav-fc">8</span></span>
+<span class="nav-item nav-subsection" data-anchor="f-3-qc-audit-pointer">F.3 — QC audit pointer</span>
+    </nav>
+  </aside>
+
+  <main class="main-pane">
+    <div class="cover">
+      <div class="ttl">A&amp;J MEMO — EQT AB (EQT-SE) | TRIAGING</div>
+      <div class="meta">Triaging A&amp;J Memo</div>
+    </div>
+    <div class="memo-body">
+<div class="snap" id="section-a-summary-snapshot" data-spy>
+<div class="snap-bar"><span class="id">EQT-SE</span> A&amp;J MEMO — EQT AB (EQT-SE) | TRIAGING — Summary Snapshot<span class="live"><span class="dot-live"></span>&nbsp;Rebuilt 19-Jul-26 16:00</span></div>
+<div class="hero">
+<div class="tile info"><div class="lbl">Price</div><div class="big">SEK 318.30 (17-Jul-26)</div><div class="sub"></div></div>
+<div class="tile info"><div class="lbl">Forward P/E</div><div class="big">15.2x</div><div class="sub">x multiple</div></div>
+<div class="tile"><div class="lbl">Buy rating</div><div class="big">62% OW/Buy vs 38% EW/Hold (sell-side survey)</div><div class="sub">sell-side</div></div>
+<div class="tile"><div class="lbl">vs 200-day avg</div><div class="big">Above</div><div class="sub">momentum</div></div>
+<div class="tile info"><div class="lbl">Stage</div><div class="big">Triaging</div><div class="sub"></div></div>
+</div>
+<div class="details">
+<div>
+<div class="gh top">Identity &amp; classification</div>
+<div class="dr"><span class="k">Ticker</span><span class="v">EQT-SE (EQT AB)</span></div>
+<div class="dr"><span class="k">Sector</span><span class="v">Alternative investment managers</span></div>
+<div class="dr"><span class="k">Cohort</span><span class="v">Mega private-markets platform managers, listed general partners (multi-strategy)</span></div>
+<div class="dr"><span class="k">Cohort peer</span><span class="v">Partners Group Holding (PGHN-CH)</span></div>
+</div>
+<div>
+<div class="gh top">Price &amp; technicals</div>
+<div class="dr"><span class="k">Price</span><span class="v">SEK 318.30 (17-Jul-26)</span></div>
+<div class="dr"><span class="k">52-week range</span><span class="v">SEK 259.00 - 383.00</span></div>
+<div class="dr"><span class="k">200-day average</span><span class="v">SEK 311.42</span></div>
+<div class="dr"><span class="k">vs 200-day avg</span><span class="v">Above</span></div>
+<div class="dr"><span class="k">Forward P/E</span><span class="v">15.2x</span></div>
+<div class="dr"><span class="k">Sell-side target</span><span class="v">SEK 375 (mean; range SEK 306-404)</span></div>
+</div>
+<div>
+<div class="gh top">Lifecycle &amp; sources</div>
+<div class="dr"><span class="k">Stage</span><span class="v">Triaging</span></div>
+</div>
+</div>
+</div>
+<div class="legend"><b>Visual key&nbsp;</b><span class="lsamp pos">positive</span>&ensp;<span class="lsamp mid">mixed / evolving</span>&ensp;<span class="lsamp neg">negative</span>&emsp;<span class="lsep"></span>&emsp;<b>N findings</b> = analytical points per section&emsp;<span class="lsep"></span>&emsp;Coloured bars = Section &gt; Pillar &gt; Element &gt; RA hierarchy</div>
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-b-investment-case-executive-summary-bluf-bottom-line" data-spy><span class="id">B</span> Investment case — Executive summary (BLUF, Bottom Line Up Front) <span class="secn">32 findings</span></div>
+<div class="desc">Executive Summary -- We are looking for a clear, conviction-carrying statement of the investment thesis, key ratings, and actionable conclusion; avoiding vague or overly hedged language.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall verdict. <span class="g gC">C</span></strong> EQT AB combines genuinely large, verifiable change forces (leadership succession complete, the transformative Coller Capital acquisition, flagship fund activation ahead) with a currently negative earnings-momentum signal and a business that is not simple.</li><li><strong>Key risk.</strong> Sell-side earnings momentum is graded D (data-pinned) on broad-based negative EPS/EBITDA/sales revisions and a Q1 2026 print that missed consensus on fee-paying AUM growth, gross inflows (-<strong>53.6%</strong> vs consensus) and signed exits (-<strong>39.4%</strong> vs consensus).</li><li><strong>Key support.</strong> The change-forces case is unusually concrete for a Triaging-stage memo: a completed CEO and Chair succession, a $<strong>3.2bn</strong> scaled M&amp;A step-up (Coller Capital, closing Q3 2026), a forward P/E at the 14th percentile of its own 10-year range, and <strong>62%</strong> Overweight/Buy sell-side positioning against a SEK 375 mean target (~<strong>18%</strong> upside from SEK 318.30).</li><li><strong>Recommendation.</strong> Progress to Early-Stage Assessment, medium conviction, the case earns its place in the funnel on change-forces strength, but the negative revisions trend and the 40+-strategy business complexity are load-bearing enough that ESA must resolve whether Q1 softness is timing noise or genuine deceleration before conviction can firm up.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-1-business-description" data-spy><span class="id">B.1</span> Business Description <span class="secn">10 findings</span></div>
+<div class="desc">Business Description -- A plain-English description of what the company does, how it makes money, and its primary market.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Global alternative asset manager at mega-platform scale.</strong> EQT AB is a Stockholm-listed, Sweden-founded private-markets manager running EUR 313bn in pro forma assets under management across 40-plus strategies, spanning Private Capital, Real Assets, Real Estate and (post-close) Secondaries</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Fee-for-service economics, not principal risk-taking.</strong> Revenue is split between contractual management fees (70-<strong>75%</strong> of total revenue through the cycle, charged at a blended <strong>1.40%</strong> on committed then invested capital) and carried interest (<strong>20%</strong> of fund profits above a 6-<strong>8%</strong> hurdle, of which EQT AB Group keeps <strong>35%</strong> and investment professionals keep <strong>65%</strong>)</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Locked-up, non-redeemable capital base.</strong> The flagship closed-end funds carry 10-to-12-year lock-ups with no unilateral LP redemption right; the report states no LP has defaulted through the Global Financial Crisis or any subsequent cycle, which is the structural source of EQT's fee-revenue predictability</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Financial character: high margin, capital-light, high return on equity.</strong> FY25 adjusted total revenue was EUR 2,732m (+<strong>16%</strong> year on year), adjusted EBITDA margin reached <strong>60.1%</strong> (versus a c.<strong>50%</strong> average for listed European asset managers), and reported ROE was <strong>40.96%</strong></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Segment mix is diversifying via the pending Coller Capital acquisition.</strong> The USD 3.2bn all-share deal (<strong>7.0%</strong> dilution, closing expected mid-to-late Q3 2026) adds Secondaries and Solutions as a fourth business line, bringing EUR 28-30bn of initial fee-paying AUM and a target to double that AUM inside four years</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Ownership is highly concentrated.</strong> EQT partners together with Investor AB (a <strong>14.0%</strong> stake) control approximately <strong>75%</strong> of shares, leaving a free float of only 25-<strong>28%</strong>, a structural defence against activist campaigns, and no active activist presence has been identified in the source material</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Leadership just completed a generational handover.</strong> Per Franzen became CEO in May 2025 and Jean Eric Salata took the chairmanship in May 2026, succeeding founder Conni Jonsson after nearly two decades of founder-led leadership</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>Investment-style read: a structural compounder with a cyclical carry overlay.</strong> The contractual fee base behaves like a quality compounder (predictable, non-cyclical, high margin); the carried-interest and realization component is genuinely cyclical and currently depressed, with <strong>78%</strong> of flagship fund EQT IX's value still unrealized</div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Geography and client base skew institutional but are diversifying toward retail.</strong> More than 1,400 active global clients, pension funds at <strong>40%</strong> of pro forma commitments and sovereign wealth funds up from <strong>13%</strong> (2019) to <strong>22%</strong> (2025) of commitments; private wealth was <strong>26%</strong> of capital raised in 2024-25 via a growing evergreen product suite</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Technology exposure inside the portfolio is a genuine idiosyncratic risk, not just a sector-level one.</strong> EQT's own Private Equity book carries <strong>30%</strong> technology exposure against a <strong>7%</strong> peer average, per Rothschild &amp; Co Redburn, making the manager unusually geared to listed and private software valuation swings even though its own vertical software assets are still growing EBITDAC 20-<strong>30%</strong></div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-2-bluf" data-spy><span class="id">B.2</span> BLUF <span class="secn">5 findings</span></div>
+<div class="desc">Thesis Summary -- The one-paragraph investment thesis: what is changing, what the expected outcome is, and what the entry conditions are.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong><span class="g gC">C</span> Overall.</strong> A real change-forces case sits on top of a currently negative earnings-revision trend; net read is progress-worthy but not yet high conviction</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong><span class="g gD">D</span> Earnings momentum is the headline negative.</strong> Sell-side revisions are broad-based negative across every window (EPS -<strong>5%</strong>/-<strong>7%</strong>/-<strong>10%</strong>/-<strong>3%</strong> at 1M/3M/6M/12M) and Q1 2026 missed consensus on flows and exits by more than a third</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong><span class="g gD">D</span> The business is not simple.</strong> 40-plus strategies across four segments, a live USD 3.2bn integration and a scaling private-wealth channel are three simultaneous change-from-current items running at once</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong><span class="g gB">B</span> The change-forces case itself is unusually concrete.</strong> A completed leadership succession, a transformative M&amp;A step-up, and two flagship funds (EQT XI, Infrastructure VII) activating within the next two to three quarters are verifiable, dated catalysts, not narrative</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Recommendation.</strong> Progress to Early-Stage Assessment, medium conviction, with the Q1 2026 flow/exit miss and the technology-concentration risk named as the two key questions for the next stage</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-3-master-ratings" data-spy><span class="id">B.3</span> Master Ratings <span class="secn">6 findings</span></div>
+<div class="desc">Master Ratings -- The A-F element ratings across all scored elements, in a single-column format with 3-4 supporting findings per rating.</div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr1-technical-momentum-c" data-spy><span class="id">MR1</span> Technical momentum <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Price action:</strong> <span class="s-mid">mixed</span> price SEK 318.30 sits <u>marginally above</u> the 200-day average (SEK 311.42), but relative strength is weak, RS percentile 29, RS versus industry 13, and a negative RS composite (-0.15) with the stock down <strong>5.4%</strong> over 12 months against its own market</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr2-sell-side-earnings-momentum-d" data-spy><span class="id">MR2</span> Sell-side earnings momentum <span class="g gD">D</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Revisions trend:</strong> <span class="s-neg">negative</span> net EPS, EBITDA and sales revisions are negative across every rolling window and the composite momentum score is -8, target-price revisions are also net negative over 1M and 3M despite a still-constructive <strong>64%</strong> Buy-rating share</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr3-thematic-fit-b" data-spy><span class="id">MR3</span> Thematic fit <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Secular positioning:</strong> <span class="s-pos">positive</span> EQT sits inside <u>two durable secular tailwinds</u>, an <strong>11%</strong> CAGR in global alternative AUM against <strong>9%</strong> for the broader asset and wealth management industry, and consolidation of institutional and retail capital toward scaled mega-managers, but is held below A by its own <strong>30%</strong>-versus-<strong>7%</strong>-peer technology concentration and the nascent evergreen-liquidity fragility signalled by Partners Group's redemption gate</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr4-pillar-i-case-change-elements-b" data-spy><span class="id">MR4</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Element E1 drives this grade:</strong> <span class="s-pos">positive</span> internal change (completed succession, Coller M&amp;A) and external change (secular allocation shift) are both <u>genuinely strong</u>, capped below A by the Q1 2026 delivery miss against consensus</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr5-pillar-ii-case-building-blocks-c" data-spy><span class="id">MR5</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Building-blocks picture:</strong> <span class="s-mid">mixed</span> strong setup-fit and demand-side dynamics (Elements E8, E11) are offset by real complexity (Element E7) and a thematic exposure that cuts both ways (Element E5), Group grades cluster at C across the board</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="mr6-pillar-iii-investment-case-components-nr" data-spy><span class="id">MR6</span> Pillar III: Investment case components [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Scope note:</strong> not applicable at this stage</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-4-change-elements-summary" data-spy><span class="id">B.4</span> Change Elements Summary <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> The only Pillar I Element in scope at Triaging, E1 (Required input change forces), earns a B: genuinely strong internal and external change forces sit on top of a base that is well-invested and cheaply rated but not yet clean of headwinds or fully congruent with recent delivery.</li><li><strong>E1 carries the case at this stage.</strong> E2 (Required case outputs) and E3 (Sufficient total-shareholder-return / valuation upside) are not yet in scope; they are first written at Early-Stage Assessment once E1's change-forces read has had a chance to show up in the financials.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E1, Required input change forces. <span class="g gB">B</span></strong> External tailwinds (secular alternatives-allocation growth, industry consolidation to scale) and internal tailwinds (completed leadership succession, the Coller Capital step-up) are both strong and independently verifiable. The robust-base test is only partially clean: EQT is well-invested (EUR 50bn dry powder, an internal digital sourcing platform, direct client-relations function) and trades at a genuinely low multiple (<strong>15.2x</strong> forward P/E, 14th percentile of its own 10-year range), but the base carries live headwinds (technology-concentration exposure, evergreen-liquidity fragility precedent) and Q1 2026 delivery diverged from the FY25 beat-and-raise pattern (fee-paying AUM growth and gross inflows both missed consensus by a wide margin). The B reflects a genuinely strong change-forces case held one notch below A by that delivery-congruency gap</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E2, Required case outputs.</strong> Not applicable at this stage; first assessed at Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E3, Sufficient total-shareholder-return / valuation upside.</strong> Not applicable at this stage; first assessed at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-5-building-blocks-summary" data-spy><span class="id">B.5</span> Building Blocks Summary <span class="secn">5 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Across the four in-scope Groups the picture is consistently mixed-to-solid rather than uniformly strong: Group 2 (Case simplicity) is the weak point, held down by a genuine complexity finding on E7, while Group 3's E11 shows a durable demand-side moat offset by real supplier-concentration risk.</li><li><strong>The setup-fit read (E8) is the most encouraging Pillar II finding at this stage.</strong> EQT shows a credible primary fit with the "strong corporate change driven EPSU/EPT" setup (leadership change, M&amp;A step-up, strategy evolution all present and dated) and a credible secondary fit with the "big demand change-driven EPSU/EPT" setup (secular allocation shift, oligopoly-like scaled-platform structure), which is unusually clean triangulation for a Triaging-stage memo.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Group 1, Case momentum. <span class="g gC">C</span></strong> E4 (Technical momentum) and E6 (Sell-side earnings momentum) are captured via Master Ratings MR1 and MR2 rather than as full Elements at this stage; E5 (Thematic fit, the sole in-scope Group 1 Element) grades C on genuinely mixed thematic exposure, a defensive, contractual fee base that should hold up reasonably in a downturn, set against real AI/software-de-rating exposure inside the portfolio</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Group 2, Case simplicity. <span class="g gC">C</span></strong> E7 (Required case simplicity guardrails) grades D, this is not a simple, single-driver bet; it is a 40-plus-strategy platform running a live USD 3.2bn integration alongside a scaling private-wealth channel. E8 (Fit with acceptable case setups) grades B and materially offsets the E7 finding, producing a blended C for the Group</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Group 3, Core philosophy. <span class="g gC">C</span></strong> Only E11 (Value-chain dynamics) is in scope at Triaging and grades C: a genuinely strong, sticky institutional demand base is offset by a real single-source supplier concentration risk (Citco, fund administration) and by margin-blending pressure from large LPs demanding fee-free co-investment rights. E9, E10, E12 and E13 are not yet in scope</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Group 4, Case riskiness. <span class="g gC">C</span></strong> Light first-pass framing only; no Element-level risk work is done at Triaging. The framing note below (Step 3d) flags four plausible risk vectors, technology/software de-rating, evergreen-liquidity contagion from peer gating, single-source supplier concentration, and realization/exit timing slippage, none yet assessed formally against the ten Invalidation thresholds, which is Deep Dive scope</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Group 5, Case optionality. <span class="g gNR">NR</span></strong> Not yet in scope at Triaging; first written at Early-Stage Assessment</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="b-6-action-recommendation" data-spy><span class="id">B.6</span> Action &amp; Recommendation <span class="secn">3 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Decision. <span class="g gC">C</span></strong> Progress to Early-Stage Assessment, medium conviction.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Decision:</strong> Progress to Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Conditions for progression:</strong> the ESA pass must resolve (a) whether the Q1 2026 flow/exit miss is timing noise ahead of the Coller close and EQT XI activation, or the start of a genuine deceleration, and (b) whether the technology-concentration exposure inside the Private Equity book is a contained, ring-fenced risk or a structural drag on the group's realization profile</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions:</strong> (1) Watson to brief the Chief of Staff to generate the Business Foundation report's Early-Stage Assessment-level companion (Leadership Foundations) ahead of the ESA pass, given E9 (Great operator) first opens at that stage and the Franzen/Salata succession is exactly the kind of management-quality question that report is built to answer; (2) Watson to pull the Q2 2026 interim results (expected within the ESA window) as the first hard data point on whether the Q1 flow miss reverses</div></div>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-c-investment-case-attributes-pillar-i-pillar-ii" data-spy><span class="id">C</span> Investment case attributes (Pillar I + Pillar II) <span class="secn">47 findings</span></div>
+<div class="desc">Investment Case -- We are looking for the core A&amp;J thesis -- change forces, business quality, and case parameters, each scored rigorously. This is the primary evidence base for the allocation decision.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Overall case. <span class="g gC">C</span></strong> A genuinely strong, verifiable change-forces case (E1) sits on top of a building-blocks picture that is solid but not simple: real setup fit and demand-side moat (E8, E11) are offset by real complexity and thematic mixedness (E7, E5).</li><li><strong>The central tension.</strong> EQT is cheap and catalyst-rich (low multiple, completed succession, M&amp;A step-up, two flagship funds about to activate) at exactly the moment its near-term delivery (Q1 flows/exits, sell-side revisions) is soft, the case is a bet that the change forces show up in the financials before the market re-rates the multiple on its own, not after.</li></ul></div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-1-pillar-i-case-change-elements-b" data-spy><span class="id">C.1</span> Pillar I: Case change elements <span class="g gB">B</span> <span class="secn">9 findings</span></div>
+<div class="desc">Change Thesis Summary -- A concise bridge summary of the change story and key case inputs, preceding the detailed Pillar I analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar I verdict. <span class="g gB">B</span></strong> E1 (Required input change forces) is the only Pillar I Element in scope at Triaging and carries a B: strong, dated, verifiable change forces on both the internal and external side, held one notch below A by a genuine delivery-congruency gap in the most recent quarter.</li><li><strong>E2 and E3 not yet in scope.</strong> Required case outputs (E2) and total-shareholder-return / valuation upside (E3) are first written at Early-Stage Assessment, once there has been a chance to observe whether the change forces identified here actually show up in the financials.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e1-required-input-change-forces-internal-external-b" data-spy>Element E1 — Required input change forces (internal / external) <span class="g gB">B</span> <span class="secn">9 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E1 (Required input change forces) verdict. <span class="g gB">B</span></strong> Internal change (completed leadership succession, the Coller Capital step-up) and external change (secular allocation shift toward alternatives, industry consolidation to scale) are both genuinely strong. The base is well-invested and cheaply rated, but Q1 2026 delivery diverged materially from the FY25 beat-and-raise pattern, which is the reason this holds at B rather than A.</li><li><strong>RA1 (Change forces) answer. <span class="g gB">B</span></strong> Both the external and internal change-force tests pass with real evidence rather than narrative, a rare combination for a Triaging-stage read.</li><li><strong>RA2 (Robust base) answer. <span class="g gB">B</span></strong> The base is well-invested and genuinely cheap, but not clean of headwinds and not fully congruent with the most recent quarter's delivery.</li></ul></div>
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra1-change-forces-b" data-spy><span class="id">E1 RA1</span> Change forces? <span class="g gB">B</span> <span class="secn">2 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA1 CQ1, Strong external change forces / tailwinds? <span class="g gB">B</span></strong> Yes, and unusually well-evidenced for a Triaging-stage read<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Secular allocation shift:</strong> global alternative AUM reached USD 14.3tn in March 2026, growing at an <strong>11%</strong> CAGR over ten years versus <strong>9%</strong> for the broader USD 147tn asset and wealth management industry, with private-wealth alternatives allocation still just <strong>5%</strong> globally against <strong>60%</strong> for endowments and <strong>36%</strong> for sovereign wealth funds, a large, structural runway</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Industry consolidation to scale:</strong> capital is consolidating around scaled multi-strategy platforms; EQT holds the number-two global rank in private equity fundraising and is the top franchise in Asia-Pacific after Baring Private Equity Asia, with alternative-asset-management M&amp;A pricing at 8-<strong>15x</strong> EV/EBITDA (the Coller deal itself is evidence of this consolidation)</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Rate-cycle tailwind flagged in the source:</strong> falling rates are explicitly framed in the Business Foundation report as a catalyst that unlocks transaction backlogs and relieves LP denominator-effect constraints, which is directly relevant to the exit-market normalisation driver below</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA1 CQ2, Strong internal change forces? <span class="g gB">B</span></strong> Yes, a completed leadership succession and a transformative acquisition, both dated and verifiable rather than speculative<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Leadership succession completed, not pending:</strong> Per Franzen became CEO in May 2025 and Jean Eric Salata took the chairmanship in May 2026 from founder Conni Jonsson, both events already in the past as of this memo, which removes the execution-risk overhang that a <em>pending</em> succession would carry</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Coller Capital acquisition is the single largest internal change force:</strong> a USD 3.2bn all-share deal (SEK 355/share, <strong>7.0%</strong> dilution) adding a fourth business line (Secondaries and Solutions) with EUR 28-30bn of initial fee-paying AUM, targeted to be mid-single-digit percent accretive to fee-related earnings, with management targeting to double Coller's fee-paying AUM inside four years</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Fundraising machine is active, not dormant:</strong> EQT XI (EUR 23-24bn target) activates mid-2026 and Infrastructure VII (EUR 21bn target) launches at year-end 2026, while BPEA IX already closed at its USD 15.6bn hard cap, the largest-ever Asia-Pacific dedicated private equity fund</div></div></div></div></div>
+</div><!-- /ra-wrap -->
+<div class="ra-wrap">
+<div class="bar h-ra" id="e1-ra2-robust-base-b" data-spy><span class="id">E1 RA2</span> Robust base? <span class="g gB">B</span> <span class="secn">7 findings</span></div>
+<div class="desc">Required Input Change Forces -- We are looking for credible external tailwinds (regulatory, structural, or cyclical) AND active internal change programmes (turnaround, restructuring, re-acceleration); both must be real and sufficiently strong. Avoiding cases where change is incremental or forced.</div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E1 RA2 CQ1, Absence of external headwinds? <span class="g gD">D</span></strong> No, this is the weakest sub-test inside E1, and it is a genuine, not manufactured, gap<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Technology-concentration headwind:</strong> EQT's Private Equity portfolio carries <strong>30%</strong> technology exposure against a <strong>7%</strong> peer average per Rothschild &amp; Co Redburn, making it uniquely exposed to listed software de-rating (public comparables down 5-<strong>6x</strong> EV/EBITDA in recent corrections) even as EQT's own vertical software assets still grow EBITDAC 20-<strong>30%</strong></div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Evergreen-liquidity fragility precedent:</strong> peer Partners Group gated its EUR 8.6bn Global Value SICAV after <strong>9.8%</strong> of NAV in redemption requests in Q2 2026, a genuine industry-level warning sign for the private-wealth evergreen channel EQT is scaling into (EQT's own evergreen exposure is currently only around <strong>2%</strong> of AUM against Partners Group's c.<strong>30%</strong>, which is a real mitigant, not a full offset)</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>FX sensitivity is real but modest:</strong> a <strong>5%</strong> EUR/USD shift moves the income statement by approximately EUR 115.1m, a manageable but non-trivial exposure given the group's international fee base</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E1 RA2 CQ2, Well-invested base? <span class="g gB">B</span></strong> Yes, on balance<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Deployment infrastructure is substantial:</strong> EUR 50bn of dry powder, EUR 11bn of co-investment opportunities generated over the last twelve months, and an in-house digital sourcing platform (EQT Digital/Motherbrain, c.70 professionals) that institutionalises deal origination</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Direct client-relations function preserves margin:</strong> EQT runs its own Client Relations team rather than relying on third-party placement agents, which is a genuine investment in distribution economics that most of the peer set does not replicate to the same degree</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Headcount discipline alongside investment:</strong> platform headcount is flat at c.1,874 full-time equivalents even as AUM scales, with a <strong>75%</strong> reduction in in-house consultants, evidence of operating discipline rather than growth-at-any-cost hiring</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E1 RA2 CQ3, Past/present fundamental delivery congruency with thesis? <span class="g gC">C</span></strong> Mixed, FY25 was a clean beat, Q1 2026 was a clean miss<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>FY25 beat the thesis cleanly:</strong> adjusted revenue grew <strong>16%</strong> to EUR 2,732m, adjusted EPS rose <strong>19.21%</strong> to EUR 1.123, and FY25 numbers beat consensus on revenue (+<strong>2.67%</strong>), EBITDA (+<strong>4.65%</strong>) and fee-related EBITDA margin (+1.20pp)</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Q1 2026 broke that pattern:</strong> fee-paying AUM was flat at EUR 141.6bn (slightly below the EUR 144.1bn consensus), gross inflows to fee-paying AUM of EUR 2.6bn missed the EUR 5.6bn consensus by <strong>53.6%</strong>, and signed gross exits of EUR 2.0bn missed the EUR 3.3bn consensus by <strong>39.4%</strong></div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>Management's own guidance pattern is conservative, not misleading:</strong> the medium-term fee-related EBITDA margin target is "<strong>55%</strong>+" against 2025 delivery of only <strong>52.3%</strong>, which Jefferies explicitly characterises as deliberate sandbagging rather than a miss, a genuine positive for guidance credibility even though it complicates a simple beat/miss read</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E1 RA2 CQ4, Large change-from-current / mispricing? <span class="g gB">B</span></strong> Yes, on the valuation evidence<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Multiple has genuinely de-rated:</strong> forward P/E of <strong>15.2x</strong> sits at only the 14th percentile of EQT's own ten-year trading history, a meaningfully compressed rating for a business still growing adjusted EPS at high-teens percentage rates</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Sell-side sees real upside from here:</strong> mean price target SEK 375 (range SEK 306-404) against a SEK 318.30 live price implies roughly <strong>18%</strong> upside on consensus targets, with <strong>62%</strong> of covering analysts at Overweight/Buy</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Scenario spread from Morgan Stanley frames the mispricing question explicitly:</strong> a base case of SEK 352, a bull case of SEK 526 (<strong>2.8x</strong> MOIC) and a bear case of SEK 160 (<strong>1.8x</strong> MOIC), a wide dispersion that itself signals the market has not yet converged on how much of the change-from-current is priced</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E1 RA2 CQ5, Low trading multiple? <span class="g gB">B</span></strong> Yes<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>Absolute level:</strong> <u><strong>15.2x</strong> forward P/E is low</u> for a business compounding adjusted EPS at close to <strong>20%</strong> year on year and running a <strong>60.1%</strong> EBITDA margin, roughly 1,000 basis points above the average listed European asset manager</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>Peer-relative context supports the "low" read:</strong> EQT's own three-year revenue CAGR (<strong>13.2%</strong>) exceeds a <strong>10%</strong> peer average, yet its multiple sits at a percentile low against its own history rather than at a premium the growth and margin profile might otherwise command</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>Caveat on why it is cheap:</strong> the negative sell-side earnings-revision trend (MR2, graded D) is very likely part of why the multiple has compressed, so "cheap" and "genuinely mispriced" are not automatically the same thing, this is exactly the tension the ESA pass needs to resolve</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E1):</strong> the counter-view is that the Q1 2026 miss and the negative revisions trend are not noise but the start of a genuine deceleration, in which case the low multiple is a value trap rather than a mispricing, this is rejected as the primary read at Triaging (not dismissed) because the miss is concentrated in flow and exit <em>timing</em> metrics ahead of two large, dated catalysts (the Coller close and EQT XI activation) rather than in the underlying fee-rate or AUM-retention metrics, but it is exactly the question Early-Stage Assessment must settle with a further data point (the Q2 2026 interim print)</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (E1):</strong> (1) Watson to pull EQT's Q2 2026 interim results as soon as published (expected inside the ESA window) as the first read on whether the Q1 flow/exit miss reverses; (2) Watson to brief the Chief of Staff to generate the Leadership Foundations report ahead of ESA, given the E9 (Great operator) test opens there and hinges directly on evidencing Franzen's and Salata's early track record rather than assuming succession quality from the transition being orderly</div></div>
+</div><!-- /ra-wrap -->
+</div><!-- /ele-wrap -->
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="c-2-pillar-ii-case-building-blocks-c" data-spy><span class="id">C.2</span> Pillar II: Case building blocks <span class="g gC">C</span> <span class="secn">38 findings</span></div>
+<div class="desc">Business Quality Summary -- A concise bridge summary of the business quality assessment, preceding the detailed Pillar II analysis.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Pillar II verdict. <span class="g gC">C</span></strong> Group 2 (Case simplicity) is the weak point, driven by a genuine complexity finding on E7; Group 1 and Group 3 are both mixed-to-solid; Group 4 carries a light risk-framing note only; Group 5 is not yet in scope.</li><li><strong>Setup fit (E8) is the most encouraging single finding in Pillar II.</strong> EQT shows credible, dated, verifiable fit with two of the six acceptable case setups, which is a stronger signal at Triaging than most cases show.</li></ul></div>
+<div class="group-wrap">
+<div class="group-head" id="group-1-case-momentum-c" data-spy><span class="id">Grp 1</span> Case momentum <span class="g gC">C</span> <span class="secn">8 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 1 verdict. <span class="g gC">C</span></strong> E5 (Thematic fit) is the only in-scope Group 1 Element and grades C on genuinely mixed thematic exposure; E4 and E6 are captured via the Master Ratings rather than as full Elements at this stage.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e4-technical-momentum-nr" data-spy>Element E4 — Technical momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Technical Momentum -- Mechanical gate: we require MA alignment (50-day above 200-day), a tight base pattern, and positive relative performance vs index. If not technically positioned, the case is too early to act on.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E4 (Technical momentum) is captured at Triaging via Master Rating MR1 (Section B.3); the full Element E4 is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e5-thematic-fit-c" data-spy>Element E5 — Thematic fit <span class="g gC">C</span> <span class="secn">6 findings</span></div>
+<div class="desc">Thematic Fit -- We are looking for positive fit against all three active portfolio thematics: T1 (bear market resilience), T2 (AI disruption insulation or tailwind), T3 (Iran / oil-price environment).</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E5 (Thematic fit) verdict. <span class="g gC">C</span></strong> A genuinely defensive, contractual fee base (positive for a bear-market / late-cycle thematic) sits alongside a real, idiosyncratic AI/software-de-rating exposure inside the portfolio (negative for the AI-disruption thematic), the two roughly offset, producing a mixed rather than clean-positive read. This Element carries double weight at Triaging.</li><li><strong>RA1 (Suitability for bear market/downturn) verdict. <span class="g gB">B</span></strong> The contractual, locked-up fee base is a genuine defensive characteristic.</li><li><strong>RA2 (Suitability for AI disruption) verdict. <span class="g gD">D</span></strong> The manager's own book carries real AI/software-linked de-rating exposure, which is a negative on this specific thematic even though EQT itself deploys AI operationally.</li><li><strong>RA3 (Suitability for Iran oil-price/inflation-driven demand deterioration) verdict. <span class="g gC">C</span></strong> Largely insulated on direct input costs (asset-light fee model) but exposed indirectly via exit-market and fundraising sensitivity to macro shocks.</li><li><strong>RA4 (Paradigm fit from business perspective) verdict. <span class="g gC">C</span></strong> Net read across all three thematics is mixed, not clean-positive or clean-negative.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E5 RA1, Suitability for bear market / economic downturn: <span class="g gB">B</span></strong> The contractual fee model is a genuine defensive characteristic in a downturn<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>Non-cyclical revenue base:</strong> 70-<strong>75%</strong> of total revenue is contractual management fees locked in by 10-to-12-year fund structures, with no LP default recorded through the Global Financial Crisis or any subsequent cycle</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Negative working capital reinforces resilience:</strong> management fees are payable half-yearly in advance, and exit-gain proceeds are distributed to LPs within three to five days, both of which reduce cash-flow volatility relative to a typical cyclical financial</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Counter-point that keeps this at B rather than A:</strong> the carried-interest component (c.<strong>11%</strong> of revenue historically) is genuinely cyclical, and a bear market would delay the EUR 2,897m of unrealised accrued carry currently sitting on the balance sheet</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E5 RA2, Suitability for AI disruption: <span class="g gD">D</span></strong> Genuine negative exposure sits inside the portfolio, not just at the industry level<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Technology concentration is the direct transmission channel:</strong> <strong>30%</strong> of the Private Equity portfolio is technology-exposed against a <strong>7%</strong> peer average, and public software comparables have de-rated 5-<strong>6x</strong> EV/EBITDA in recent corrections, a mechanism that directly marks down EQT's own NAV and delays carry recognition</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>The mitigant is real but partial:</strong> EQT's own vertical software assets are still growing EBITDAC 20-<strong>30%</strong>, and the firm uses AI operationally via Motherbrain (c.70 professionals) for deal sourcing, so the exposure is not purely negative, but the valuation-transmission risk on the existing book is the dominant near-term effect</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Unrealised exposure:</strong> <span class="s-neg">negative</span> <u><strong>78%</strong> of EQT IX's value remains unrealised</u> on what the source describes as depressed entry multiples, meaning a chunk of the flagship fund's realised-value profile is directly hostage to how AI-driven software re-ratings resolve</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E5 RA3, Suitability for Iran oil-price induced inflation or demand deterioration: <span class="g gC">C</span></strong> Largely indirect exposure<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Asset-light model limits direct input-cost transmission:</strong> EQT itself carries minimal capex (EUR 26.1m FY25) and no material direct commodity exposure, so an oil-price or inflation shock does not hit its own cost base the way it would a capital-intensive industrial</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Indirect exposure runs through portfolio companies and exit markets:</strong> a demand-deterioration shock would compress valuations across the underlying portfolio and could further delay the exit-market normalisation the case already depends on</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>FX sensitivity is the more quantifiable macro channel:</strong> a <strong>5%</strong> EUR/USD move affects the income statement by roughly EUR 115.1m, which is the clearest, source-quoted macro-sensitivity figure available at this stage</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E5 RA4, Paradigm fit from a business perspective (summary): <span class="g gC">C</span></strong> Net read across the three preceding tests is mixed, not clean-positive<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Structural secular fit is strong:</strong> the <strong>11%</strong> alternative-AUM CAGR and the consolidation-to-scale dynamic are durable, multi-year tailwinds independent of any single macro regime</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Present-cycle exposure is genuinely negative:</strong> the AI/software-de-rating channel is not a hypothetical risk, it is already visible in the FY25/Q1 2026 numbers via delayed carry recognition</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Net:</strong> a business built for the next decade's paradigm, currently navigating a bruising patch of the present one</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Counter-view considered (E5):</strong> the counter-view is that the defensive fee base dominates and this should grade B, not C, because 70-<strong>75%</strong> of revenue is contractual regardless of market regime, this is rejected as the primary read because the marginal, catalyst-relevant part of the investment case (carry recognition, flagship fund realisation timing, the re-rating thesis itself) is precisely the cyclical 25-<strong>30%</strong> of the business that the AI/software exposure threatens, so the mixed grade better reflects where the case is actually sensitive</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Downstream actions (E5):</strong> (1) Watson to track listed software/technology comparable multiples as a leading indicator for EQT's own portfolio marks ahead of the next NAV update; (2) Watson to re-run the thematic read once <code>memory/thematics/active.md</code> is rebuilt, since the current file is under a standing staleness suspension and this Element was authored against the reports' own thematic content rather than the canonical thematics file</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e6-sell-side-earnings-momentum-nr" data-spy>Element E6 — Sell-side earnings momentum [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Momentum Consistency -- We are looking for alignment between fundamental and technical momentum -- both pointing in the same direction; avoiding divergence between improving fundamentals and a breaking chart.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E6 (Sell-side earnings momentum) is captured at Triaging via Master Rating MR2 (Section B.3); the full Element E6 is first assessed at Deep Dive</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-2-case-simplicity-c" data-spy><span class="id">Grp 2</span> Case simplicity <span class="g gC">C</span> <span class="secn">17 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 2 verdict. <span class="g gC">C</span></strong> E7 (Required case simplicity guardrails) grades D on a genuine complexity finding; E8 (Fit with acceptable case setups) grades B on a genuine setup-fit finding; the two roughly offset to a blended C for the Group.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e7-required-case-simplicity-guardrails-d" data-spy>Element E7 — Required case simplicity guardrails <span class="g gD">D</span> <span class="secn">7 findings</span></div>
+<div class="desc">Required Case Simplicity Guardrails -- We are looking for a focused, two-driver change case with a narrow perimeter, zero active non-case headwinds, and an honest-tracker IR style; avoiding multi-thesis complexity or noisy reporting.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E7 (Required case simplicity guardrails) verdict. <span class="g gD">D</span></strong> EQT is not a simple, single-driver bet. It runs 40-plus strategies across four segments, is mid-integration on a USD 3.2bn acquisition, and is simultaneously scaling a new private-wealth distribution channel, three live change-from-current items running in parallel. This Element carries double weight at Triaging.</li><li><strong>RA1 (Focused bet) verdict. <span class="g gC">C</span></strong> Borderline on driver count: the report itself names two dominant drivers but five total ranked drivers.</li><li><strong>RA2 (Narrow perimeter) verdict. <span class="g gF">F</span></strong> Clear fail, a 40-plus-strategy, four-segment, multi-geography platform is the opposite of a narrow perimeter.</li><li><strong>RA3 (Zero headwinds) verdict. <span class="g gD">D</span></strong> Clear fail, live headwinds exist (technology concentration, evergreen-liquidity precedent, supplier concentration).</li><li><strong>RA4 (Handful of change-from-current items) verdict. <span class="g gC">C</span></strong> Borderline, three genuinely material items are running concurrently (Coller integration, leadership bedding-in, private-wealth scale-up), one more than the "2 or less" test wants but each is well-flagged and dated.</li><li><strong>RA5 (Conservative investor relations) verdict. <span class="g gB">B</span></strong> Clean pass, the sandbagging pattern is explicit and sell-side confirmed.</li></ul></div>
+<div class="finding cq-level"><span class="fnum">1.</span><div class="ftext"><strong>E7 RA1 CQ1, 2 or less fulcrum drivers AND 4 or less key drivers? <span class="g gC">C</span></strong> Borderline pass on fulcrum drivers, borderline fail on total key-driver count<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>The report itself ranks the drivers, which is a genuine simplicity aid:</strong> flagship fund activation and exit-environment normalisation are named as the two highest-impact, most timing-exposed drivers, a clean fulcrum-driver pair</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>But the total named driver set runs to five:</strong> flagship activation, Coller integration, private-wealth expansion, exit normalisation and AI infrastructure scaling are all separately tracked, one more than the "4 or less" key-driver test wants</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>The two highest-impact drivers share a common failure mode:</strong> the report itself notes a simultaneous delay in flagship activation and exit normalisation would compound to hit both fee-related earnings and carry recognition in the same window, which is a genuine complexity/correlation risk worth flagging even where driver count is borderline</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">2.</span><div class="ftext"><strong>E7 RA2 CQ1, 10 or less geographies and/or business units? <span class="g gF">F</span></strong> No, clearly<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Four reporting segments from H1 2026:</strong> Private Capital, Real Assets, Real Estate and (post-Coller-close) Secondaries, each with its own sub-strategies and fund vintages</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Strategy count:</strong> <u>more than 40 investment strategies</u> across those four segments, spanning buyout, infrastructure, real estate, growth, venture, secondaries and now evergreen wealth vehicles, an order of magnitude beyond a narrow-perimeter business</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Geographic reach is genuinely global:</strong> flagship activity spans Europe, North America and Asia-Pacific (BPEA IX, the largest-ever Asia-Pacific dedicated PE fund, closed at its USD 15.6bn hard cap), reinforcing the multi-geography, multi-strategy read</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">3.</span><div class="ftext"><strong>E7 RA3 CQ1, Zero value-chain headwind risks to revenue? <span class="g gD">D</span></strong> No<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>Technology/software de-rating is a direct value-chain headwind</strong>, transmitting through NAV marks and delayed carry recognition on the <strong>30%</strong>-technology-exposed Private Equity book</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>Evergreen-liquidity fragility is an emerging value-chain headwind:</strong> the Partners Group gating episode is a live precedent for exactly the retail-distribution channel EQT is scaling into</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>Single-source supplier concentration (Citco, fund administration) is a structural, if currently latent, headwind</strong>, addressed in full at E11 below</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">4.</span><div class="ftext"><strong>E7 RA4 CQ1, 2 or less change-from-current items or problems? <span class="g gC">C</span></strong> Borderline, three material items, not two, but all well-flagged<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>Item one: Coller Capital integration</strong>, still subject to regulatory approval with an expected mid-to-late Q3 2026 close, and a real integration/culture-dilution risk given how rapidly EQT is scaling via M&amp;A</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>Item two: leadership bedding-in</strong>, with both the CEO (Franzen, since May 2025) and Chair (Salata, since May 2026) roles now filled but still in their first one-to-two years, alongside elevated employee turnover (<strong>17%</strong> in 2025, up from <strong>13%</strong>)</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>Item three: private-wealth channel scale-up</strong>, growing from two evergreen vehicles in 2024 to five by late 2025, which is a genuine operational and distribution-risk change-from-current item on top of the other two</div></div></div></div></div>
+<div class="finding cq-level"><span class="fnum">5.</span><div class="ftext"><strong>E7 RA5 CQ1, Company confirms guidance is conservative? <span class="g gB">B</span></strong> Yes, clearly, and independently confirmed by sell-side<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>The margin-guidance pattern is explicit:</strong> a medium-term fee-related EBITDA margin target of "<strong>55%</strong>+" against 2025 delivery of only <strong>52.3%</strong>, even as the broader adjusted EBITDA margin hit <strong>60.1%</strong>, Jefferies explicitly characterises this as deliberate sandbagging</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>The multi-year guidance-versus-actual pattern is consistent:</strong> FY2023, FY2024 and FY2025 adjusted EBITDA margin guidance of 55-<strong>65%</strong> was delivered at <strong>58%</strong>, <strong>58%</strong> and <strong>60%</strong> respectively, landing mid-to-high range each year rather than missing</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>FY25 beat consensus across every headline metric</strong> (revenue +<strong>2.67%</strong>, EBITDA +<strong>4.65%</strong>, fee-related EBITDA margin +1.20pp), reinforcing that the conservative-guidance pattern is a genuine, repeatable feature of management's communication style</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E7):</strong> the counter-view is that EQT's complexity is more apparent than real, because the vast majority of revenue still derives from a small number of large flagship funds and the 40-plus-strategy count is a fundraising-brochure artefact rather than an operating-complexity one, this has some merit (fee revenue is genuinely concentrated in a handful of flagship vehicles) but is not accepted as the primary read, because the <em>change-from-current</em> count (three live, simultaneous items: integration, leadership bedding-in, wealth-channel scale-up) is the more decision-relevant complexity measure at Triaging, and that count genuinely exceeds the guardrail</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (E7):</strong> (1) Watson to track fee-related revenue concentration by flagship fund at Early-Stage Assessment to test whether the "40-plus strategies" headline overstates true operating complexity; (2) Watson to monitor the Coller Capital regulatory-approval timeline explicitly, since a slippage in the Q3 2026 close date would add a fourth live change-from-current item</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e8-fit-with-acceptable-case-setups-b" data-spy>Element E8 — Fit with acceptable case setups <span class="g gB">B</span> <span class="secn">10 findings</span></div>
+<div class="desc">Fit with Acceptable Case Setups -- We are looking for clear membership of one or more of the seven acceptable setup archetypes; screens for Unacceptable (RA7) and False Friend (RA8) setups that would disqualify the case.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E8 (Fit with acceptable case setups) verdict. <span class="g gB">B</span></strong> EQT shows a credible primary fit with the "strong corporate change driven EPSU/EPT" setup (dated, verifiable leadership change and M&amp;A step-up) and a credible secondary fit with the "big demand change-driven EPSU/EPT" setup (secular allocation shift, oligopoly-like scaled-platform structure). Neither negative guardrail (unacceptable setups, false-friend setups) shows a clean match, though the false-friend test surfaces a genuine caution around one-off realisation gains. This is the carve-out floor Element (3 bullets minimum per Required Attribute and Core Question, no multiplier), the primary and secondary fit setups identified here deepen further at Early-Stage Assessment.</li><li><strong>Primary fit: RA3, Strong corporate change driven EPSU/EPT.</strong></li><li><strong>Secondary fit: RA2, Big demand change-driven EPSU/EPT.</strong></li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E8 RA1, Mis-modelled, high-quality EPS upgrader? <span class="g gC">C</span></strong> Partial fit, plausible but not the primary read<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>E8 RA1 CQ1, Is the sell-side under-modelling EQT's earnings power? <span class="g gC">C</span></strong> Some evidence for this, the sandbagging pattern (guidance consistently beaten) suggests sell-side models may anchor too closely to conservative management guidance rather than the higher realised delivery</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>Against this:</strong> the <em>current</em> revision trend is negative (SSEM graded D), which is the opposite signal from a "the street hasn't caught up yet" upgrader pattern, if anything the street has been cutting, not lagging a raise</div></div><div class="subfinding"><span class="subnum">1.3</span><div class="subtext"><strong>Net:</strong> a plausible longer-run dynamic (guidance-versus-delivery gap) coexists with a contradictory near-term signal (negative revisions), so this setup earns a partial rather than clean fit</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E8 RA2, Big demand change-driven EPSU or EPT? <span class="g gB">B</span></strong> Credible secondary fit<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>E8 RA2 CQ1, Is there a market-wide demand explosion? <span class="g gB">B</span></strong> Yes in a structural sense, global alternative AUM at USD 14.3tn growing at an <strong>11%</strong> CAGR, with private-wealth allocations still only <strong>5%</strong> of the addressable pool against <strong>60%</strong> for endowments, is closer to a structural demand shift than a single-quarter explosion, but the direction and scale both fit</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>E8 RA2 CQ2, Does the company hold a dominant competitive position? <span class="g gB">B</span></strong> Yes, EQT ranks number two globally in PE fundraising and is the top franchise in Asia-Pacific ex-BPEA, with the BPEA IX close at its USD 15.6bn hard cap evidencing genuine scaled demand for its fund products</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>E8 RA2 CQ3, Is the business model one-to-many scalable? <span class="g gB">B</span></strong> Yes, structurally, a single deal team and fund structure can absorb multiple LPs at near-zero marginal distribution cost once raised, which is the core operating-leverage logic behind the <strong>60.1%</strong> EBITDA margin</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>E8 RA2 CQ4, Is the market an oligopoly (structure and behaviour)? <span class="g gB">B</span></strong> Directionally yes, capital is consolidating toward a small number of scaled mega-managers (Blackstone, KKR, Carlyle, Partners Group, EQT), and M&amp;A activity (Coller Capital, at 8-<strong>15x</strong> EV/EBITDA sector pricing) is itself evidence of oligopolistic consolidation behaviour</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>E8 RA2 CQ5, Is there fixed-cost leverage for margin expansion? <span class="g gB">B</span></strong> Yes, flat headcount (c.1,874 FTEs) alongside <strong>16%</strong> revenue growth and a <strong>60.1%</strong> EBITDA margin (versus <strong>58%</strong> in the prior year) is direct evidence of operating leverage</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E8 RA3, Strong corporate change driven EPSU / EPT? <span class="g gB">B</span></strong> Credible primary fit; the strongest single setup match in this Element<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>E8 RA3 CQ1, Financial guidance increase? <span class="g gC">C</span></strong> Not a clean raise, guidance is stable and conservative rather than explicitly raised, though delivery has consistently landed above the midpoint</div></div><div class="subfinding"><span class="subnum">3.2</span><div class="subtext"><strong>E8 RA3 CQ2, Shareholder returns increase? <span class="g gB">B</span></strong> Yes, the FY25 dividend rose <strong>16%</strong> to SEK 5.00 per share, and total distributions of EUR 757-758m split between EUR 461m of dividends and EUR 296-297m of buybacks</div></div><div class="subfinding"><span class="subnum">3.3</span><div class="subtext"><strong>E8 RA3 CQ3, Balance sheet utilisation increase? <span class="g gC">C</span></strong> Modest, net debt of EUR 1,448m at <strong>0.9x</strong> adjusted EBITDA (source also cites <strong>1.2x</strong> pro forma post-Coller) is conservative, so leverage is not being materially stepped up, though the Coller deal is itself a large, debt-free (all-share) balance-sheet use</div></div><div class="subfinding"><span class="subnum">3.4</span><div class="subtext"><strong>E8 RA3 CQ4, Perimeter / composition reduction? <span class="g gC">C</span></strong> No, the perimeter is expanding (Coller adds a fourth segment), the opposite of a simplification signal, though this is a strategic add rather than uncontrolled scope creep</div></div><div class="subfinding"><span class="subnum">3.5</span><div class="subtext"><strong>E8 RA3 CQ5, Strategically-sensible mergers and acquisitions step-up? <span class="g gB">B</span></strong> Yes, clearly, the Coller Capital acquisition is exactly this pattern: a scaled, all-share deal adding a complementary business line (Secondaries and Solutions) with a stated integration ambition (double fee-paying AUM within four years)</div></div><div class="subfinding"><span class="subnum">3.6</span><div class="subtext"><strong>E8 RA3 CQ6, Strategy / strategic priorities change? <span class="g gB">B</span></strong> Yes, the explicit pivot toward private wealth (evergreen vehicles growing from two to five in under two years) and toward secondaries (via Coller) are both real strategic-priority shifts, not incremental adjustments</div></div><div class="subfinding"><span class="subnum">3.7</span><div class="subtext"><strong>E8 RA3 CQ7, Standards improvement? <span class="g gC">C</span></strong> Some evidence, procurement savings of EUR 140m (2023-2025) and a <strong>75%</strong> reduction in in-house consultants both point to operating-standard tightening, though this is efficiency-driven rather than a governance or disclosure-standard uplift</div></div><div class="subfinding"><span class="subnum">3.8</span><div class="subtext"><strong>E8 RA3 CQ8, Other leadership / actor changes? <span class="g gB">B</span></strong> Yes, the Executive Committee was reduced from 10 to 8 members alongside the CEO/Chair changes, a genuine broader leadership-structure change, not just the top two roles</div></div><div class="subfinding"><span class="subnum">3.9</span><div class="subtext"><strong>E8 RA3 CQ9, CEO change? <span class="g gB">B</span></strong> Yes, and completed rather than pending, Per Franzen became CEO in May 2025, removing the succession-uncertainty overhang this setup is designed to capture</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E8 RA4, Change-from-current clearing in a high-quality compounder? <span class="g gC">C</span></strong> Partial fit; some clearing has genuinely happened, but not all of it<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>E8 RA4 CQ1, No CEO? <span class="g gB">B</span></strong> Cleared, the CEO seat is filled and has been for over a year</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>E8 RA4 CQ2, Strategy vacuum? <span class="g gB">B</span></strong> Cleared, strategy is explicit (flagship fund activation, Coller integration, private-wealth scale-up), not vacant</div></div><div class="subfinding"><span class="subnum">4.3</span><div class="subtext"><strong>E8 RA4 CQ3, Investment phase (near-term financials down, mid-term financials up)? <span class="g gC">C</span></strong> Partially, Q1 2026 softness in flows and exits could be read as a near-term dip ahead of the Coller integration and flagship activation lifting mid-term financials, but this has not yet been confirmed as a deliberate investment-phase pattern versus genuine deceleration</div></div><div class="subfinding"><span class="subnum">4.4</span><div class="subtext"><strong>E8 RA4 CQ4, Guidance for mid-term (might be up, to be determined)? <span class="g gC">C</span></strong> Directionally yes, Deutsche Bank projects a <strong>20%</strong> EPS CAGR through 2029, but this is a sell-side house view rather than explicit company mid-term guidance</div></div><div class="subfinding"><span class="subnum">4.5</span><div class="subtext"><strong>E8 RA4 CQ5, Company mis-execution (guidance-delivery risk down)? <span class="g gB">B</span></strong> Cleared, no evidence of mis-execution; the sandbagging pattern is the opposite signal (guidance consistently met or beaten)</div></div><div class="subfinding"><span class="subnum">4.6</span><div class="subtext"><strong>E8 RA4 CQ6, Market-level demand down? <span class="g gC">C</span></strong> Not cleared, Q1 2026 gross inflows and signed exits both missed consensus by more than a third, which is at minimum a near-term demand-timing question, even if the structural demand backdrop (E8 RA2 CQ1) remains intact</div></div><div class="subfinding"><span class="subnum">4.7</span><div class="subtext"><strong>E8 RA4 CQ7, Competition down (near-term pricing, mid-term relative competitive advantage)? <span class="g gC">C</span></strong> Mixed, EQT defends a premium <strong>1.40%</strong> blended fee against Partners Group's 1.15-<strong>1.20%</strong> and Carlyle's lower fee tiers, but large LPs are pushing for fee-free co-investment rights, a genuine competitive/fee-blending pressure</div></div><div class="subfinding"><span class="subnum">4.8</span><div class="subtext"><strong>E8 RA4 CQ8, Disruption to earnings growth profile / investment case bankability down? <span class="g gD">D</span></strong> Not cleared, the technology-concentration exposure is precisely this kind of mid-to-long-term disruption risk to the earnings growth profile, and it is live, not resolved</div></div><div class="subfinding"><span class="subnum">4.9</span><div class="subtext"><strong>E8 RA4 CQ9, High quality business on a mid-term / long-term basis? <span class="g gB">B</span></strong> Cleared, <strong>60.1%</strong> EBITDA margin, <strong>40.96%</strong> ROE, and a c.<strong>13.2%</strong> three-year revenue CAGR against a <strong>10%</strong> peer average are all genuine high-quality-business signals</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E8 RA5, Huge change-from-current clearing event in solid quality? <span class="g gD">D</span></strong> Weak fit, no single "kitchen-sink" clearing event is evidenced<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>E8 RA5 CQ1, Bottom-quartile trading multiple? <span class="g gC">C</span></strong> Partial, 14th-percentile P/E is low but the report frames this against EQT's own ten-year history, not an explicit peer-quartile ranking, so the test is directionally supportive but not confirmed on a like-for-like basis</div></div><div class="subfinding"><span class="subnum">5.2</span><div class="subtext"><strong>E8 RA5 CQ2, Sell-side estimates cut deeply across all analysts to conservative levels? <span class="g gC">C</span></strong> Partial, target-price cuts are visible (Jefferies SEK 410 to 370, Deutsche Bank SEK 405 to 380, DNB Carnegie SEK 430 to 360) but the cuts are moderate (single-digit to low-teens percentage reductions), not a deep, capitulatory reset</div></div><div class="subfinding"><span class="subnum">5.3</span><div class="subtext"><strong>E8 RA5 CQ3, Company numerical guidance rebased lower, kitchen-sinked? <span class="g gD">D</span></strong> No, guidance has not been rebased lower; if anything the pattern is stable conservative guidance consistently beaten</div></div><div class="subfinding"><span class="subnum">5.4</span><div class="subtext"><strong>E8 RA5 CQ4, Disruptive impact on day-to-day operations / revenue in last twelve months? <span class="g gD">D</span></strong> Not clearly evidenced, Q1 2026 softness is a miss against consensus expectations, not a disruptive operational event of the "cockroach" severity this test is designed to catch</div></div><div class="subfinding"><span class="subnum">5.5</span><div class="subtext"><strong>E8 RA5 CQ5, "You know" / capitulation check on guidance, sell-side, share price? <span class="g gD">D</span></strong> No evidence of a capitulation moment; the share price sits mid-range (SEK 318.30 against a SEK 259-383 52-week range), not at a washed-out low</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>E8 RA6, Trough-on-trough turn in solid quality cyclical? <span class="g gD">D</span></strong> Weak fit, EQT is not primarily a classic cyclical, though the carry/realization component has cyclical characteristics<div class="subfindings"><div class="subfinding"><span class="subnum">6.1</span><div class="subtext"><strong>E8 RA6 CQ1, Bottom-quartile trading multiple? <span class="g gC">C</span></strong> As above, directionally supportive but not confirmed peer-quartile</div></div><div class="subfinding"><span class="subnum">6.2</span><div class="subtext"><strong>E8 RA6 CQ2, End-market demand decreased for 18 months or more? <span class="g gD">D</span></strong> No, the structural demand backdrop (E8 RA2 CQ1) has been growing, not shrinking, over that horizon; the softness is confined to the most recent quarter</div></div><div class="subfinding"><span class="subnum">6.3</span><div class="subtext"><strong>E8 RA6 CQ3, Competitive behaviour calmed versus price-down for volume gain? <span class="g gC">C</span></strong> Partial, EQT defends its premium fee (<strong>1.40%</strong> blended) rather than discounting, which is the opposite of a price-down dynamic, though fee-blending pressure from co-investment demand is a related, softer version of this force</div></div><div class="subfinding"><span class="subnum">6.4</span><div class="subtext"><strong>E8 RA6 CQ4, New contract pricing levels now stable? <span class="g gB">B</span></strong> Yes, the <strong>1.40%</strong> blended fee rate has been stable since IPO</div></div><div class="subfinding"><span class="subnum">6.5</span><div class="subtext"><strong>E8 RA6 CQ5, Company executed a right-sizing programme for six months or more? <span class="g gC">C</span></strong> Partial, headcount is flat and consultant usage cut <strong>75%</strong>, evidence of cost discipline, but not framed in the source as a formal right-sizing response to a downturn</div></div><div class="subfinding"><span class="subnum">6.6</span><div class="subtext"><strong>E8 RA6 CQ6, Competitors executed right-sizing for six months or more? <span class="g gD">D</span></strong> Not evidenced in the source material for this specific test</div></div><div class="subfinding"><span class="subnum">6.7</span><div class="subtext"><strong>E8 RA6 CQ7, Sell-side estimates cut deeply across all analysts to conservative levels? <span class="g gC">C</span></strong> As RA5 CQ2, moderate rather than deep cuts</div></div><div class="subfinding"><span class="subnum">6.8</span><div class="subtext"><strong>E8 RA6 CQ8, Company guidance rebased lower, kitchen-sinked? <span class="g gD">D</span></strong> As RA5 CQ3, no</div></div><div class="subfinding"><span class="subnum">6.9</span><div class="subtext"><strong>E8 RA6 CQ9, Capitulation check? <span class="g gD">D</span></strong> As RA5 CQ5, no</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>E8 RA7, Fit with unacceptable case setups? [NEGATIVE GUARDRAIL]: <span class="g gB">B</span></strong> No clear match found, a good (clean) outcome for this guardrail<div class="subfindings"><div class="subfinding"><span class="subnum">7.1</span><div class="subtext"><strong>E8 RA7 CQ1, Does the case resemble a known unacceptable setup pattern? <span class="g gB">B</span></strong> No evidence of the classic unacceptable patterns (a business with no genuine change force riding pure multiple re-rating, or a leveraged roll-up with no organic growth), EQT's change forces are real and its growth is substantially organic (fee-paying AUM growth, flagship fund activation) rather than purely acquisition-driven</div></div><div class="subfinding"><span class="subnum">7.2</span><div class="subtext"><strong>Genuine change forces are present, not manufactured:</strong> the completed succession and the Coller M&amp;A are dated, verifiable events, which is the opposite of an unacceptable "story stock with no catalyst" pattern</div></div><div class="subfinding"><span class="subnum">7.3</span><div class="subtext"><strong>This is a clean pass</strong>, and the strongest of the two negative-guardrail results</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>E8 RA8, Fit with false friend case setups? [NEGATIVE GUARDRAIL]: <span class="g gC">C</span></strong> A partial, genuine caution surfaces here, not a clean pass<div class="subfindings"><div class="subfinding"><span class="subnum">8.1</span><div class="subtext"><strong>E8 RA8 CQ1, Does the apparent quality or momentum rest on non-repeatable items? <span class="g gC">C</span></strong> Partially yes, the &gt;USD 20bn Galderma gain (the largest single private-equity capital gain in history, at <strong>4.3x</strong> Gross MOIC) is an exceptional, non-repeatable outlier that materially flattered FY25's <strong>60.1%</strong> EBITDA margin and the record EUR 34-38bn realization total; strip it out and the underlying fee-related EBITDA margin (<strong>52.3%</strong>) is a more representative, and considerably less flattering, run-rate</div></div><div class="subfinding"><span class="subnum">8.2</span><div class="subtext"><strong>This is the single most important "false friend" caution in the whole memo:</strong> a reader anchoring on the headline <strong>60.1%</strong> margin or the record realization figure without adjusting for the Galderma outlier would be over-crediting the quality of the recurring business</div></div><div class="subfinding"><span class="subnum">8.3</span><div class="subtext"><strong>The mitigant:</strong> management's own conservative fee-related EBITDA margin guidance (<strong>55%</strong>+) is struck closer to the true recurring run-rate, which suggests management itself is not trying to obscure this, but the market-facing headline numbers still carry real false-friend risk if taken at face value</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">9.</span><div class="ftext"><strong>Counter-view considered (E8):</strong> the counter-view is that the primary setup fit (RA3, corporate change) is overstated because much of the "change" is really just an orderly, long-planned succession rather than a discontinuous catalyst, this is rejected as the primary read because the Coller Capital acquisition is independently a genuine, discontinuous, scale-changing corporate action on top of the succession, and the two together (leadership change plus M&amp;A step-up) are a stronger combined signal than either alone</div></div>
+<div class="finding ra-level"><span class="fnum">10.</span><div class="ftext"><strong>Downstream actions (E8):</strong> (1) Watson to strip the Galderma outlier from FY25 margin and realization figures at Early-Stage Assessment to establish a clean, non-outlier-adjusted run-rate for E2 (Required case outputs); (2) Watson to name the two confirmed fit setups (RA3 primary, RA2 secondary) explicitly in the ESA brief so the carve-out deepens the right two setups rather than re-sweeping all six</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-3-core-philosophy-c" data-spy><span class="id">Grp 3</span> Core philosophy <span class="g gC">C</span> <span class="secn">11 findings</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 3 verdict. <span class="g gC">C</span></strong> At Triaging, only E11 (Value-chain dynamics) is in scope, second pass, and grades C. E9 (Great operator), E10 (Advantaged business), E12 (Supportive industry structure) and E13 (High secular growth potential) are not applicable at this stage.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e9-great-operator-nr" data-spy>Element E9 — Great operator [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Great Operator -- We are looking for a CEO who is Right Direction (strategic clarity), Right Resources (capital allocation and team), and Right Record (track record across conditions); scored on Force, Agency, Dynamism.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E9 (Great operator) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e10-advantaged-business-and-widening-competitive-adv" data-spy>Element E10 — Advantaged business and widening competitive advantage [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Advantaged Business + Widening Competitive Advantage -- We are looking for a genuine and widening competitive advantage -- whether moat (regulatory, IP, network) or operational (branch density, service lock-in, proprietary model); avoiding narrowing advantages.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E10 (Advantaged business and widening competitive advantage) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e11-value-chain-dynamics-c" data-spy>Element E11 — Value-chain dynamics <span class="g gC">C</span> <span class="secn">7 findings</span></div>
+<div class="desc">Value-Chain Dynamics -- We are looking for a supportive value chain on five dimensions: demand-side strength, competitive supportiveness, low disruption threat, benign political/regulatory backdrop, and supplier bargaining-power advantage.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Element E11 (Value-chain dynamics) verdict. <span class="g gC">C</span></strong> A genuinely strong, sticky institutional demand base and clear evidence of margin-capturing vertical integration are offset by a real single-source supplier concentration risk (Citco) and by rising fee-blending pressure from large LPs demanding co-investment rights. This is a second-pass, light-depth read at Triaging.</li><li><strong>RA1 (Demand side strong/fragile) verdict. <span class="g gB">B</span></strong> Genuinely strong and sticky.</li><li><strong>RA2 (Competitive supportiveness/aggression) verdict. <span class="g gC">C</span></strong> Mixed, consolidation favours EQT, fee-blending pressure works against it.</li><li><strong>RA3 (Disruption forces) verdict. <span class="g gD">D</span></strong> Real, live disruption forces identified (technology, retailization).</li><li><strong>RA4 (Political/regulatory) verdict. <span class="g gC">C</span></strong> Manageable compliance-cost creep, no acute regulatory attack surface.</li><li><strong>RA5 (Supportive supplier side) verdict. <span class="g gD">D</span></strong> A genuine single-source concentration risk.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>E11 RA1, Demand side, strong / robust or fragile / negative? <span class="g gB">B</span></strong> Strong and sticky<div class="subfindings"><div class="subfinding"><span class="subnum">1.1</span><div class="subtext"><strong>E11 RA1 CQ1, Customer demand: <span class="g gB">B</span></strong> More than 1,400 active global clients, with pension funds at <strong>40%</strong> of pro forma commitments and sovereign wealth fund commitments up from <strong>13%</strong> (2019) to <strong>22%</strong> (2025), a broadening, not narrowing, institutional base</div></div><div class="subfinding"><span class="subnum">1.2</span><div class="subtext"><strong>E11 RA1 CQ2, Route to market / intermediaries: <span class="g gB">B</span></strong> Roughly <strong>70%</strong> of Infrastructure VI commitments came from pre-existing Infrastructure V investors and <strong>25%</strong> of BPEA IX capital came from existing EQT institutional clients, strong evidence of repeat-LP demand reducing distribution-acquisition cost, though two-thirds of clients have used only one strategy in five years, a cross-sell opportunity not yet captured</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>E11 RA2, Competitive supportiveness or aggression? <span class="g gC">C</span></strong> Mixed<div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>E11 RA2 CQ1, Existing competition: <span class="g gC">C</span></strong> Scale peers (Blackstone USD 938bn FPAUM, KKR USD 615bn, Carlyle USD 333bn, Partners Group CHF 185bn) compete directly for the same LP capital and deal flow; EQT defends a premium <strong>1.40%</strong> blended fee against Partners Group's 1.15-<strong>1.20%</strong>, evidence of relative pricing power, not weakness</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>E11 RA2 CQ2, Adjacencies entering: <span class="g gC">C</span></strong> Captive-insurance rivals (Apollo/Athene, KKR/Global Atlantic) secure permanent capital that EQT can only partially access via the Coller-State Street relationship, a genuine adjacency-based competitive pressure</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>E11 RA2 CQ3, Vanilla new entrants: <span class="g gB">B</span></strong> Limited, the capital, track record and LP-relationship barriers to entry at EQT's scale are high; new entrants realistically compete at a smaller scale, not head-on for flagship-fund capital</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>E11 RA2 CQ4, Orthogonal / innovative new entrants: <span class="g gC">C</span></strong> Democratization of access (retail platforms, evergreen vehicles) is itself a disruption vector that both EQT and new entrants are racing to capture, a genuinely two-sided dynamic</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>E11 RA2 CQ5, Substitutes / alternatives: <span class="g gC">C</span></strong> Public market alternatives (listed equities, direct lending vehicles) compete for the same institutional and retail capital pool, particularly as private-wealth investors compare evergreen private-markets products against liquid alternatives</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>E11 RA3, Disruption forces? <span class="g gD">D</span></strong> Real and live, the weakest sub-test in this Element<div class="subfindings"><div class="subfinding"><span class="subnum">3.1</span><div class="subtext"><strong>E11 RA3 CQ1, Disruption to demand, competition, regulators, suppliers, political, or other actors: <span class="g gD">D</span></strong> Two concrete disruption forces are already visible in the numbers: technology/software de-rating (the <strong>30%</strong>-versus-<strong>7%</strong>-peer exposure) and evergreen-liquidity contagion risk (the Partners Group gating precedent), both are live, not hypothetical, and both directly threaten near-term case delivery</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>E11 RA4, Political / regulatory? <span class="g gC">C</span></strong> Manageable, not acute<div class="subfindings"><div class="subfinding"><span class="subnum">4.1</span><div class="subtext"><strong>E11 RA4 CQ1, Regulator strengths-weaknesses-opportunities-threats: <span class="g gC">C</span></strong> AIFMD II and retail-liquidity regulation raise the compliance-cost floor for the evergreen private-wealth push, a genuine but manageable cost headwind rather than an existential threat</div></div><div class="subfinding"><span class="subnum">4.2</span><div class="subtext"><strong>E11 RA4 CQ2, Political actor strengths-weaknesses-opportunities-threats: <span class="g gC">C</span></strong> The Coller Capital acquisition still requires regulatory approval ahead of its targeted Q3 2026 close, a real but standard-course M&amp;A execution risk rather than a novel political threat</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>E11 RA5, Supportive supplier side? <span class="g gD">D</span></strong> A genuine, structural concentration risk<div class="subfindings"><div class="subfinding"><span class="subnum">5.1</span><div class="subtext"><strong>E11 RA5 CQ1, Supplier side strengths-weaknesses-opportunities-threats: <span class="g gD">D</span></strong> Heavy reliance on a single provider, Citco (since 2014), for fund administration, accounting and anti-money-laundering functions is a material single-source concentration risk; a severe disruption at Citco could freeze global fund reporting and client distributions across the entire platform, a genuinely structural vulnerability that has not been diversified away</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Counter-view considered (E11):</strong> the counter-view is that the demand-side strength so dominates the value-chain picture that this should grade B, not C, this is rejected as the primary read because the Citco single-source concentration is a genuinely structural, platform-wide operational risk (not a diversification-hedgeable market risk), and a value-chain grade that ignores a single point of failure of that magnitude would understate the Element's true risk profile</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>Downstream actions (E11):</strong> (1) Watson to research whether EQT has any disaster-recovery or dual-sourcing arrangement for fund administration beyond Citco, as this is not addressed in either report on disk; (2) Watson to monitor the AIFMD II implementation timeline and its specific cost impact on EQT's evergreen private-wealth vehicles ahead of Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e12-supportive-industry-structure-nr" data-spy>Element E12 — Supportive industry structure [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Supportive Industry Structure -- We are looking for a market that is consolidated or consolidating, with gravitational pull toward further consolidation, cooperative competitor attitudes, and improving competitive trend.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E12 (Supportive industry structure) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e13-high-secular-growth-potential-nr" data-spy>Element E13 — High secular growth potential [NR] <span class="secn">1 finding</span></div>
+<div class="desc">High Secular Growth Potential -- We are looking for exposure to structural, GDP-independent growth drivers: regulatory mandates, demographic shifts, or technological change; the highest-conviction ESA element.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E13 (High secular growth potential) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-4-case-riskiness-c" data-spy><span class="id">Grp 4</span> Case riskiness <span class="g gC">C</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 4 verdict. <span class="g gC">C</span></strong> Light first-pass framing only at Triaging; no Element-level risk work (E15-E19) is undertaken until Deep Dive. Four plausible risk vectors are named below as forward flags for the ten Invalidation thresholds review that formally happens at Deep Dive.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Framing note (Group 4, c.100 words):</strong> Four risk vectors surface repeatedly across both source reports without yet being formally tested against the ten Invalidation thresholds (that review is Deep Dive-scope, Element E15 RA1). First, technology/software de-rating risk inside the Private Equity book (<strong>30%</strong> exposure versus a <strong>7%</strong> peer average) is the most quantified and most immediate. Second, evergreen-liquidity contagion risk is nascent but real, evidenced by Partners Group's redemption gate on a comparable product. Third, the Citco single-source supplier concentration is a structural operational risk with no evidenced mitigant on disk. Fourth, realization and exit-timing slippage (Q1 2026's miss on gross exits) could compound with a delayed Coller close or EQT XI activation, per the report's own driver-correlation note</div></div>
+</div><!-- /group-wrap -->
+<div class="group-wrap">
+<div class="group-head" id="group-5-case-optionality-nr" data-spy><span class="id">Grp 5</span> Case optionality [NR] <span class="g gNR">NR</span> <span class="secn">1 finding</span></div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Group 5.</strong> Not yet in scope at Triaging; first written at Early-Stage Assessment.</li></ul></div>
+<div class="ele-wrap">
+<div class="bar h-ele" id="element-e20-nice-to-have-attributes-nr" data-spy>Element E20 — Nice-to-have attributes [NR] <span class="secn">1 finding</span></div>
+<div class="desc">Nice-to-Have Attributes -- Documents non-load-bearing upside options and self-righting behaviours additive to the main case: receivables recovery, strategic restructuring, balance sheet flexibility, or asymmetric beat potential.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Not applicable at this stage:</strong> Element E20 (Nice-to-have attributes) is first assessed at Early-Stage Assessment</div></div>
+</div><!-- /ele-wrap -->
+</div><!-- /group-wrap -->
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-d-investment-case-components-pillar-iii" data-spy><span class="id">D</span> Investment case components (Pillar III)</div>
+<div class="desc">Detailed Analysis -- We are looking for in-depth, evidence-based analysis behind each pillar score, with specific named catalysts and honest treatment of counterpoints; avoiding high-level generalisations.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Not applicable at Triaging.</strong> Pillar III (the position-management playbook, the ten Invalidation thresholds, and the two 7-column driver tables) first appears at Early-Stage Assessment, once the change-forces case (Pillar I) and building-blocks case (Pillar II) have progressed far enough to support an in-flight monitoring plan.</li></ul></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-e-actions-and-recommendation" data-spy><span class="id">E</span> Actions and Recommendation <span class="secn">3 findings</span></div>
+<div class="desc">Recommendation -- We are looking for a clear, honest summary of the overall ESA grade, the gating events before acting, and the Deep Dive work plan; avoiding both over-conviction and artificial hedging.</div>
+<div class="lead"><div class="lead-label">Judgement summary</div><ul class="lead-bullets"><li><strong>Memo-level recommendation. <span class="g gC">C</span></strong> Progress to Early-Stage Assessment, medium conviction, a real, verifiable change-forces case earns its place in the funnel, but the negative earnings-revision trend and genuine business complexity mean conviction should not run ahead of what the next stage's financial-manifestation test can confirm.</li></ul></div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Recommendation:</strong> Progress to Early-Stage Assessment, medium conviction. The Triaging qualitative test ("does the case have large amounts of positive change forces?") is met on the strength of E1: a completed leadership succession, a transformative and dated M&amp;A step-up, and two flagship funds activating within the next two to three quarters are all real, verifiable change forces, not narrative. Conviction is capped at medium, not high, because Master Rating 2 (Sell-side earnings momentum, data-pinned at D) and Element E7 (Case simplicity, graded D) both point the other way, and Early-Stage Assessment's core test, do these change forces manifest in the financials, and is there a bankable foundation, is exactly the test that would resolve the tension</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>If progressing, next-stage actions and key questions for Early-Stage Assessment:</strong><div class="subfindings"><div class="subfinding"><span class="subnum">2.1</span><div class="subtext"><strong>Key question 1, is the Q1 2026 flow/exit miss timing noise or genuine deceleration?</strong> This is the single most decision-relevant open question. The Q2 2026 interim print (expected inside the ESA window) is the first hard data point; a rebound in gross inflows and signed exits toward the FY25 run-rate would materially firm up conviction, while a second consecutive miss would be a strong signal to reconsider</div></div><div class="subfinding"><span class="subnum">2.2</span><div class="subtext"><strong>Key question 2, is the technology-concentration exposure contained or structural?</strong> E2 (Required case outputs) and E3 (Valuation upside), both first written at Early-Stage Assessment, should explicitly quantify how much of the <strong>78%</strong>-unrealised EQT IX value is technology-exposed, and whether the 20-<strong>30%</strong> EBITDAC growth in EQT's own vertical software assets is enough to offset listed-comparable de-rating risk</div></div><div class="subfinding"><span class="subnum">2.3</span><div class="subtext"><strong>Key question 3, does the 40-plus-strategy complexity finding (Element E7) hold up once Element E9 (Great operator), Element E10 (Advantaged business), Element E12 (Supportive industry structure) and Element E13 (High secular growth potential) open at Early-Stage Assessment?</strong> A genuinely great operator (Element E9) and a genuinely advantaged business (Element E10) can carry more operating complexity than a mediocre one; the quality tests that open at Early-Stage Assessment are the right place to re-test whether Element E7's D grade should be read as a standalone negative or as the acceptable cost of scale for a top-two global platform</div></div><div class="subfinding"><span class="subnum">2.4</span><div class="subtext"><strong>Key question 4, does the false-friend caution on Galderma (E8 RA8) meaningfully change the case once E2 strips the outlier out?</strong> A clean, Galderma-adjusted fee-related earnings and realization run-rate at Early-Stage Assessment would either confirm the underlying business is genuinely strong without the outlier, or reveal that headline FY25 quality metrics were more flattered by the one-off than the Triaging-level read can currently tell</div></div><div class="subfinding"><span class="subnum">2.5</span><div class="subtext"><strong>Timeline:</strong> target Early-Stage Assessment authoring after the Q2 2026 interim print (expected within the funnel's normal cadence), so key question 1 can be answered with real data rather than a forecast</div></div></div></div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Two downstream actions (memo-level):</strong> (1) Watson to brief the Chief of Staff to generate the Leadership Foundations report ahead of Early-Stage Assessment, given E9 (Great operator) opens there and the Franzen/Salata succession is the single most relevant open management-quality question; (2) Watson to log a calendar flag for the Q2 2026 EQT interim results release and re-open this case for the Early-Stage Assessment pass immediately after that print, rather than on a generic time-based schedule</div></div>
+</div><!-- /sec-wrap -->
+<div class="sec-wrap">
+<div class="bar h-sec" id="section-f-appendices" data-spy><span class="id">F</span> Appendices <span class="secn">14 findings</span></div>
+<div class="desc">Quality Control -- The research sources underpinning the memo and QC checks verifying data freshness, methodology compliance, and assessment consistency.</div>
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-1-source-register" data-spy><span class="id">F.1</span> Source register <span class="secn">6 findings</span></div>
+<div class="desc">Research Sources -- The AlphaSense research reports, financial data, and other primary sources underlying this memo, with word counts and dates.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Change Forces report</strong> [AS], <code>Files/EQT-SE/41-change-forces/compact-watson.md</code>, submitted 08-Jul-2026, production timestamp 09-Jul-2026, identity-confirmed (two-signal). Primary source for E1, E5, E7, E8 (setup signature), the Master Ratings narrative, and the leadership/M&amp;A/valuation content throughout Section B and C</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Business Foundation report</strong> [AS], <code>Files/EQT-SE/42-business-foundations/compact-watson.md</code>, submitted 01-Jul-2026, production timestamp 01-Jul-2026, identity-confirmed (two-signal). Above the Triaging floor (only Change Forces is required); used for E11 (value-chain, supplier, competitive-landscape content), the business-description content in B.1, and peer-benchmark figures (Partners Group, Blackstone, KKR, Carlyle, Bridgepoint, CVC) throughout</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Master-dashboard local data</strong> [internal], <code>master-dashboard/data/prices.json</code> (17-Jul-2026, technical/price data for Section A and MR1); <code>master-dashboard/data/factset-valuation.json</code> and <code>master-dashboard/data/factset-ssem.json</code> (both file-modified 16-Jul-2026, within the 14-day staleness threshold, valuation and sell-side revision data for Section A, MR2, and E1 RA2's Core Questions on mispricing and trading multiple)</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Ratings snapshot</strong> [internal], <code>databases/ratings-snapshot.json</code>, last edited 11-Jul-2026 (Notion sync); source of the data-pinned MR1 (<code>p1_technical_momentum</code> = C) and MR2 (<code>p5_ssem</code> = D) grades per the locked 09-Jul-26 Master Ratings sourcing rule</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Cohort membership</strong> [internal], <code>databases/data/cohorts-v3.json</code>, cohort 01.010 "Mega private-markets platform managers, listed general partners (multi-strategy)": CVC-NL, EQT-SE, PGHN-CH, RF-FR, BPT-GB. No cohort peer carries an on-disk Change Forces report or A&amp;J memo as of this memo's date; grading throughout is struck against the named public peers (Partners Group, Blackstone, KKR, Carlyle, Bridgepoint, CVC) quoted inside EQT's own two reports</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Reports not yet on disk:</strong> Leadership Foundations and Risks family reports are absent. Neither is required at Triaging (Change Forces is the sole floor requirement); Leadership Foundations is flagged as a priority ahead of Early-Stage Assessment given E9 (Great operator) opens at that stage</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-2-process-notes" data-spy><span class="id">F.2</span> Process notes <span class="secn">8 findings</span></div>
+<div class="desc">QC Flags -- Known data gaps, timeliness caveats, methodological notes, and departures from standard SOP.</div>
+<div class="finding ra-level"><span class="fnum">1.</span><div class="ftext"><strong>Data discrepancy, total FY25 realizations:</strong> the Change Forces digest states "total realizations surged to €<strong>34bn</strong> (from €<strong>11bn</strong> in 2024)"; the Business Foundation digest separately states "a record €<strong>38bn</strong> in total exit realizations in FY25." Both figures are traced to source in their respective reports; the discrepancy is not resolved here (possibly different realization definitions, e.g. signed versus completed, or gross versus including co-investment). Flagged for Early-Stage Assessment to reconcile against the FY25 annual report directly</div></div>
+<div class="finding ra-level"><span class="fnum">2.</span><div class="ftext"><strong>Data discrepancy, net debt / leverage:</strong> the Change Forces digest states net debt of EUR 1,448m at "<strong>0.9x</strong> Adjusted EBITDA"; the Business Foundation digest states net debt-to-EBITDA of "<strong>1.2x</strong>" (described as pro forma, likely reflecting the pending Coller Capital debt-funding impact). Both are internally consistent with their own stated basis; not resolved here, flagged for Early-Stage Assessment</div></div>
+<div class="finding ra-level"><span class="fnum">3.</span><div class="ftext"><strong>Data discrepancy, technology exposure percentage:</strong> the Change Forces digest cites Redburn's "<strong>30%</strong> Private Equity portfolio exposure to technology" figure prominently; the Business Foundation digest separately states technology is "approximately <strong>7%</strong> of total group assets" and "approximately <strong>14%</strong> of EQT's Private Capital segment assets." These are not contradictory (different denominators: total group AUM versus the Private Equity sub-portfolio versus the Private Capital segment) but the memo has been careful throughout to specify which denominator applies in each instance to avoid conflating them</div></div>
+<div class="finding ra-level"><span class="fnum">4.</span><div class="ftext"><strong>Data discrepancy, knowledge-level flag on the ratings snapshot:</strong> <code>databases/ratings-snapshot.json</code> shows <code>"knowledge_level": "4. ESA"</code> for EQT-SE, which would ordinarily imply an Early-Stage Assessment memo already exists. No such memo, nor any prior-stage A&amp;J memo, was found on disk under <code>Files/EQT-SE/A-J-memo/</code> or any legacy stage folder as of this memo's authoring date (19-Jul-2026); the dedup check per the brief confirmed clear. This field is flagged as likely stale or set by a separate process (e.g. an earlier manual Notion edit) rather than reflecting an actual filed memo, and is not treated as a blocker per the explicit brief instruction to proceed on the on-disk dedup finding</div></div>
+<div class="finding ra-level"><span class="fnum">5.</span><div class="ftext"><strong>Working assumption flagged:</strong> the "MR Summary" grade on the Section A snapshot tile (<span class="g gC">C</span>) is Watson's own blended read across all six Master Ratings, since the SOP does not specify a mechanical roll-up formula for this single-tile summary; it is presented as a judgement call, not a data-pinned figure (unlike MR1 and MR2, which are)</div></div>
+<div class="finding ra-level"><span class="fnum">6.</span><div class="ftext"><strong>Working assumption flagged:</strong> <code>memory/thematics/active.md</code> is under a standing staleness suspension (10-Jun-26 note in <code>CLAUDE-CANONICAL.md</code>) pending rebuild. Element E5 (Thematic fit) was authored fresh against the thematic content embedded in EQT's own two reports (bear-market defensiveness of the fee base, AI/software de-rating exposure, macro/FX sensitivity) rather than against the suspended file, per the Thinking SOP's own instruction that Watson may author E5's Core Questions fresh where the canonical thematics file is not current</div></div>
+<div class="finding ra-level"><span class="fnum">7.</span><div class="ftext"><strong>No self-initiated research queries were run for this memo.</strong> Both on-disk reports (Change Forces, Business Foundation) were unusually rich and internally cross-referenced, and no genuine information or analytical gap emerged that the on-disk material could not answer at Triaging depth. This is within the SOP's 0-5 expected band for self-initiated queries and is not a coverage failure</div></div>
+<div class="finding ra-level"><span class="fnum">8.</span><div class="ftext"><strong>No mid-flight consult with Richard fired during this memo.</strong> No scope-expanding finding, contradictory-research concern, or constraint collision arose that exceeded Investment Analyst authority; all judgement calls (grading, setup-fit selection, thematic framing given the suspended active.md file) were within normal Investment Analyst discretion per the SOP</div></div>
+</div><!-- /subsec-wrap -->
+<div class="subsec-wrap">
+<div class="subsec-head" id="f-3-qc-audit-pointer" data-spy><span class="id">F.3</span> QC audit pointer</div>
+<p>Quality Control Audit: see §7 of the self-review debrief — <code>memory/skills/investment-analyst/self-review-debriefs/eqt-se-triaging-self-review-debrief-2026-07-19.md</code></p>
+</div><!-- /subsec-wrap -->
+</div><!-- /sec-wrap -->
+    </div>
+  </main>
+
+</div>
+<script>
+/* ============================================================================
+   NAV JS — inherited from Phase 1 base template; updated for redesign:
+   - getStickyStackHeight()  -> hardcoded 130px (4 bars × ~32px each)
+   - setMainHeaderCssVar()   -> REMOVED (no sticky .main-header in new design)
+   - updateBreadcrumb()      -> kept (logic preserved) but returns early since
+                                #breadcrumb element is not in the HTML
+   - All 5 toggle handlers   -> preserved verbatim
+   - setupNavClicks()        -> preserved verbatim
+   - setupSpy()              -> preserved verbatim (queries [data-spy][id])
+   - setupSearch()           -> preserved verbatim
+   - applyGradeFallback()    -> preserved verbatim
+   ============================================================================ */
+(function() {
+
+  /* Frozen sticky stack height.
+     4 bars: h-sec(34) + h-pil(30) + h-ele(27) + h-ra(25) ~ 130px.
+     Hardcoded because there is no single .main-header to measure. */
+  function getStickyStackHeight() {
+    return 130;
+  }
+
+  /* --- the 5 toggle handlers — inherited near-verbatim --------------------- */
+  function setupToggles() {
+    var body = document.body;
+    function bindToggle(id, bodyClass) {
+      var btn = document.getElementById(id);
+      if (!btn) return;
+      btn.addEventListener('click', function() {
+        body.classList.toggle(bodyClass);
+        btn.classList.toggle('active');
+        if (bodyClass === 'element-details') applyElementDetails();
+      });
+    }
+    bindToggle('pill-toggle',           'show-pills');
+    bindToggle('element-details-toggle','element-details');
+    bindToggle('ras-on-toggle',         'ras-always-on');
+    bindToggle('cqs-on-toggle',         'cqs-always-on');
+    bindToggle('audit-toggle',          'show-audit');
+  }
+
+  /* Element-details mode: reveal all RAs + CQs for the focused element */
+  function applyElementDetails() {
+    document.querySelectorAll('.force-show').forEach(function(n) {
+      n.classList.remove('force-show');
+    });
+    if (!document.body.classList.contains('element-details')) return;
+    var focused = document.querySelector('.nav-item.focused');
+    if (!focused) return;
+    var elemId = focused.getAttribute('data-element-id');
+    if (!elemId) {
+      if (focused.classList.contains('nav-element'))
+        elemId = focused.getAttribute('data-anchor');
+      else return;
+    }
+    var navElem = document.querySelector(
+      '.nav-element[data-anchor="' + elemId + '"]');
+    if (!navElem) return;
+    var raList = navElem.nextElementSibling;
+    if (raList && raList.classList.contains('nav-ra-list')) {
+      raList.classList.add('force-show');
+      raList.querySelectorAll('.nav-ra').forEach(function(ra) {
+        ra.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq-list').forEach(function(cl) {
+        cl.classList.add('force-show');
+      });
+      raList.querySelectorAll('.nav-cq').forEach(function(cq) {
+        cq.classList.add('force-show');
+      });
+    }
+  }
+
+  /* --- click-to-scroll --------------------------------------------------- */
+  function setupNavClicks() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+      item.addEventListener('click', function() {
+        if (item.classList.contains('nav-ra'))
+          item.classList.toggle('expanded');
+        var anchor = item.getAttribute('data-anchor');
+        if (!anchor) return;
+        var target = document.getElementById(anchor);
+        if (!target) return;
+        var mainPane = document.querySelector('.main-pane');
+        var offset = target.offsetTop - getStickyStackHeight() - 8;
+        mainPane.scrollTo({top: offset, behavior: 'instant'});
+      });
+    });
+  }
+
+  /* --- scroll-spy: queries document-flow elements carrying [data-spy][id] */
+  function setupSpy() {
+    var mainPane = document.querySelector('.main-pane');
+    if (!mainPane) return;
+    var anchors = Array.prototype.slice.call(
+      mainPane.querySelectorAll('[data-spy][id]'));
+
+    function updateFocus() {
+      var paneRect  = mainPane.getBoundingClientRect();
+      var triggerY  = paneRect.top + getStickyStackHeight() + 10;
+      var picked = null;
+      for (var i = 0; i < anchors.length; i++) {
+        if (anchors[i].getBoundingClientRect().top <= triggerY)
+          picked = anchors[i];
+        else break;
+      }
+      if (!picked) return;
+      var anchor = picked.id;
+
+      document.querySelectorAll('.nav-item.focused').forEach(function(n) {
+        n.classList.remove('focused');
+      });
+      var navItem = document.querySelector(
+        '.nav-item[data-anchor="' + anchor + '"]');
+      if (!navItem) return;
+      navItem.classList.add('focused');
+
+      /* auto-expand branch */
+      document.querySelectorAll('.nav-ra-list.expanded').forEach(function(n) {
+        n.classList.remove('expanded');
+      });
+      var focusedRa = navItem.classList.contains('nav-ra') ? navItem : null;
+      document.querySelectorAll('.nav-ra.expanded').forEach(function(n) {
+        if (n !== focusedRa) n.classList.remove('expanded');
+      });
+
+      if (navItem.classList.contains('nav-element')) {
+        var raList = navItem.nextElementSibling;
+        if (raList && raList.classList.contains('nav-ra-list'))
+          raList.classList.add('expanded');
+      } else if (navItem.classList.contains('nav-ra')) {
+        var parent = navItem.parentElement;
+        if (parent && parent.classList.contains('nav-ra-list'))
+          parent.classList.add('expanded');
+      }
+    }
+
+    mainPane.addEventListener('scroll', updateFocus);
+    updateFocus();
+  }
+
+  /* --- search/filter ----------------------------------------------------- */
+  function setupSearch() {
+    var input = document.getElementById('nav-search');
+    if (!input) return;
+    input.addEventListener('input', function() {
+      var q = input.value.trim().toLowerCase();
+      document.querySelectorAll('.nav-item').forEach(function(item) {
+        if (!q) {
+          item.style.display = '';
+        } else {
+          var text = (item.textContent || '').toLowerCase();
+          item.style.display = text.indexOf(q) >= 0 ? '' : 'none';
+        }
+      });
+    });
+  }
+
+  /* --- grade fallback ---------------------------------------------------- */
+  function applyGradeFallback() {
+    document.querySelectorAll('.g').forEach(function(el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+  }
+
+  /* --- init -------------------------------------------------------------- */
+  document.addEventListener('DOMContentLoaded', function() {
+    setupToggles();
+    setupNavClicks();
+    setupSpy();
+    setupSearch();
+    applyGradeFallback();
+  });
+
+})();
+</script>
+<script>window.MEMO_RATINGS={"MR1":{"grade":"C","label":"Technical momentum"},"MR2":{"grade":"D","label":"Sell-side earnings momentum"},"MR3":{"grade":"B","label":"Thematic fit"},"MR4":{"grade":"B","label":"Pillar I: Case change elements"},"MR5":{"grade":"C","label":"Pillar II: Case building blocks"},"MR6":{"grade":"NR","label":"Pillar III: Investment case components [NR]"},"C.1":{"grade":"B","label":"Pillar I: Case change elements"},"E1.RA1":{"grade":"B","label":"Change forces?"},"E1.RA2":{"grade":"B","label":"Robust base?"},"C.2":{"grade":"C","label":"Pillar II: Case building blocks"},"Group 1":{"grade":"C","label":"Case momentum"},"Group 2":{"grade":"C","label":"Case simplicity"},"Group 3":{"grade":"C","label":"Core philosophy"},"Group 4":{"grade":"C","label":"Case riskiness"},"Group 5":{"grade":"NR","label":"Case optionality [NR]"}};window.MEMO_GRANULAR={"master":[{"code":"MR1","label":"Technical momentum","grade":"C"},{"code":"MR2","label":"Sell-side earnings momentum","grade":"D"},{"code":"MR3","label":"Thematic fit","grade":"B"},{"code":"MR4","label":"Case change elements","grade":"B"},{"code":"MR5","label":"Case building blocks","grade":"C"},{"code":"MR6","label":"Investment case components","grade":"NR"}],"pillars":[{"roman":"I","label":"Investment case attributes (Pillar I + Pillar II)","grade":null,"elements":[],"groups":[]},{"roman":"I","label":"Case change elements","grade":"B","elements":[{"code":"E1","label":"Required input change forces (internal / external)","grade":"B","ras":[{"code":"RA1","label":"Change forces?","grade":"B","cqs":[]},{"code":"RA2","label":"Robust base?","grade":"B","cqs":[]}]}],"groups":[]},{"roman":"II","label":"Case building blocks","grade":"C","elements":[],"groups":[{"code":"GROUP 1","label":"Case momentum","grade":"C","elements":[{"code":"E4","label":"Technical momentum","grade":null,"ras":[]},{"code":"E5","label":"Thematic fit","grade":"C","ras":[]},{"code":"E6","label":"Sell-side earnings momentum","grade":null,"ras":[]}]},{"code":"GROUP 2","label":"Case simplicity","grade":"C","elements":[{"code":"E7","label":"Required case simplicity guardrails","grade":"D","ras":[]},{"code":"E8","label":"Fit with acceptable case setups","grade":"B","ras":[]}]},{"code":"GROUP 3","label":"Core philosophy","grade":"C","elements":[{"code":"E9","label":"Great operator","grade":null,"ras":[]},{"code":"E10","label":"Advantaged business and widening competitive advantage","grade":null,"ras":[]},{"code":"E11","label":"Value-chain dynamics","grade":"C","ras":[]},{"code":"E12","label":"Supportive industry structure","grade":null,"ras":[]},{"code":"E13","label":"High secular growth potential","grade":null,"ras":[]}]},{"code":"GROUP 4","label":"Case riskiness","grade":"C","elements":[]},{"code":"GROUP 5","label":"Case optionality","grade":"NR","elements":[{"code":"E20","label":"Nice-to-have attributes","grade":null,"ras":[]}]}]},{"roman":"III","label":"Investment case components (Pillar III)","grade":null,"elements":[],"groups":[]}]};</script>
+</body>
+</html>

@@ -3663,7 +3663,7 @@ function toLevel(l){
   document.querySelectorAll('details.kq').forEach(d=>d.open=false);
 }
 const qsDepth=new URLSearchParams(location.search).get('depth'); if(qsDepth) window.addEventListener('DOMContentLoaded',()=>toLevel(qsDepth));
-</script><!-- LIVE-READINGS v1 -->
+</script><!-- LIVE-READINGS v1.1 -->
 <style>/* live readings v1 */.live-note{max-width:900px;margin:10px auto;box-sizing:border-box;background:#fff7e6;border:1px solid #e6d9b0;border-radius:6px;padding:8px 12px;font-size:0.9em;color:#5c4d1f}.live-note.live-fail{background:#f2f2f2;border-color:#ccc;color:#555}td.lv-chg{border-bottom:1px dotted #8a6d1f;cursor:help}</style>
 <script>
 (function(){
@@ -3672,7 +3672,7 @@ var URL='https://vfhqi.github.io/ratings/ratings-snapshot.json';
 var KEYS={5:'sellside_momentum',6:'thematic_fit_momentum',7:'technical_momentum',8:'tsr_valuation'};
 var IDX=null, S=null, RUN='', pinDate='';
 function txt(el){return (el.textContent||'').replace(/\s+/g,' ').trim();}
-function letter(g){var s=String(g==null?'':g).trim().toUpperCase().charAt(0);return /[A-F]/.test(s)?s:'';}
+function letter(g){var m=/^([A-Fa-f])(?![A-Za-z])/.exec(String(g==null?'':g).trim());return m?m[1].toUpperCase():'';}
 function tickerOfPage(){var m=/\(([A-Z0-9]+(?:\.[A-Z0-9]+)*-[A-Z]{2})\)/.exec(document.title||'');return m?m[1]:'';}
 function liveFor(stock,n){
   var r=(stock&&stock.master_ratings)?stock.master_ratings[KEYS[n]]:null;
@@ -3694,7 +3694,7 @@ function applyPill(pill,qual,n){
   return true;
 }
 function run(){
-  var changed=0, seen=0, peerChg=0;
+  var chg={}, seen=0, peerChg=0;
   var refs=document.querySelectorAll('span.ref');
   for(var i=0;i<refs.length;i++){
     var m=/^\(Master Rating ([5-8]), E 5, BB 4\)$/.exec(txt(refs[i])); if(!m) continue;
@@ -3702,7 +3702,7 @@ function run(){
     seen++;
     var qual=pill.nextElementSibling&&pill.nextElementSibling.classList.contains('qual')?pill.nextElementSibling:null;
     if(!pinDate && qual){var pd=/pinned (\d{4}-\d{2}-\d{2})/.exec(txt(qual)); if(pd) pinDate=pd[1];}
-    if(applyPill(pill,qual,n)) changed++;
+    if(applyPill(pill,qual,n)) chg[n]=1;
   }
   // the Eight Master Ratings summary table
   var rows=document.querySelectorAll('tr.mr-td');
@@ -3711,12 +3711,13 @@ function run(){
     var mm=nm?/^Master Rating ([5-8])\b/.exec(txt(nm)):null; if(!mm||!pc) continue;
     var p=pc.querySelector('.rating'); if(!p) continue;
     var oldAsat=asat?txt(asat):'';
-    if(applyPill(p,pc.querySelector('.qual'),+mm[1]) && asat && asat.children.length===0){
-      var L=live(+mm[1]); asat.textContent=(L.asat?('Current: '+L.asat):'Current: no reading')+' (in this memo: '+oldAsat+')';
+    if(applyPill(p,pc.querySelector('.qual'),+mm[1])){
+      chg[+mm[1]]=1;
+      if(asat && asat.children.length===0){ var L=live(+mm[1]); asat.textContent=(L.asat?('Current: '+L.asat):'Current: no reading')+' (in this memo: '+oldAsat+')'; }
     }
   }
   var fam=document.querySelectorAll('tr.fam-td td');
-  for(var f=0;f<fam.length;f++){ if(fam[f].innerHTML.indexOf('pinned from the ratings store')>=0 && changed>0)
+  for(var f=0;f<fam.length;f++){ if(fam[f].innerHTML.indexOf('pinned from the ratings store')>=0 && Object.keys(chg).length>0)
     fam[f].innerHTML=fam[f].innerHTML.replace('pinned from the ratings store','current values from the ratings store; this memo’s own pin is shown beside any that changed'); }
   // the ratings ladder appendix
   var lad=document.querySelectorAll('table.ladder tr');
@@ -3725,6 +3726,7 @@ function run(){
     var ml=/^Master Rating ([5-8]), E 5, BB 4$/.exec(txt(td[0])); if(!ml) continue;
     var oldT=txt(td[2]), pinned=letter(oldT), L2=live(+ml[1]);
     if(pinned===L2.g) continue;
+    chg[+ml[1]]=1;
     td[2].className=L2.g?('r'+L2.g):'rN'; td[2].textContent=L2.g?L2.g:'Not rated';
     td[3].textContent='Current value'+(L2.asat?(' as at '+L2.asat):'')+'. In this memo: '+txt(td[3]);
   }
@@ -3753,10 +3755,10 @@ function run(){
     var ps=document.querySelectorAll('p');
     for(var q=0;q<ps.length;q++){
       if(ps[q].innerHTML.indexOf('The peer table on the Eight Master Ratings')>=0 && /the ratings store as at (\d{4}-\d{2}-\d{2})/.test(ps[q].innerHTML))
-        ps[q].innerHTML=ps[q].innerHTML.replace(/the ratings store as at (\d{4}-\d{2}-\d{2})/,'the ratings store, columns 5 to 8 current as at '+(RUN||'today')+' and columns 1 to 4 as at $1');
+        ps[q].innerHTML=ps[q].innerHTML.replace(/the ratings store as at (\d{4}-\d{2}-\d{2})/,function(_m,d0){return 'the ratings store, columns 5 to 8 current as at '+(RUN||'today')+' and columns 1 to 4 as at '+d0;});
     }
   }
-  return {seen:seen,changed:changed,peerChg:peerChg};
+  return {seen:seen,changed:Object.keys(chg).length,peerChg:peerChg};
 }
 function note(cls,html){
   var h1=document.querySelector('h1'), d=document.createElement('div');
@@ -3766,10 +3768,11 @@ function note(cls,html){
 function start(){
   fetch(URL,{cache:'no-cache'}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
     IDX={}; (d.stocks||[]).forEach(function(s){IDX[s.ticker]=s;});
-    RUN=(d.master_ratings_header&&d.master_ratings_header.run_date)||'';
+    RUN=String((d.master_ratings_header&&d.master_ratings_header.run_date)||'').replace(/[^0-9A-Za-z:. -]/g,'').slice(0,40);
     S=IDX[tickerOfPage()];
     if(!S){ note('live-fail','Top-down readings (Master Ratings 5 to 8): this stock was not found in the current ratings data, so this page shows the values this memo pinned (dated beside each).'); return; }
-    var res=run();
+    var res;
+    try{ res=run(); }catch(e2){ note('live-fail','Top-down readings (Master Ratings 5 to 8): the current values could not be applied to every part of this page, so some parts may show the values this memo pinned (each says which).'); return; }
     var when=RUN?(' (the ratings run of '+RUN+')'):'';
     note('', '<strong>Top-down readings (Master Ratings 5 to 8)</strong> on this page show the current values from the ratings data'+when+', the same numbers as the Ratings page. '+
       (res.changed>0 ? (res.changed+' of the 4 '+(res.changed===1?'differs':'differ')+' from what this memo pinned'+(pinDate?(' on '+pinDate):'')+'; each changed reading says so beside it, and the memo’s own written analysis, which is unchanged, still discusses the value it pinned.')

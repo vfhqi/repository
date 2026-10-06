@@ -4015,4 +4015,124 @@ function toLevel(l){
   document.querySelectorAll('details.kq').forEach(d=>d.open=false);
 }
 const qsDepth=new URLSearchParams(location.search).get('depth'); if(qsDepth) window.addEventListener('DOMContentLoaded',()=>toLevel(qsDepth));
-</script></body></html>
+</script><!-- LIVE-READINGS v1 -->
+<style>/* live readings v1 */.live-note{max-width:900px;margin:10px auto;box-sizing:border-box;background:#fff7e6;border:1px solid #e6d9b0;border-radius:6px;padding:8px 12px;font-size:0.9em;color:#5c4d1f}.live-note.live-fail{background:#f2f2f2;border-color:#ccc;color:#555}td.lv-chg{border-bottom:1px dotted #8a6d1f;cursor:help}</style>
+<script>
+(function(){
+'use strict';
+var URL='https://vfhqi.github.io/ratings/ratings-snapshot.json';
+var KEYS={5:'sellside_momentum',6:'thematic_fit_momentum',7:'technical_momentum',8:'tsr_valuation'};
+var IDX=null, S=null, RUN='', pinDate='';
+function txt(el){return (el.textContent||'').replace(/\s+/g,' ').trim();}
+function letter(g){var s=String(g==null?'':g).trim().toUpperCase().charAt(0);return /[A-F]/.test(s)?s:'';}
+function tickerOfPage(){var m=/\(([A-Z0-9]+(?:\.[A-Z0-9]+)*-[A-Z]{2})\)/.exec(document.title||'');return m?m[1]:'';}
+function liveFor(stock,n){
+  var r=(stock&&stock.master_ratings)?stock.master_ratings[KEYS[n]]:null;
+  var g=(r&&r.grade)?letter(r.grade):'';
+  return {g:g, asat:(r&&r.as_at)?String(r.as_at).slice(0,10):'', mapped:!!(r&&r.provenance==='memo_v1_mapped')};
+}
+function live(n){return liveFor(S,n);}
+function nextEl(el,cls){var e=el.nextElementSibling;while(e){if(e.classList&&e.classList.contains(cls))return e;e=e.nextElementSibling;}return null;}
+// the pill and its qualifier: returns true when it changed
+function applyPill(pill,qual,n){
+  var L=live(n), old=txt(pill), m=/^Rating = ([A-F])/.exec(old), pinned=m?m[1]:'';
+  if(pinned===L.g) return false;
+  var oq=qual?txt(qual).replace(/^\(/,'').replace(/\)$/,''):'';
+  var pinDesc=pinned?(pinned+(oq?', '+oq:'')):old;
+  pill.className='rating '+(L.g?('r'+L.g):'rN');
+  pill.textContent=L.g?('Rating = '+L.g):'No current rating';
+  if(!qual){qual=document.createElement('span');qual.className='qual';pill.parentNode.insertBefore(qual,pill.nextSibling);pill.parentNode.insertBefore(document.createTextNode(' '),qual);}
+  qual.textContent='(current value'+(L.asat?(' as at '+L.asat):'')+'; in this memo: '+pinDesc+')';
+  return true;
+}
+function run(){
+  var changed=0, seen=0, peerChg=0;
+  var refs=document.querySelectorAll('span.ref');
+  for(var i=0;i<refs.length;i++){
+    var m=/^\(Master Rating ([5-8]), E 5, BB 4\)$/.exec(txt(refs[i])); if(!m) continue;
+    var n=+m[1], pill=nextEl(refs[i],'rating'); if(!pill) continue;
+    seen++;
+    var qual=pill.nextElementSibling&&pill.nextElementSibling.classList.contains('qual')?pill.nextElementSibling:null;
+    if(!pinDate && qual){var pd=/pinned (\d{4}-\d{2}-\d{2})/.exec(txt(qual)); if(pd) pinDate=pd[1];}
+    if(applyPill(pill,qual,n)) changed++;
+  }
+  // the Eight Master Ratings summary table
+  var rows=document.querySelectorAll('tr.mr-td');
+  for(var j=0;j<rows.length;j++){
+    var nm=rows[j].querySelector('td.mrname'), pc=rows[j].querySelector('td.mrpill'), asat=rows[j].querySelector('td.asat');
+    var mm=nm?/^Master Rating ([5-8])\b/.exec(txt(nm)):null; if(!mm||!pc) continue;
+    var p=pc.querySelector('.rating'); if(!p) continue;
+    var oldAsat=asat?txt(asat):'';
+    if(applyPill(p,pc.querySelector('.qual'),+mm[1]) && asat && asat.children.length===0){
+      var L=live(+mm[1]); asat.textContent=(L.asat?('Current: '+L.asat):'Current: no reading')+' (in this memo: '+oldAsat+')';
+    }
+  }
+  var fam=document.querySelectorAll('tr.fam-td td');
+  for(var f=0;f<fam.length;f++){ if(fam[f].innerHTML.indexOf('pinned from the ratings store')>=0 && changed>0)
+    fam[f].innerHTML=fam[f].innerHTML.replace('pinned from the ratings store','current values from the ratings store; this memo’s own pin is shown beside any that changed'); }
+  // the ratings ladder appendix
+  var lad=document.querySelectorAll('table.ladder tr');
+  for(var k=0;k<lad.length;k++){
+    var td=lad[k].querySelectorAll('td'); if(td.length<4) continue;
+    var ml=/^Master Rating ([5-8]), E 5, BB 4$/.exec(txt(td[0])); if(!ml) continue;
+    var oldT=txt(td[2]), pinned=letter(oldT), L2=live(+ml[1]);
+    if(pinned===L2.g) continue;
+    td[2].className=L2.g?('r'+L2.g):'rN'; td[2].textContent=L2.g?L2.g:'Not rated';
+    td[3].textContent='Current value'+(L2.asat?(' as at '+L2.asat):'')+'. In this memo: '+txt(td[3]);
+  }
+  // the peer table: columns 5 to 8
+  var tabs=document.getElementsByTagName('table');
+  for(var t=0;t<tabs.length;t++){
+    var ths=tabs[t].querySelectorAll('tr:first-child th, thead th'), cols=[], tkc=-1;
+    for(var h=0;h<ths.length;h++){
+      var ht=txt(ths[h]); if(ht==='Ticker') tkc=h;
+      var mh=/^([5-8]) (Sell-side Momentum|Thematic Fit\/Momentum|Technical Momentum|TSR\/Valuation)$/.exec(ht); if(mh) cols.push([h,+mh[1]]);
+    }
+    if(tkc<0||cols.length!==4) continue;
+    var trs=tabs[t].querySelectorAll('tr');
+    for(var r=0;r<trs.length;r++){
+      var tds=trs[r].querySelectorAll('td'); if(tds.length<=tkc) continue;
+      var st=IDX[txt(tds[tkc])]; if(!st) continue;
+      for(var c=0;c<cols.length;c++){
+        var cell=tds[cols[c][0]]; if(!cell) continue;
+        var oldC=txt(cell), oldL=letter(oldC), LL=liveFor(st,cols[c][1]);
+        if(oldL===LL.g) continue;
+        cell.textContent=LL.g?(LL.g+(LL.mapped?' (mapped, not re-judged)':'')):'No rating';
+        cell.title='Current value'+(LL.asat?(' as at '+LL.asat):'')+'. In this memo: '+oldC;
+        cell.className=((cell.className||'')+' lv-chg').trim(); peerChg++;
+      }
+    }
+    var ps=document.querySelectorAll('p');
+    for(var q=0;q<ps.length;q++){
+      if(ps[q].innerHTML.indexOf('The peer table on the Eight Master Ratings')>=0 && /the ratings store as at (\d{4}-\d{2}-\d{2})/.test(ps[q].innerHTML))
+        ps[q].innerHTML=ps[q].innerHTML.replace(/the ratings store as at (\d{4}-\d{2}-\d{2})/,'the ratings store, columns 5 to 8 current as at '+(RUN||'today')+' and columns 1 to 4 as at $1');
+    }
+  }
+  return {seen:seen,changed:changed,peerChg:peerChg};
+}
+function note(cls,html){
+  var h1=document.querySelector('h1'), d=document.createElement('div');
+  d.className='live-note '+cls; d.id='live-readings-note'; d.innerHTML=html;
+  if(h1&&h1.parentNode) h1.parentNode.insertBefore(d,h1.nextSibling); else document.body.insertBefore(d,document.body.firstChild);
+}
+function start(){
+  fetch(URL,{cache:'no-cache'}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
+    IDX={}; (d.stocks||[]).forEach(function(s){IDX[s.ticker]=s;});
+    RUN=(d.master_ratings_header&&d.master_ratings_header.run_date)||'';
+    S=IDX[tickerOfPage()];
+    if(!S){ note('live-fail','Top-down readings (Master Ratings 5 to 8): this stock was not found in the current ratings data, so this page shows the values this memo pinned (dated beside each).'); return; }
+    var res=run();
+    var when=RUN?(' (the ratings run of '+RUN+')'):'';
+    note('', '<strong>Top-down readings (Master Ratings 5 to 8)</strong> on this page show the current values from the ratings data'+when+', the same numbers as the Ratings page. '+
+      (res.changed>0 ? (res.changed+' of the 4 '+(res.changed===1?'differs':'differ')+' from what this memo pinned'+(pinDate?(' on '+pinDate):'')+'; each changed reading says so beside it, and the memo’s own written analysis, which is unchanged, still discusses the value it pinned.')
+                     : 'All 4 match what this memo pinned'+(pinDate?(' on '+pinDate):'')+'.')+
+      (res.peerChg>0 ? (' In the peer table, '+res.peerChg+' cell'+(res.peerChg===1?'':'s')+' in columns 5 to 8 changed since the pin (underlined; hover for the pinned value).') : ''));
+  }).catch(function(e){
+    note('live-fail','Top-down readings (Master Ratings 5 to 8): today’s ratings could not be loaded just now, so this page shows the values this memo pinned (dated beside each).');
+  });
+}
+if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
+})();
+</script>
+<!-- /LIVE-READINGS -->
+</body></html>

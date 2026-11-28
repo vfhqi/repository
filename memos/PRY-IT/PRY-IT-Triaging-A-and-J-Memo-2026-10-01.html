@@ -3413,103 +3413,21 @@ function toLevel(l){
   document.querySelectorAll('details.kq').forEach(d=>d.open=false);
 }
 const qsDepth=new URLSearchParams(location.search).get('depth'); if(qsDepth) window.addEventListener('DOMContentLoaded',()=>toLevel(qsDepth));
-</script><!-- LIVE-READINGS v1.1 -->
-<style>/* live readings v1 */.live-note{max-width:900px;margin:10px auto;box-sizing:border-box;background:#fff7e6;border:1px solid #e6d9b0;border-radius:6px;padding:8px 12px;font-size:0.9em;color:#5c4d1f}.live-note.live-fail{background:#f2f2f2;border-color:#ccc;color:#555}td.lv-chg{border-bottom:1px dotted #8a6d1f;cursor:help}</style>
+</script><!-- LIVE-READINGS v1.2 -->
+<style>/* live readings v1.2 */.live-note{max-width:900px;margin:10px auto;box-sizing:border-box;background:#fff7e6;border:1px solid #e6d9b0;border-radius:6px;padding:8px 12px;font-size:0.9em;color:#5c4d1f}.live-note.live-fail{background:#f2f2f2;border-color:#ccc;color:#555}.live-note table.lv-ms{border-collapse:collapse;margin:6px 0 2px;font-size:0.95em}.live-note table.lv-ms td{padding:2px 8px;border-top:1px solid #ecdfba;vertical-align:middle}.live-note table.lv-ms td.n,.live-note table.lv-ms td.p{text-align:right;font-variant-numeric:tabular-nums}.live-note table.lv-ms td.p{font-style:italic}.live-note table.lv-ms tr.res td{font-weight:600}.live-note .lv-l{display:inline-block;min-width:1.4em;text-align:center;border-radius:3px;font-weight:700;padding:0 3px}.lv-A{background:#cfe8d6;color:#1d6b43}.lv-B{background:#e3f0e2;color:#3d7a52}.lv-C{background:#f6edd4;color:#8a6d1f}.lv-D{background:#f6dccd;color:#9a3412}.lv-F{background:#f3c9c2;color:#9a1d12}.lv-O{background:#fff;color:#777;border:1px solid #bbb}</style>
 <script>
 (function(){
 'use strict';
+// v1.2 (28-Nov-26, SA - Eight Master Ratings, D-EMR-120): this memo was written on the September framework. The page no longer
+// overwrites its pinned ratings with live values of the September eight (retired from display on 27-Nov-26). Instead one panel
+// at the top shows TODAY'S MASTER RATINGS from the ratings data (master_set), exactly as the Master Dashboard shows them.
 var URL='https://vfhqi.github.io/ratings/ratings-snapshot.json';
-var KEYS={5:'sellside_momentum',6:'thematic_fit_momentum',7:'technical_momentum',8:'tsr_valuation'};
-var IDX=null, S=null, RUN='', pinDate='';
-function txt(el){return (el.textContent||'').replace(/\s+/g,' ').trim();}
-function letter(g){var m=/^([A-Fa-f])(?![A-Za-z])/.exec(String(g==null?'':g).trim());return m?m[1].toUpperCase():'';}
+var ORDER=[['res','lo','Lower-Quartile Master Rating'],['res','hi','Upper-Quartile Master Rating (information only)'],['res','bu','Bottom-up/Stock-driven Rating'],['res','td','Top Down/Exogenously-driven Rating'],
+  ['r','cf','Investment Case - Degree of Change Forces'],['r','up','Investment Case - Probability of Upgrades'],['r','rk','Investment Case Riskiness'],['r','fit','Case Profile Fit'],['r','tsr','Upside / TSR'],
+  ['r','tm','Current SP Technical Momentum'],['r','ss','Current SS Earnings Momentum'],['r','pm','Current Peerset Momentum']];
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function ord(x){var n=Math.round(+x),v=n%100;return n+((v>=10&&v<=20)?'th':({1:'st',2:'nd',3:'rd'}[n%10]||'th'));}
 function tickerOfPage(){var m=/\(([A-Z0-9]+(?:\.[A-Z0-9]+)*-[A-Z]{2})\)/.exec(document.title||'');return m?m[1]:'';}
-function liveFor(stock,n){
-  var r=(stock&&stock.master_ratings)?stock.master_ratings[KEYS[n]]:null;
-  var g=(r&&r.grade)?letter(r.grade):'';
-  return {g:g, asat:(r&&r.as_at)?String(r.as_at).slice(0,10):'', mapped:!!(r&&r.provenance==='memo_v1_mapped')};
-}
-function live(n){return liveFor(S,n);}
-function nextEl(el,cls){var e=el.nextElementSibling;while(e){if(e.classList&&e.classList.contains(cls))return e;e=e.nextElementSibling;}return null;}
-// the pill and its qualifier: returns true when it changed
-function applyPill(pill,qual,n){
-  var L=live(n), old=txt(pill), m=/^Rating = ([A-F])/.exec(old), pinned=m?m[1]:'';
-  if(pinned===L.g) return false;
-  var oq=qual?txt(qual).replace(/^\(/,'').replace(/\)$/,''):'';
-  var pinDesc=pinned?(pinned+(oq?', '+oq:'')):old;
-  pill.className='rating '+(L.g?('r'+L.g):'rN');
-  pill.textContent=L.g?('Rating = '+L.g):'No current rating';
-  if(!qual){qual=document.createElement('span');qual.className='qual';pill.parentNode.insertBefore(qual,pill.nextSibling);pill.parentNode.insertBefore(document.createTextNode(' '),qual);}
-  qual.textContent='(current value'+(L.asat?(' as at '+L.asat):'')+'; in this memo: '+pinDesc+')';
-  return true;
-}
-function run(){
-  var chg={}, seen=0, peerChg=0;
-  var refs=document.querySelectorAll('span.ref');
-  for(var i=0;i<refs.length;i++){
-    var m=/^\(Master Rating ([5-8]), E 5, BB 4\)$/.exec(txt(refs[i])); if(!m) continue;
-    var n=+m[1], pill=nextEl(refs[i],'rating'); if(!pill) continue;
-    seen++;
-    var qual=pill.nextElementSibling&&pill.nextElementSibling.classList.contains('qual')?pill.nextElementSibling:null;
-    if(!pinDate && qual){var pd=/pinned (\d{4}-\d{2}-\d{2})/.exec(txt(qual)); if(pd) pinDate=pd[1];}
-    if(applyPill(pill,qual,n)) chg[n]=1;
-  }
-  // the Eight Master Ratings summary table
-  var rows=document.querySelectorAll('tr.mr-td');
-  for(var j=0;j<rows.length;j++){
-    var nm=rows[j].querySelector('td.mrname'), pc=rows[j].querySelector('td.mrpill'), asat=rows[j].querySelector('td.asat');
-    var mm=nm?/^Master Rating ([5-8])\b/.exec(txt(nm)):null; if(!mm||!pc) continue;
-    var p=pc.querySelector('.rating'); if(!p) continue;
-    var oldAsat=asat?txt(asat):'';
-    if(applyPill(p,pc.querySelector('.qual'),+mm[1])){
-      chg[+mm[1]]=1;
-      if(asat && asat.children.length===0){ var L=live(+mm[1]); asat.textContent=(L.asat?('Current: '+L.asat):'Current: no reading')+' (in this memo: '+oldAsat+')'; }
-    }
-  }
-  var fam=document.querySelectorAll('tr.fam-td td');
-  for(var f=0;f<fam.length;f++){ if(fam[f].innerHTML.indexOf('pinned from the ratings store')>=0 && Object.keys(chg).length>0)
-    fam[f].innerHTML=fam[f].innerHTML.replace('pinned from the ratings store','current values from the ratings store; this memo’s own pin is shown beside any that changed'); }
-  // the ratings ladder appendix
-  var lad=document.querySelectorAll('table.ladder tr');
-  for(var k=0;k<lad.length;k++){
-    var td=lad[k].querySelectorAll('td'); if(td.length<4) continue;
-    var ml=/^Master Rating ([5-8]), E 5, BB 4$/.exec(txt(td[0])); if(!ml) continue;
-    var oldT=txt(td[2]), pinned=letter(oldT), L2=live(+ml[1]);
-    if(pinned===L2.g) continue;
-    chg[+ml[1]]=1;
-    td[2].className=L2.g?('r'+L2.g):'rN'; td[2].textContent=L2.g?L2.g:'Not rated';
-    td[3].textContent='Current value'+(L2.asat?(' as at '+L2.asat):'')+'. In this memo: '+txt(td[3]);
-  }
-  // the peer table: columns 5 to 8
-  var tabs=document.getElementsByTagName('table');
-  for(var t=0;t<tabs.length;t++){
-    var ths=tabs[t].querySelectorAll('tr:first-child th, thead th'), cols=[], tkc=-1;
-    for(var h=0;h<ths.length;h++){
-      var ht=txt(ths[h]); if(ht==='Ticker') tkc=h;
-      var mh=/^([5-8]) (Sell-side Momentum|Thematic Fit\/Momentum|Technical Momentum|TSR\/Valuation)$/.exec(ht); if(mh) cols.push([h,+mh[1]]);
-    }
-    if(tkc<0||cols.length!==4) continue;
-    var trs=tabs[t].querySelectorAll('tr');
-    for(var r=0;r<trs.length;r++){
-      var tds=trs[r].querySelectorAll('td'); if(tds.length<=tkc) continue;
-      var st=IDX[txt(tds[tkc])]; if(!st) continue;
-      for(var c=0;c<cols.length;c++){
-        var cell=tds[cols[c][0]]; if(!cell) continue;
-        var oldC=txt(cell), oldL=letter(oldC), LL=liveFor(st,cols[c][1]);
-        if(oldL===LL.g) continue;
-        cell.textContent=LL.g?(LL.g+(LL.mapped?' (mapped, not re-judged)':'')):'No rating';
-        cell.title='Current value'+(LL.asat?(' as at '+LL.asat):'')+'. In this memo: '+oldC;
-        cell.className=((cell.className||'')+' lv-chg').trim(); peerChg++;
-      }
-    }
-    var ps=document.querySelectorAll('p');
-    for(var q=0;q<ps.length;q++){
-      if(ps[q].innerHTML.indexOf('The peer table on the Eight Master Ratings')>=0 && /the ratings store as at (\d{4}-\d{2}-\d{2})/.test(ps[q].innerHTML))
-        ps[q].innerHTML=ps[q].innerHTML.replace(/the ratings store as at (\d{4}-\d{2}-\d{2})/,function(_m,d0){return 'the ratings store, columns 5 to 8 current as at '+(RUN||'today')+' and columns 1 to 4 as at '+d0;});
-    }
-  }
-  return {seen:seen,changed:Object.keys(chg).length,peerChg:peerChg};
-}
 function note(cls,html){
   var h1=document.querySelector('h1'), d=document.createElement('div');
   d.className='live-note '+cls; d.id='live-readings-note'; d.innerHTML=html;
@@ -3517,19 +3435,27 @@ function note(cls,html){
 }
 function start(){
   fetch(URL,{cache:'no-cache'}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); }).then(function(d){
-    IDX={}; (d.stocks||[]).forEach(function(s){IDX[s.ticker]=s;});
-    RUN=String((d.master_ratings_header&&d.master_ratings_header.run_date)||'').replace(/[^0-9A-Za-z:. -]/g,'').slice(0,40);
-    S=IDX[tickerOfPage()];
-    if(!S){ note('live-fail','Top-down readings (Master Ratings 5 to 8): this stock was not found in the current ratings data, so this page shows the values this memo pinned (dated beside each).'); return; }
-    var res;
-    try{ res=run(); }catch(e2){ note('live-fail','Top-down readings (Master Ratings 5 to 8): the current values could not be applied to every part of this page, so some parts may show the values this memo pinned (each says which).'); return; }
-    var when=RUN?(' (the ratings run of '+RUN+')'):'';
-    note('', '<strong>Top-down readings (Master Ratings 5 to 8)</strong> on this page show the current values from the ratings data'+when+', the same numbers as the Ratings page. '+
-      (res.changed>0 ? (res.changed+' of the 4 '+(res.changed===1?'differs':'differ')+' from what this memo pinned'+(pinDate?(' on '+pinDate):'')+'; each changed reading says so beside it, and the memo’s own written analysis, which is unchanged, still discusses the value it pinned.')
-                     : 'All 4 match what this memo pinned'+(pinDate?(' on '+pinDate):'')+'.')+
-      (res.peerChg>0 ? (' In the peer table, '+res.peerChg+' cell'+(res.peerChg===1?'':'s')+' in columns 5 to 8 changed since the pin (underlined; hover for the pinned value).') : ''));
+    var S=null,t=tickerOfPage(); (d.stocks||[]).forEach(function(s){ if(s.ticker===t) S=s; });
+    var ms=S&&S.master_set;
+    if(!ms){ note('live-fail','<strong>Today&rsquo;s Master Ratings:</strong> this stock is not in today&rsquo;s ratings data, so none can be shown here. The ratings below are this memo&rsquo;s own, as written.'); return; }
+    var rr=ms.r||{}, res=ms.res||{}, rows='';
+    ORDER.forEach(function(o){
+      var name=o[2], L='', num='', pc='', cls='';
+      if(o[0]==='res'){ var x=res[o[1]]; cls='res';
+        if(x){ var on=(rr[x.on]||{}).p; L='<span class="lv-l lv-'+x.l+'">'+x.l+'</span>'; num=(on!=null)?(Math.round(+on)+'/100'):''; pc=ord(x.p); }
+        else { L='&ndash;'; pc='none'; } }
+      else { var e=rr[o[1]]||{};
+        if(e.p!=null){ L='<span class="lv-l lv-'+e.l+'">'+e.l+'</span>'; num=Math.round(+e.n)+'/100'; pc=ord(e.p); }
+        else if(e.old){ L='<span class="lv-l lv-O" title="from a memo written before the Rater: no percentile; feeds nothing">'+esc(e.old)+'</span>'; pc='older memo'; }
+        else { L='&ndash;'; pc='no rating'; } }
+      rows+='<tr class="'+cls+'"><td>'+esc(name)+'</td><td>'+L+'</td><td class="n">'+num+'</td><td class="p">'+pc+'</td></tr>';
+    });
+    var hd=d.master_set_header||{}, when=String(hd.written_at||'').slice(0,10);
+    note('', '<strong>Today&rsquo;s Master Ratings</strong>'+(when?(' (ratings data of '+esc(when)+')'):'')+': letter, rating out of 100 and percentile, the same numbers as the Master Dashboard. '+
+      'This memo was written on the earlier September framework: the ratings in its text, its summary table and its peer table are its own, as written on the memo&rsquo;s date.'+
+      '<table class="lv-ms">'+rows+'</table>');
   }).catch(function(e){
-    note('live-fail','Top-down readings (Master Ratings 5 to 8): today’s ratings could not be loaded just now, so this page shows the values this memo pinned (dated beside each).');
+    note('live-fail','<strong>Today&rsquo;s Master Ratings</strong> could not be loaded just now. The ratings below are this memo&rsquo;s own, as written on the memo&rsquo;s date.');
   });
 }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',start); else start();
